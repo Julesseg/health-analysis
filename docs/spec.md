@@ -164,4 +164,4 @@ This specification consolidates the product and interface decisions from the gri
 
 Before implementing dependent features, validate the actual imported HRV records, define temporal boundaries and import identity handling, and specify and validate the statistical procedure and confidence criteria. These are engineering validation tasks rather than requests to reopen settled product decisions.
 
-The user confirmed the primary test seam required by the to-spec workflow. Publication to the project issue tracker requires its tracker and triage vocabulary to be configured; the repository currently has GitHub Issues enabled but no recorded engineering-skill tracker configuration or ready-for-agent label. This document is the consolidated specification; publication as a ready-for-agent issue awaits that setup.
+The user confirmed the primary test seam required by the to-spec workflow. The project uses GitHub Issues with the default engineering-skill triage vocabulary. Publish this complete specification with the ready-for-agent label, without an additional triage pass.

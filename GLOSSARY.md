@@ -31,6 +31,15 @@ A configured value used when no log exists for a variable. It is an assumption r
 **Backdated entry**:
 A log entry describing something that happened before the entry was recorded.
 
+**Daily log**:
+The manually tracked values for a selected day. Individually entered values are recorded as they are logged, while untouched values can retain assumed defaults until the day is reviewed.
+
+**Day review**:
+Confirmation of all displayed daily values together, including unchanged defaults. It is separate from recording individual entries.
+
+**Saved analysis**:
+A retained analysis configuration used to follow a question as new data becomes available.
+
 **Adjustment input**:
 An additional input included when estimating an adjusted association. The inputs used for adjustment are visible and can be changed by the person running the analysis.
 

@@ -9,7 +9,10 @@ The user confirmed this first-version scope on 2026-11-16. Implementation has no
 - Include useful default analyses and allow the app to discover candidate correlations automatically.
 - Explore associations with a specific day's behavior and with behavior over the preceding week or month, including possible longer-term associations.
 - Support quick manual logging and backdated entries.
+- Organize manual logging as one form per selected day, showing all manually tracked values with configured defaults for fields without saved values. Provide a date control for backdating.
+- Autosave valid manual field edits as values are entered; they are available to analysis immediately. A separate Confirm day action reviews all displayed values, including unchanged defaults. Untouched values remain assumed defaults until reviewed. Support optional daily time-of-day tracking fields and provide no Unknown option in the daily form. Missing imported measurements remain missing.
 - Begin with a native iPhone app for the user's own use, with on-device storage and analysis. A web interface may be considered later.
+- Use standard SwiftUI components and the system's native Liquid Glass appearance, with system styling and accessible light/dark presentation.
 - Support behavior combinations and adjusted associations involving more than two inputs, including interactions where one input's association with the output varies with another. Individual contributions and interactions are parts of the same multi-input analysis requirement.
 - Analyze the full relevant behavior window when exploring longer-term associations. Separate delay controls are not part of the initial design; the user wants intervening behavior included.
 - Allow configurable defaults per manually tracked variable, starting from a chosen date. Distinguish defaulted values from explicit entries, retain missing sensor measurements as missing, and require an explicit choice to fill older history with defaults.
@@ -17,7 +20,7 @@ The user confirmed this first-version scope on 2026-11-16. Implementation has no
 - Keep the existing HRV bridge as the initial candidate source, subject to checking its data.
 - Anchor behavior windows to the output's timing. Associate overnight sleep with its wake date and analyze preceding behavior; exclude behavior that happened after the relevant output.
 - Suggest adjustment inputs, show which inputs an analysis used, and allow the user to change them. Report when the available variation and overlapping data cannot distinguish their associations.
-- Support custom quantities with units, counts, yes/no values, ratings, and categories as inputs or outputs. Provide presets and reusable quick-log actions.
+- Support custom quantities with units, counts, yes/no values, ratings, and categories as inputs or outputs. Provide tracking presets and a daily form for entering their values.
 - Distinguish exact from approximate times in backdated entries.
 - Treat Apple Health as read-only. Manual entries and custom tracking belong to this app and are not written back to Apple Health.
 - Offer HRV, sleep duration/timing, and resting heart rate as initial output presets, with activity, caffeine, alcohol, medication intake, and subjective stress/energy as suggested inputs. Activate presets according to data availability and the user's tracking choices; all remain editable.
@@ -30,6 +33,8 @@ The user confirmed this first-version scope on 2026-11-16. Implementation has no
 ## Accepted architecture
 
 See [Native iPhone app with on-device analysis](adr/0001-native-iphone-on-device-analysis.md).
+
+The [interface design](ui-design.md) records the agreed navigation, layouts, autosaved daily form, and native Liquid Glass direction, preserving this confirmed product scope.
 
 ## Technical validation before implementation
 

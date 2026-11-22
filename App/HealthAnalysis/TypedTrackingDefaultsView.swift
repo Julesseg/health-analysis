@@ -4,6 +4,7 @@ import SwiftUI
 struct TypedTrackingDefaultsView: View {
     let log: ManualLog
     let variable: TypedTrackingVariable
+    @Environment(\.locale) private var locale
     @Environment(\.timeZone) private var timeZone
 
     var body: some View {
@@ -55,6 +56,8 @@ struct TypedTrackingDefaultsView: View {
             Text(isOn ? LocalizedStringKey("Yes") : "No")
         case (.category(let options), .category(let id)):
             Text(verbatim: options.first { $0.id == id }?.name ?? "")
+        case (.timeOfDay, .timeOfDay(let time, _)):
+            Text(time.pickerDate, format: Date.FormatStyle(date: .omitted, time: .shortened, locale: locale, timeZone: .gmt))
         default:
             Text("This tracking value is unavailable.")
         }
@@ -86,7 +89,7 @@ private struct TypedDefaultEditor: View {
     var body: some View {
         Form {
             Section {
-                TypedTrackingValueControl(variable: variable, label: Text("Default value"), value: $value)
+                TypedTrackingValueControl(kind: variable.kind, label: Text("Default value"), value: $value)
             }
             Section {
                 ManualLogDatePicker(

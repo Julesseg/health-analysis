@@ -3,31 +3,36 @@ import SwiftUI
 
 struct ManualLogView: View {
     let log: ManualLog
+    @Environment(\.calendar) private var calendar
     @Environment(\.locale) private var locale
     @Environment(\.timeZone) private var timeZone
-    @State private var date = Date.now
+    @State private var selectedDay: ManualLogDay?
     @FocusState private var focusedQuantity: TrackingQuantity.ID?
 
     var body: some View {
+        let today = ManualLogDay(.now, timeZone: timeZone)
         Group {
             if !log.isStoreAvailable {
                 ContentUnavailableView("Couldn’t open the daily log", systemImage: "exclamationmark.circle")
             } else if log.quantities.isEmpty && log.typedVariables.isEmpty {
                 ContentUnavailableView("No tracking variables", systemImage: "square.and.pencil")
             } else {
-                dailyForm(on: ManualLogDay(date, timeZone: timeZone))
+                dailyForm(on: selectedDay ?? today, today: today)
             }
         }
         .navigationTitle("Log")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            if selectedDay == nil { selectedDay = today }
+        }
     }
 
-    private func dailyForm(on day: ManualLogDay) -> some View {
+    private func dailyForm(on day: ManualLogDay, today: ManualLogDay) -> some View {
         let rows = log.dailyQuantities(on: day, locale: locale)
         let typedRows = log.dailyTypedEntries(on: day)
         return Form {
             Section {
-                ManualLogDatePicker(title: "Date", date: $date, latestDate: .now)
+                dayPicker(on: day, today: today)
             }
             Section {
                 if rows.isEmpty && typedRows.isEmpty {
@@ -43,11 +48,33 @@ struct ManualLogView: View {
                 }
                 .id(day)
             }
-            if !rows.isEmpty {
+            if !rows.isEmpty || !typedRows.isEmpty {
                 ManualLogReviewSection(log: log, day: day)
             }
         }
-        .onChange(of: date) { focusedQuantity = nil }
+        .onChange(of: day) { focusedQuantity = nil }
+    }
+
+    private func dayPicker(on day: ManualLogDay, today: ManualLogDay) -> some View {
+        var pickerCalendar = calendar
+        pickerCalendar.timeZone = .gmt
+        return ManualLogDatePicker(
+            title: "Date",
+            date: Binding(
+                get: { pickerDate(for: selectedDay ?? day) },
+                set: { selectedDay = ManualLogDay($0, timeZone: .gmt) }
+            ),
+            latestDate: pickerDate(for: max(today, day))
+        )
+        .environment(\.calendar, pickerCalendar)
+        .environment(\.timeZone, .gmt)
+    }
+
+    private func pickerDate(for day: ManualLogDay) -> Date {
+        DateComponents(
+            calendar: Calendar(identifier: .gregorian), timeZone: .gmt,
+            year: day.year, month: day.month, day: day.day
+        ).date!
     }
 
     private func quantityField(_ row: DailyQuantity, on day: ManualLogDay) -> some View {

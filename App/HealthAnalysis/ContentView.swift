@@ -79,6 +79,7 @@ struct ContentView: View {
     private var data: some View {
         List {
             HealthMeasurementsSection(history: application.healthMeasurements)
+            ActivitySection(history: application.healthMeasurements)
             if !overview.hasTrackingVariables {
                 Section("Daily log") {
                     Text("No tracking variables")

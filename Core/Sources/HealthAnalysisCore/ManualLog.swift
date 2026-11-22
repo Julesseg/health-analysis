@@ -279,7 +279,7 @@ public final class ManualLog {
         name: String, kind: TrackingVariableKind, defaultValue: ManualTrackingValue, startsOn: ManualLogDay
     ) throws(TypedVariableCreationError) -> TypedTrackingVariable {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, kind.accepts(defaultValue) else { throw .invalidDefinition }
+        guard !name.isEmpty, kind.acceptsDefault(defaultValue) else { throw .invalidDefinition }
         guard var updated = snapshot else { throw .persistenceFailed }
         let variable = TypedTrackingVariable(
             id: UUID(), name: name, kind: kind, defaultValue: defaultValue, startsOn: startsOn
@@ -309,7 +309,7 @@ public final class ManualLog {
         guard var typed = updated.typed, let variable = typed.variables.first(where: { $0.id == id }) else {
             throw .unknownTypedVariable
         }
-        guard variable.kind.accepts(value) else { throw .invalidValue }
+        guard variable.kind.acceptsDefault(value) else { throw .invalidValue }
 
         var history = defaultHistory(for: variable)
         try history.set(ManualDefaultVersion(effectiveOn: effectiveOn, value: value), scope: scope)
@@ -364,13 +364,14 @@ public final class ManualLog {
             typedEdits[key] = TypedLogEdit(value: value, status: .invalid)
             return
         }
-        typed.entries[key] = value
+        let observation = value.asObservation
+        typed.entries[key] = observation
         updated.typed = typed
         do {
             try persist(updated)
             typedEdits[key] = nil
         } catch {
-            typedEdits[key] = TypedLogEdit(value: value, status: .saveFailed)
+            typedEdits[key] = TypedLogEdit(value: observation, status: .saveFailed)
         }
     }
 

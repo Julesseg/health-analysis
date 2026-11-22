@@ -8,14 +8,32 @@ struct DailyTypedEntryField: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             TypedTrackingValueControl(
-                variable: row.variable,
+                kind: row.variable.kind,
                 label: Text(verbatim: row.variable.name),
-                value: Binding(
-                    get: { log.dailyTypedEntry(row.id, on: row.day)?.displayedValue ?? row.displayedValue },
-                    set: { log.editTypedEntry(row.id, on: row.day, value: $0) }
-                )
+                value: value
             )
+            if case .timeOfDay = row.variable.kind {
+                Toggle("Approximate time", isOn: approximateTime)
+                    .accessibilityLabel(Text("Approximate time for \(row.variable.name)"))
+            }
             feedback
+        }
+    }
+
+    private var value: Binding<ManualTrackingValue> {
+        Binding(
+            get: { log.dailyTypedEntry(row.id, on: row.day)?.displayedValue ?? row.displayedValue },
+            set: { log.editTypedEntry(row.id, on: row.day, value: $0) }
+        )
+    }
+
+    private var approximateTime: Binding<Bool> {
+        Binding {
+            guard case .timeOfDay(_, let precision) = value.wrappedValue else { return false }
+            return precision == .approximate
+        } set: { isApproximate in
+            guard case .timeOfDay(let time, _) = value.wrappedValue else { return }
+            value.wrappedValue = .timeOfDay(time, precision: isApproximate ? .approximate : .exact)
         }
     }
 
@@ -40,14 +58,14 @@ struct DailyTypedEntryField: View {
 }
 
 struct TypedTrackingValueControl: View {
-    let variable: TypedTrackingVariable
+    let kind: TrackingVariableKind
     let label: Text
     @Binding var value: ManualTrackingValue
     @Environment(\.locale) private var locale
 
     @ViewBuilder
     var body: some View {
-        switch (variable.kind, value) {
+        switch (kind, value) {
         case (.count, .count(let count)):
             stepper(value: count, range: 0...Int.max, trackingValue: ManualTrackingValue.count)
         case (.yesNo, .yesNo(let isOn)):
@@ -67,6 +85,17 @@ struct TypedTrackingValueControl: View {
             .pickerStyle(.menu)
             .accessibilityLabel(label)
             .accessibilityValue(Text(verbatim: options.first { $0.id == selection }?.name ?? ""))
+        case (.timeOfDay, .timeOfDay(let time, _)):
+            ManualClockPicker(label: label, time: Binding(
+                get: {
+                    guard case .timeOfDay(let current, _) = value else { return time }
+                    return current
+                },
+                set: { newTime in
+                    guard case .timeOfDay(let current, let precision) = value, newTime != current else { return }
+                    value = .timeOfDay(newTime, precision: precision)
+                }
+            ))
         default:
             Text("This tracking value is unavailable.")
         }

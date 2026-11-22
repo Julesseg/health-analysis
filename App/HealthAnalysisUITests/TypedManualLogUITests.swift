@@ -49,7 +49,9 @@ final class TypedManualLogUITests: XCTestCase {
 
         app.buttons["Previous day"].tap()
         servings.buttons["Decrement"].tap()
-        app.switches["Took medication"].tap()
+        let medication = app.switches["Took medication"]
+        let switchControl = medication.switches.firstMatch
+        (switchControl.exists ? switchControl : medication).tap()
         energy.buttons["Increment"].tap()
         let location = named("Workout location", in: app.buttons)
         location.tap()

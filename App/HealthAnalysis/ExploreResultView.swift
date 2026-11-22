@@ -5,7 +5,6 @@ import SwiftUI
 struct ExploreResultView: View {
     let application: HealthAnalysisApplication
     let configuration: AnalysisConfiguration
-    let inputName: String
 
     @State private var run: Result<AnalysisResult, AnalysisRunFailure>?
 
@@ -15,6 +14,7 @@ struct ExploreResultView: View {
             case .success(let result):
                 findings(result)
                 evidence(result)
+                modeledInputs(result)
                 coverage(result)
             case .failure(let failure):
                 Section {
@@ -35,26 +35,39 @@ struct ExploreResultView: View {
 
     @ViewBuilder
     private func findings(_ result: AnalysisResult) -> some View {
-        Section {
-            if let estimate = result.estimates.first {
-                Text(estimate.finding.description)
-                    .font(.headline)
-                Text("\(estimate.difference, format: estimateNumber) bpm per \(estimate.inputIncrement, format: .number) mg more caffeine")
-                    .monospacedDigit()
-                LabeledContent("Approximate 95% uncertainty interval") {
-                    Text(intervalLabel(estimate))
-                }
-                .accessibilityIdentifier("explore.uncertainty")
-                EstimateChart(estimate: estimate)
-                if estimate.finding == .nearZero {
-                    Text("The full interval is within 1 bpm of zero per 100 mg of caffeine.")
-                        .foregroundStyle(.secondary)
-                }
-            } else {
+        if result.estimates.isEmpty {
+            Section {
                 Text("There isn’t enough evidence to estimate this association.")
                     .font(.headline)
             }
-            if result.lastHealthReadFailure != nil {
+        }
+        ForEach(Array(result.estimates.enumerated()), id: \.element.input) { index, estimate in
+            if let input = result.modeledInputs.first(where: { $0.series == estimate.input }) {
+                Section {
+                    Text(estimate.finding.description)
+                        .font(.headline)
+                    Text("\(estimate.difference, format: estimateNumber) bpm per \(estimate.inputIncrement, format: .number) \(input.unit) increase")
+                        .monospacedDigit()
+                    LabeledContent("Approximate 95% uncertainty interval") {
+                        Text(intervalLabel(estimate))
+                    }
+                    .accessibilityIdentifier(index == 0 ? "explore.uncertainty" : "explore.uncertainty.\(index)")
+                    EstimateChart(estimate: estimate, input: input)
+                        .accessibilityIdentifier(index == 0 ? "explore.estimateChart" : "explore.estimateChart.\(index)")
+                    if estimate.finding == .nearZero {
+                        Text("The full interval is within 1 bpm of zero for the reported increment.")
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    switch input.role {
+                    case .input: Text(input.name)
+                    case .adjustment: Text("Account for · \(input.name)")
+                    }
+                }
+            }
+        }
+        if result.lastHealthReadFailure != nil {
+            Section {
                 Text("The latest Health check failed. This analysis uses earlier imported measurements.")
                     .foregroundStyle(.secondary)
             }
@@ -66,14 +79,46 @@ struct ExploreResultView: View {
             LabeledContent("Confidence") {
                 Text(result.evidence.grade.description)
             }
+            LabeledContent("Model") {
+                Text(result.model.description)
+            }
             ForEach(result.evidence.reasons, id: \.self) { reason in
                 Text(reason.description)
+                ForEach(result.modeledInputs.filter { reason.affectedInputs.contains($0.series) }) { input in
+                    Text("\(input.name) (\(input.unit))")
+                }
             }
             if let days = result.evidence.dependenceLagDays {
                 Text("The interval accounts for dependence across up to \(days) calendar days.")
             }
-            Text("This comparison uses one input. Other variables may also be associated with resting heart rate.")
+            if result.modeledInputs.count > 1 {
+                Text("Each estimate accounts for the other modeled inputs and has its own uncertainty interval.")
+                    .foregroundStyle(.secondary)
+            }
+            Text("Other variables may also be associated with resting heart rate.")
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private func modeledInputs(_ result: AnalysisResult) -> some View {
+        Section {
+            ForEach(result.modeledInputs) { input in
+                LabeledContent {
+                    Text(input.defaultDayCount, format: .number)
+                } label: {
+                    VStack(alignment: .leading) {
+                        Text("\(input.name) (\(input.unit))")
+                        Text(input.role == .input ? "Input" : "Adjustment input")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityValue(Text("\(input.defaultDayCount) paired days using a default"))
+            }
+        } header: {
+            Text("Modeled inputs")
+        } footer: {
+            Text("Quantities come from the daily log. Counts show paired days using a default for each input.")
         }
     }
 
@@ -99,7 +144,7 @@ struct ExploreResultView: View {
                 }
             }
             NavigationLink("Usable dates and gaps") {
-                ExploreCoverageView(result: result, inputName: inputName)
+                ExploreCoverageView(result: result)
             }
             measurementsLink
         }
@@ -124,6 +169,14 @@ struct ExploreResultView: View {
 
 private struct EstimateChart: View {
     let estimate: AnalysisEstimate
+    let input: AnalysisModeledInput
+
+    private var domain: ClosedRange<Double> {
+        let lower = min(0, estimate.interval.lowerBound)
+        let upper = max(0, estimate.interval.upperBound)
+        let padding = (upper - lower) * 0.1
+        return (lower - padding)...(upper + padding)
+    }
 
     var body: some View {
         Chart {
@@ -133,43 +186,36 @@ private struct EstimateChart: View {
             RuleMark(
                 xStart: .value("Lower limit", estimate.interval.lowerBound),
                 xEnd: .value("Upper limit", estimate.interval.upperBound),
-                y: .value("Estimate", "Caffeine")
+                y: .value("Estimate", input.name)
             )
             .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round))
             .foregroundStyle(Color.accentColor)
             PointMark(
                 x: .value("Estimated difference", estimate.difference),
-                y: .value("Estimate", "Caffeine")
+                y: .value("Estimate", input.name)
             )
             .foregroundStyle(Color.accentColor)
         }
-        .chartXScale(domain: min(-1, estimate.interval.lowerBound)...max(1, estimate.interval.upperBound))
+        .chartXScale(domain: domain)
         .chartXAxisLabel("Difference in resting heart rate (bpm)", position: .bottom, alignment: .center)
         .chartYAxis(.hidden)
         .frame(height: 95)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Estimated difference and uncertainty")
+        .accessibilityLabel("Estimated difference and uncertainty for \(input.name)")
         .accessibilityValue(
-            Text("\(estimate.difference, format: estimateNumber) beats per minute. Approximate 95% interval: \(intervalLabel(estimate)).")
+            Text("\(estimate.difference, format: estimateNumber) bpm per \(estimate.inputIncrement, format: .number) \(input.unit) increase, with an approximate 95% interval of \(intervalLabel(estimate)).")
         )
-        .accessibilityIdentifier("explore.estimateChart")
     }
 }
 
 private struct ExploreCoverageView: View {
     let result: AnalysisResult
-    let inputName: String
 
     private var timeZone: TimeZone { result.configuration.timeZone }
 
     var body: some View {
         List {
             Section("Question") {
-                LabeledContent {
-                    Text(inputName)
-                } label: {
-                    Text("Caffeine quantity")
-                }
                 LabeledContent("Output") { Text("Resting heart rate") }
                 LabeledContent("Behavior window") { Text("Complete preceding day") }
                 LabeledContent("History") { Text("Full usable history") }
@@ -186,7 +232,7 @@ private struct ExploreCoverageView: View {
                         Text(source.bundleIdentifier)
                     }
                 }
-                Text("Each pair uses caffeine from the complete local day before the resting heart rate sample began.")
+                Text("Each pair uses a complete input window before the resting heart rate sample began.")
             }
 
             Section("Gaps") {
@@ -244,8 +290,8 @@ private func intervalLabel(_ estimate: AnalysisEstimate) -> String {
 private extension AnalysisEstimate.Finding {
     var description: LocalizedStringKey {
         switch self {
-        case .higher: "Higher caffeine amounts were associated with higher resting heart rate."
-        case .lower: "Higher caffeine amounts were associated with lower resting heart rate."
+        case .higher: "Higher values were associated with higher resting heart rate."
+        case .lower: "Higher values were associated with lower resting heart rate."
         case .nearZero: "The estimated association was close to zero."
         case .uncertain: "The association is uncertain."
         }
@@ -262,19 +308,40 @@ private extension AnalysisEvidence.Grade {
     }
 }
 
+private extension AnalysisModel {
+    var description: LocalizedStringKey {
+        switch self {
+        case .caffeineLinearV1: "Single-input linear association"
+        case .numericLinearV1: "Numeric linear regression"
+        }
+    }
+}
+
 private extension AnalysisEvidence.Reason {
     var description: LocalizedStringKey {
         switch self {
         case .inadequateCoverage: "This comparison needs at least 42 paired days."
-        case .noObservedInputs: "Every paired caffeine amount comes from a default."
-        case .limitedInputVariation: "Caffeine amounts varied too little across paired days."
+        case .inadequateJointCoverage(let days): "This model needs at least \(days) paired days."
+        case .noObservedInputs: "Every paired value for this input comes from a default."
+        case .limitedInputVariation: "The input varied too little across paired days."
         case .uncertaintyUnavailable: "The paired values could not support a usable uncertainty interval."
         case .limitedHistory: "The analysis uses fewer than 90 paired days."
         case .sparseCoverage: "Fewer than three quarters of days in the usable history had a pair."
-        case .manyDefaults: "More than one quarter of paired days used an assumed caffeine amount."
-        case .wideInterval: "The uncertainty interval spans more than 2 bpm per 100 mg of caffeine."
-        case .indeterminateInterval: "The interval is compatible with a near-zero association and with a larger difference."
+        case .manyDefaults: "More than one quarter of paired days used at least one assumed input."
+        case .wideInterval: "The uncertainty interval spans more than 2 bpm for the reported increment."
+        case .indeterminateInterval: "An interval includes zero and allows differences away from zero."
         case .adequateCoverageAndPrecision: "The analysis has at least 90 paired days, good overlap, limited default use, and a narrow interval."
+        case .adjustedModelLimitations: "Evidence is limited to this history and the variables included in the model."
+        case .collinearInputs: "These inputs vary together too closely to estimate their separate associations."
+        case .defaultOnlyInputs: "These inputs only have defaults on paired days."
+        case .lowVariationInputs: "These inputs vary too little on paired days."
+        }
+    }
+
+    var affectedInputs: Set<AnalysisSeriesID> {
+        switch self {
+        case .collinearInputs(let inputs), .defaultOnlyInputs(let inputs), .lowVariationInputs(let inputs): inputs
+        default: []
         }
     }
 }
@@ -283,7 +350,7 @@ private extension AnalysisRunFailure {
     var description: LocalizedStringKey {
         switch self {
         case .unsupportedConfiguration: "This analysis configuration is unavailable."
-        case .inputUnavailable: "The selected caffeine quantity is unavailable."
+        case .inputUnavailable: "A selected quantity is unavailable."
         case .manualLogUnavailable: "Couldn’t open the daily log."
         case .chooseOutputSource: "Choose a preferred resting heart rate source in Health measurements."
         case .healthHistoryUnavailable: "Couldn’t use Health history. Check Health measurements and try again."

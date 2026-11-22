@@ -22,8 +22,9 @@ public struct AnalysisEvidence: Sendable {
         case moderate
     }
 
-    public enum Reason: Sendable {
+    public enum Reason: Codable, Hashable, Sendable {
         case inadequateCoverage
+        case inadequateJointCoverage(minimumDays: Int)
         case noObservedInputs
         case limitedInputVariation
         case uncertaintyUnavailable
@@ -33,6 +34,10 @@ public struct AnalysisEvidence: Sendable {
         case wideInterval
         case indeterminateInterval
         case adequateCoverageAndPrecision
+        case adjustedModelLimitations
+        case collinearInputs(Set<AnalysisSeriesID>)
+        case defaultOnlyInputs(Set<AnalysisSeriesID>)
+        case lowVariationInputs(Set<AnalysisSeriesID>)
     }
 
     public let grade: Grade
@@ -67,7 +72,7 @@ enum NumericAssociation {
             return insufficient(.limitedInputVariation)
         }
 
-        let lagDays = max(7, Int(ceil(2 * pow(Double(count), 1.0 / 3.0))))
+        let lagDays = CalendarHAC.defaultLagDays(for: count)
         let increment = 100.0
         guard let input = observations.first?.inputs.first?.series,
               let fit = fit(
@@ -123,32 +128,16 @@ enum NumericAssociation {
         let sumSquares = design.reduce(0) { $0 + $1 * $1 }
         let scaledSlope = zip(design, centeredOutput).reduce(0) { $0 + $1.0 * $1.1 } / sumSquares
         let residuals = zip(design, centeredOutput).map { $1 - $0 * scaledSlope }
-        let scores = zip(design, residuals).map(*)
-        let scoreVariance = bartlettSum(scores, dayNumbers: dayNumbers, lagDays: lagDays)
         let divisor = sumSquares * inputScale
-        let variance = (count / (count - 2)) * scoreVariance / (divisor * divisor)
         let slope = scaledSlope / inputScale
-        let bandwidthFraction = Double(lagDays + 1) / count
-        let criticalValue = 1.96 + bandwidthFraction
-            * (2.9694 + bandwidthFraction * (0.4160 - 0.5324 * bandwidthFraction))
-        let halfWidth = criticalValue * sqrt(variance)
+        let scores = zip(design, residuals).map { $0 * $1 / divisor }
+        let halfWidth = CalendarHAC.halfWidth(
+            scores: scores, dayNumbers: dayNumbers, lagDays: lagDays, parameterCount: 2
+        )
 
         guard let maxResidual = residuals.map(abs).max(),
               maxResidual > 64 * Double.ulpOfOne * abs(meanOutput),
               halfWidth > 0, (abs(slope) + halfWidth).isFinite else { return nil }
         return (slope, halfWidth)
-    }
-
-    private static func bartlettSum(_ scores: [Double], dayNumbers: [Int], lagDays: Int) -> Double {
-        var sum = scores.reduce(0) { $0 + $1 * $1 }
-        for index in scores.indices.dropFirst() {
-            for prior in (0..<index).reversed() {
-                let lag = dayNumbers[index] - dayNumbers[prior]
-                if lag > lagDays { break }
-                let weight = 1 - Double(lag) / Double(lagDays + 1)
-                sum += 2 * weight * scores[index] * scores[prior]
-            }
-        }
-        return sum
     }
 }

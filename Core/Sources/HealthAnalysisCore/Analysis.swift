@@ -92,6 +92,8 @@ public struct AnalysisResult: Sendable {
     public let lastHealthReadFailure: HealthMeasurementReadFailure?
     public let observations: [AnalysisObservation]
     public let coverage: AnalysisCoverage
+    public let model: AnalysisModel
+    public let modeledInputs: [AnalysisModeledInput]
     public let estimates: [AnalysisEstimate]
     public let evidence: AnalysisEvidence
 }
@@ -107,19 +109,33 @@ public enum AnalysisRunFailure: Error, Equatable {
 
 extension HealthAnalysisApplication {
     @MainActor public var analysisCaffeineQuantities: [TrackingQuantity] {
-        manualLog.quantities.filter { $0.unit.lowercased() == "mg" }
+        analysisNumericQuantities.filter { $0.unit.lowercased() == "mg" }
+    }
+
+    @MainActor public var analysisNumericQuantities: [TrackingQuantity] {
+        manualLog.quantities
+    }
+
+    @MainActor public func analysisAdjustmentSuggestions(excluding inputIDs: [UUID]) -> [TrackingQuantity] {
+        let selected = Set(inputIDs)
+        return analysisNumericQuantities.filter { !selected.contains($0.id) }
     }
 
     @MainActor public func analyze(
         _ configuration: AnalysisConfiguration, asOf: Date = .now
     ) throws(AnalysisRunFailure) -> AnalysisResult {
+        let series = configuration.inputs + configuration.adjustmentInputs
         guard case .health(let metric, let sourceID) = configuration.output, metric == .restingHeartRate,
-              configuration.inputs.count == 1, case .manualQuantity(let quantityID) = configuration.inputs[0],
-              configuration.adjustmentInputs.isEmpty, configuration.behaviorWindow == .precedingDay,
+              !configuration.inputs.isEmpty, Set(series).count == series.count,
+              configuration.behaviorWindow == .precedingDay,
               configuration.history == .fullHistory else { throw .unsupportedConfiguration }
         guard manualLog.isStoreAvailable else { throw .manualLogUnavailable }
-        guard let quantity = analysisCaffeineQuantities.first(where: { $0.id == quantityID }) else {
-            throw .inputUnavailable
+        let availableQuantities = Dictionary(uniqueKeysWithValues: analysisNumericQuantities.map { ($0.id, $0) })
+        var quantities: [TrackingQuantity] = []
+        for input in series {
+            guard case .manualQuantity(let quantityID) = input else { throw .unsupportedConfiguration }
+            guard let quantity = availableQuantities[quantityID] else { throw .inputUnavailable }
+            quantities.append(quantity)
         }
 
         let lastReadAt = healthMeasurements.lastSuccessfulReadAt
@@ -146,10 +162,19 @@ extension HealthAnalysisApplication {
 
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = configuration.timeZone
-        let dataset = DailyCaffeineDataset(
-            records: outputRecords, quantity: quantity, manualLog: manualLog, calendar: calendar
+        let dataset = DailyQuantityDataset(
+            records: outputRecords, quantities: quantities, manualLog: manualLog, calendar: calendar
         )
-        let assessment = NumericAssociation.assess(dataset.observations, coverage: dataset.coverage, calendar: calendar)
+        let modeledInputs = quantities.enumerated().map { index, quantity in
+            AnalysisModeledInput(
+                series: .manualQuantity(quantity.id), name: quantity.name, unit: quantity.unit,
+                role: index < configuration.inputs.count ? .input : .adjustment,
+                defaultDayCount: dataset.observations.count { $0.inputs[index].origin != .observation }
+            )
+        }
+        let assessment = NumericAnalysis.assess(
+            dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar
+        )
         return AnalysisResult(
             configuration: configuration,
             outputSource: dataset.outputSource,
@@ -157,19 +182,21 @@ extension HealthAnalysisApplication {
             lastHealthReadFailure: lastReadFailure,
             observations: dataset.observations,
             coverage: dataset.coverage,
-            estimates: assessment.estimate.map { [$0] } ?? [],
+            model: assessment.model,
+            modeledInputs: modeledInputs,
+            estimates: assessment.estimates,
             evidence: assessment.evidence
         )
     }
 }
 
-private struct DailyCaffeineDataset {
+private struct DailyQuantityDataset {
     let observations: [AnalysisObservation]
     let coverage: AnalysisCoverage
     let outputSource: HealthMeasurement.Source?
 
     @MainActor init(
-        records: [HealthMeasurement], quantity: TrackingQuantity, manualLog: ManualLog, calendar: Calendar
+        records: [HealthMeasurement], quantities: [TrackingQuantity], manualLog: ManualLog, calendar: Calendar
     ) {
         var dailyOutputs: [Date: HealthMeasurement] = [:]
         for record in records {
@@ -184,15 +211,20 @@ private struct DailyCaffeineDataset {
 
         observations = dailyOutputs.keys.sorted().compactMap { date -> AnalysisObservation? in
             guard let record = dailyOutputs[date],
-                  let preceding = calendar.dateInterval(of: .day, for: date.addingTimeInterval(-1))?.start,
-                  let (amount, origin) = manualLog.analysisValue(
-                      for: quantity, on: ManualLogDay(preceding, timeZone: calendar.timeZone)
-                  ) else { return nil }
-            let value = NSDecimalNumber(decimal: amount).doubleValue
-            guard value.isFinite, value >= 0 else { return nil }
+                  let preceding = calendar.dateInterval(of: .day, for: date.addingTimeInterval(-1))?.start else {
+                return nil
+            }
+            let inputDay = ManualLogDay(preceding, timeZone: calendar.timeZone)
+            var inputs: [AnalysisObservation.Input] = []
+            for quantity in quantities {
+                guard let (amount, origin) = manualLog.analysisValue(for: quantity, on: inputDay) else { return nil }
+                let value = NSDecimalNumber(decimal: amount).doubleValue
+                guard value.isFinite, quantity.unit.lowercased() != "mg" || value >= 0 else { return nil }
+                inputs.append(.init(series: .manualQuantity(quantity.id), date: preceding, value: value, origin: origin))
+            }
             return AnalysisObservation(
                 outputDate: date, outputAnchor: record.startDate, outputValue: record.value,
-                inputs: [.init(series: .manualQuantity(quantity.id), date: preceding, value: value, origin: origin)]
+                inputs: inputs
             )
         }
         coverage = AnalysisCoverage(observations: observations, outputDays: dailyOutputs.count, calendar: calendar)

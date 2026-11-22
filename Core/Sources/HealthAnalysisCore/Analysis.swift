@@ -2,6 +2,7 @@ import Foundation
 
 public enum AnalysisSeriesID: Codable, Hashable, Sendable {
     case manualQuantity(UUID)
+    case manualTyped(UUID)
     case health(metric: HealthMeasurement.Metric, sourceBundleIdentifier: String? = nil)
 }
 
@@ -67,6 +68,7 @@ public struct AnalysisObservation: Identifiable, Codable, Sendable {
             public let date: Date
             public let value: Double
             public let origin: ManualValueOrigin
+            public internal(set) var trackingValue: ManualTrackingValue? = nil
         }
 
         public let series: AnalysisSeriesID
@@ -74,6 +76,7 @@ public struct AnalysisObservation: Identifiable, Codable, Sendable {
         public let value: Double
         public let origin: ManualValueOrigin
         public let days: [Day]
+        public var trackingValue: ManualTrackingValue? { days.count == 1 ? days[0].trackingValue : nil }
 
         var hasObservedDay: Bool { origin == .observation || days.contains { $0.origin == .observation } }
 
@@ -91,6 +94,8 @@ public struct AnalysisObservation: Identifiable, Codable, Sendable {
     public let outputAnchor: Date
     public let outputValue: Double
     public let inputs: [Input]
+    public internal(set) var outputOrigin: ManualValueOrigin? = nil
+    public internal(set) var outputTrackingValue: ManualTrackingValue? = nil
 }
 
 public struct AnalysisCoverage: Codable, Sendable {
@@ -157,11 +162,15 @@ public struct AnalysisResult: Codable, Sendable {
     public let estimates: [AnalysisEstimate]
     public let interaction: AnalysisInteractionEstimate?
     public let evidence: AnalysisEvidence
+    public internal(set) var outputVariable: AnalysisVariable? = nil
 }
 
 public enum AnalysisRunFailure: Error, Equatable {
     case unsupportedConfiguration
     case inputUnavailable
+    case outputUnavailable
+    case countWindowUnavailable
+    case countInteractionUnavailable
     case manualLogUnavailable
     case chooseOutputSource
     case healthHistoryUnavailable(HealthMeasurementReadFailure)
@@ -186,21 +195,88 @@ extension HealthAnalysisApplication {
         _ configuration: AnalysisConfiguration, asOf: Date = .now
     ) throws(AnalysisRunFailure) -> AnalysisResult {
         let series = configuration.inputs + configuration.adjustmentInputs
-        guard case .health(let metric, let sourceID) = configuration.output,
-              metric == .restingHeartRate || metric == .sleepAnalysis,
-              !configuration.inputs.isEmpty, Set(series).count == series.count else { throw .unsupportedConfiguration }
+        guard !configuration.inputs.isEmpty, Set(series).count == series.count,
+              !series.contains(configuration.output) else { throw .unsupportedConfiguration }
         if let interaction = configuration.interaction, !interaction.isValid(for: configuration.inputs) {
             throw .unsupportedConfiguration
         }
         guard manualLog.isStoreAvailable else { throw .manualLogUnavailable }
-        let availableQuantities = Dictionary(uniqueKeysWithValues: analysisNumericQuantities.map { ($0.id, $0) })
-        var quantities: [TrackingQuantity] = []
-        for input in series {
-            guard case .manualQuantity(let quantityID) = input else { throw .unsupportedConfiguration }
-            guard let quantity = availableQuantities[quantityID] else { throw .inputUnavailable }
-            quantities.append(quantity)
+        let catalog = Dictionary(uniqueKeysWithValues: manualAnalysisSeries.map { ($0.variable.id, $0) })
+        var inputs: [ManualAnalysisSeries] = []
+        for id in series {
+            if case .health = id { throw .unsupportedConfiguration }
+            guard let input = catalog[id] else { throw .inputUnavailable }
+            guard input.variable.supportsInput else { throw .unsupportedConfiguration }
+            inputs.append(input)
+        }
+        let output = catalog[configuration.output]?.variable
+        if output?.kind == .tracked(.count) || inputs.contains(where: { $0.variable.kind == .tracked(.count) }) {
+            guard configuration.behaviorWindow == .precedingDay else { throw .countWindowUnavailable }
+            guard configuration.interaction == nil else { throw .countInteractionUnavailable }
         }
 
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = configuration.timeZone
+        let outputHistory: AnalysisOutputHistory
+        let practicalDifference: Double
+        switch configuration.output {
+        case .health(let metric, let sourceID):
+            guard metric == .restingHeartRate || metric == .sleepAnalysis else { throw .unsupportedConfiguration }
+            outputHistory = try healthOutputs(metric: metric, sourceID: sourceID, asOf: asOf, calendar: calendar)
+            practicalDifference = metric == .sleepAnalysis ? 0.25 : 1
+        case .manualTyped:
+            guard let series = catalog[configuration.output] else { throw .outputUnavailable }
+            guard series.variable.supportsOutput else { throw .unsupportedConfiguration }
+            outputHistory = .stored(series, in: manualLog, asOf: asOf, calendar: calendar)
+            practicalDifference = 0
+        case .manualQuantity:
+            throw .unsupportedConfiguration
+        }
+
+        let dataset = TemporalAnalysisDataset(
+            outputs: outputHistory.outputs, inputs: inputs, manualLog: manualLog,
+            window: configuration.behaviorWindow, history: configuration.history, asOf: asOf, calendar: calendar
+        )
+        let modeledInputs = inputs.enumerated().map { index, input in
+            let variable = input.variable
+            return AnalysisModeledInput(
+                series: variable.id, name: variable.name, unit: variable.unit,
+                role: index < configuration.inputs.count ? .input : .adjustment,
+                defaultDayCount: dataset.observations.count { $0.inputs[index].origin != .observation },
+                kind: variable.kind
+            )
+        }
+        let assessment: NumericAnalysis
+        if output?.kind == .tracked(.count) {
+            assessment = CountAnalysis.assess(
+                dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar
+            )
+        } else {
+            assessment = NumericAnalysis.assess(
+                dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar,
+                behaviorWindow: configuration.behaviorWindow, practicalDifference: practicalDifference,
+                interaction: configuration.interaction
+            )
+        }
+        return AnalysisResult(
+            configuration: configuration,
+            outputSource: dataset.outputSource,
+            healthHistoryReadAt: outputHistory.healthReadAt,
+            lastHealthReadFailure: outputHistory.healthReadFailure,
+            observations: dataset.observations,
+            coverage: dataset.coverage,
+            model: assessment.model,
+            modeledInputs: modeledInputs,
+            estimates: assessment.estimates,
+            interaction: assessment.interaction,
+            evidence: assessment.evidence,
+            outputVariable: output
+        )
+    }
+
+    @MainActor private func healthOutputs(
+        metric: HealthMeasurement.Metric, sourceID: String?, asOf: Date, calendar: Calendar
+    ) throws(AnalysisRunFailure) -> AnalysisOutputHistory {
         let lastReadAt = healthMeasurements.lastSuccessfulReadAt
         let lastReadFailure: HealthMeasurementReadFailure?
         switch healthMeasurements.readState {
@@ -214,8 +290,6 @@ extension HealthAnalysisApplication {
             lastReadFailure = nil
         }
 
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = configuration.timeZone
         let outputs: [TemporalAnalysisDataset.Output]
         if metric == .sleepAnalysis {
             let episodes = healthMeasurements.deriveSleepEpisodes(
@@ -228,38 +302,10 @@ extension HealthAnalysisApplication {
             )
         }
         let outputSourceID = sourceID ?? healthMeasurements.preferredSource(for: metric)?.bundleIdentifier
-        let sources = Set(outputs.map(\.source.bundleIdentifier))
+        let sources = Set(outputs.compactMap { $0.source?.bundleIdentifier })
         guard outputSourceID != nil || sources.count <= 1 else { throw .chooseOutputSource }
-        let selectedOutputs = outputs.filter { outputSourceID == nil || $0.source.bundleIdentifier == outputSourceID }
+        let selectedOutputs = outputs.filter { outputSourceID == nil || $0.source?.bundleIdentifier == outputSourceID }
 
-        let dataset = TemporalAnalysisDataset(
-            outputs: selectedOutputs, quantities: quantities, manualLog: manualLog,
-            window: configuration.behaviorWindow, history: configuration.history, asOf: asOf, calendar: calendar
-        )
-        let modeledInputs = quantities.enumerated().map { index, quantity in
-            AnalysisModeledInput(
-                series: .manualQuantity(quantity.id), name: quantity.name, unit: quantity.unit,
-                role: index < configuration.inputs.count ? .input : .adjustment,
-                defaultDayCount: dataset.observations.count { $0.inputs[index].origin != .observation }
-            )
-        }
-        let assessment = NumericAnalysis.assess(
-            dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar,
-            behaviorWindow: configuration.behaviorWindow, practicalDifference: metric == .sleepAnalysis ? 0.25 : 1,
-            interaction: configuration.interaction
-        )
-        return AnalysisResult(
-            configuration: configuration,
-            outputSource: dataset.outputSource,
-            healthHistoryReadAt: lastReadAt,
-            lastHealthReadFailure: lastReadFailure,
-            observations: dataset.observations,
-            coverage: dataset.coverage,
-            model: assessment.model,
-            modeledInputs: modeledInputs,
-            estimates: assessment.estimates,
-            interaction: assessment.interaction,
-            evidence: assessment.evidence
-        )
+        return AnalysisOutputHistory(outputs: selectedOutputs, healthReadAt: lastReadAt, healthReadFailure: lastReadFailure)
     }
 }

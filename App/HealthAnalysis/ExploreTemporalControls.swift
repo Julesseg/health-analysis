@@ -11,14 +11,20 @@ extension AnalysisSeriesID {
 struct ExploreTemporalControls: View {
     @Binding var behaviorWindow: AnalysisBehaviorWindow
     @Binding var history: AnalysisPeriod
+    var allowsLongerWindows = true
 
     var body: some View {
-        Picker("Behavior window", selection: $behaviorWindow) {
-            ForEach(AnalysisBehaviorWindow.allCases, id: \.self) { window in
-                Text(window.title).tag(window)
+        if allowsLongerWindows {
+            Picker("Behavior window", selection: $behaviorWindow) {
+                ForEach(AnalysisBehaviorWindow.allCases, id: \.self) { window in
+                    Text(window.title).tag(window)
+                }
             }
+            .accessibilityIdentifier("explore.behaviorWindow")
+        } else {
+            LabeledContent("Behavior window") { Text(AnalysisBehaviorWindow.precedingDay.title) }
+                .accessibilityIdentifier("explore.behaviorWindow")
         }
-        .accessibilityIdentifier("explore.behaviorWindow")
         Picker("History", selection: $history) {
             ForEach(AnalysisPeriod.allCases, id: \.self) { period in
                 Text(period.title).tag(period)

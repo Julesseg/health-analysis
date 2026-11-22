@@ -3,6 +3,7 @@ import Foundation
 public enum AnalysisModel: String, Codable, Hashable, Sendable {
     case caffeineLinearV1
     case numericLinearV1
+    case countLogLinearV1
     case numericInteractionV1
 }
 
@@ -18,6 +19,8 @@ public struct AnalysisModeledInput: Codable, Identifiable, Sendable {
     public let unit: String
     public let role: Role
     public let defaultDayCount: Int
+
+    public internal(set) var kind: AnalysisVariable.Kind? = nil
 
     var isMilligramQuantity: Bool { unit.lowercased() == "mg" }
     var inputIncrement: Double { isMilligramQuantity ? 100 : 1 }
@@ -168,7 +171,9 @@ struct NumericAnalysis {
         return result(.low, limitations, estimates: estimates, interactionEstimate: comparison?.estimate, lagDays: maximumLag)
     }
 
-    private static func hasVariation(_ values: [Double], input: AnalysisModeledInput) -> Bool {
+    static func hasVariation(_ values: [Double], input: AnalysisModeledInput) -> Bool {
+        if input.kind == .tracked(.count) { return CountAnalysis.supportingVariation(values) }
+        guard !values.isEmpty else { return false }
         let sorted = values.sorted()
         let upper = sorted[3 * sorted.count / 4]
         let lower = sorted[sorted.count / 4]

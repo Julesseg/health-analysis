@@ -5,6 +5,9 @@ import SwiftUI
 struct HealthAnalysisApp: App {
     private let application: HealthAnalysisApplication = {
         #if DEBUG
+        if let fixture = CountAnalysisUIFixture.applicationForLaunch() {
+            return fixture
+        }
         if let fixture = ExploreAnalysisUIFixture.applicationForLaunch() {
             return fixture
         }

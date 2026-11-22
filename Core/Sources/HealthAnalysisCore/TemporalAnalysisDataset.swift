@@ -6,7 +6,9 @@ struct TemporalAnalysisDataset {
         let anchor: Date
         let behaviorCutoff: Date
         let value: Double
-        let source: HealthMeasurement.Source
+        var source: HealthMeasurement.Source? = nil
+        var origin: ManualValueOrigin? = nil
+        var trackingValue: ManualTrackingValue? = nil
     }
 
     static func restingHeartRateOutputs(
@@ -46,7 +48,7 @@ struct TemporalAnalysisDataset {
     let outputSource: HealthMeasurement.Source?
 
     @MainActor init(
-        outputs: [Output], quantities: [TrackingQuantity], manualLog: ManualLog,
+        outputs: [Output], inputs: [ManualAnalysisSeries], manualLog: ManualLog,
         window: AnalysisBehaviorWindow, history: AnalysisPeriod, asOf: Date, calendar: Calendar
     ) {
         var dailyOutputs: [Date: Output] = [:]
@@ -59,16 +61,17 @@ struct TemporalAnalysisDataset {
             if dailyOutputs[output.date] == nil { dailyOutputs[output.date] = output }
         }
 
-        var dailyInputs: [UUID: [Date: AnalysisObservation.Input.Day?]] = [:]
-        func inputDay(_ date: Date, for quantity: TrackingQuantity) -> AnalysisObservation.Input.Day? {
-            if let cached = dailyInputs[quantity.id]?[date] { return cached }
+        var dailyInputs: [AnalysisSeriesID: [Date: AnalysisObservation.Input.Day?]] = [:]
+        func inputDay(_ date: Date, for series: ManualAnalysisSeries) -> AnalysisObservation.Input.Day? {
+            let id = series.variable.id
+            if let cached = dailyInputs[id]?[date] { return cached }
             let day = ManualLogDay(date, timeZone: calendar.timeZone)
-            let input: AnalysisObservation.Input.Day? = manualLog.analysisValue(for: quantity, on: day).flatMap { amount, origin in
-                let value = NSDecimalNumber(decimal: amount).doubleValue
-                guard value.isFinite, quantity.unit.lowercased() != "mg" || value >= 0 else { return nil }
-                return AnalysisObservation.Input.Day(date: date, value: value, origin: origin)
+            let input = series.numericValue(in: manualLog, on: day).map { sample in
+                AnalysisObservation.Input.Day(
+                    date: date, value: sample.value, origin: sample.origin, trackingValue: sample.trackingValue
+                )
             }
-            dailyInputs[quantity.id, default: [:]][date] = .some(input)
+            dailyInputs[id, default: [:]][date] = .some(input)
             return input
         }
 
@@ -83,19 +86,20 @@ struct TemporalAnalysisDataset {
                 cursor = preceding
             }
             let dates = behaviorDates.reversed()
-            var inputs: [AnalysisObservation.Input] = []
-            for quantity in quantities {
-                let days = dates.compactMap { inputDay($0, for: quantity) }
+            var pairedInputs: [AnalysisObservation.Input] = []
+            for input in inputs {
+                let days = dates.compactMap { inputDay($0, for: input) }
                 guard days.count == dates.count else { return nil }
                 let total = days.reduce(0) { $0 + $1.value }
                 guard total.isFinite else { return nil }
-                inputs.append(.init(
-                    series: .manualQuantity(quantity.id), date: cursor, value: total,
+                pairedInputs.append(.init(
+                    series: input.variable.id, date: cursor, value: total,
                     origin: days.first { $0.origin != .observation }?.origin ?? .observation, days: days
                 ))
             }
             return AnalysisObservation(
-                outputDate: date, outputAnchor: output.anchor, outputValue: output.value, inputs: inputs
+                outputDate: date, outputAnchor: output.anchor, outputValue: output.value, inputs: pairedInputs,
+                outputOrigin: output.origin, outputTrackingValue: output.trackingValue
             )
         }
         coverage = AnalysisCoverage(observations: observations, outputDates: outputDates, calendar: calendar)

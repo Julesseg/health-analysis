@@ -32,6 +32,13 @@ extension HealthAnalysisApplication {
         _ configuration: AnalysisConfiguration
     ) async -> Result<CompletedAnalysis, AnalysisRunFailure>? {
         guard !Task.isCancelled else { return nil }
+        if case .manualTyped = configuration.output {
+            do {
+                return .success(CompletedAnalysis(result: try analyze(configuration), updatedAt: .now))
+            } catch {
+                return .failure(error)
+            }
+        }
         guard let read = await healthMeasurements.refreshForAnalysis(), !Task.isCancelled else { return nil }
 
         switch read {

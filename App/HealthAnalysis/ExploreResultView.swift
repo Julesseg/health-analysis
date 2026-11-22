@@ -2,35 +2,19 @@ import Charts
 import HealthAnalysisCore
 import SwiftUI
 
-struct ExploreResultView: View {
+struct ExploreResultView<Status: View>: View {
     let application: HealthAnalysisApplication
-    let configuration: AnalysisConfiguration
+    let result: AnalysisResult
     let inputName: String
+    @ViewBuilder let status: () -> Status
 
-    @State private var run: Result<AnalysisResult, AnalysisRunFailure>?
+    private var configuration: AnalysisConfiguration { result.configuration }
 
     var body: some View {
-        List {
-            switch run {
-            case .success(let result):
-                findings(result)
-                evidence(result)
-                coverage(result)
-            case .failure(let failure):
-                Section {
-                    Text(failure.description)
-                    Button("Retry", action: analyze)
-                    measurementsLink
-                }
-            case nil:
-                ProgressView("Analyzing…")
-            }
-        }
-        .navigationTitle("Analysis result")
-        .navigationBarTitleDisplayMode(.inline)
-        .task {
-            if run == nil { analyze() }
-        }
+        findings(result)
+        status()
+        evidence(result)
+        coverage(result)
     }
 
     @ViewBuilder
@@ -110,14 +94,6 @@ struct ExploreResultView: View {
             HealthMeasurementHistoryView(
                 history: application.healthMeasurements, presentation: .restingHeartRate
             )
-        }
-    }
-
-    private func analyze() {
-        do {
-            run = .success(try application.analyze(configuration))
-        } catch {
-            run = .failure(error)
         }
     }
 }
@@ -275,19 +251,6 @@ private extension AnalysisEvidence.Reason {
         case .wideInterval: "The uncertainty interval spans more than 2 bpm per 100 mg of caffeine."
         case .indeterminateInterval: "The interval is compatible with a near-zero association and with a larger difference."
         case .adequateCoverageAndPrecision: "The analysis has at least 90 paired days, good overlap, limited default use, and a narrow interval."
-        }
-    }
-}
-
-private extension AnalysisRunFailure {
-    var description: LocalizedStringKey {
-        switch self {
-        case .unsupportedConfiguration: "This analysis configuration is unavailable."
-        case .inputUnavailable: "The selected caffeine quantity is unavailable."
-        case .manualLogUnavailable: "Couldn’t open the daily log."
-        case .chooseOutputSource: "Choose a preferred resting heart rate source in Health measurements."
-        case .healthHistoryUnavailable: "Couldn’t use Health history. Check Health measurements and try again."
-        case .healthHistoryLoading: "Health measurements are still being checked. Try again when the check finishes."
         }
     }
 }

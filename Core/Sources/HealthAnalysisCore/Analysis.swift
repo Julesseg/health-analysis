@@ -38,8 +38,8 @@ public struct AnalysisConfiguration: Codable, Hashable, Sendable {
     }
 }
 
-public struct AnalysisObservation: Identifiable, Sendable {
-    public struct Input: Sendable {
+public struct AnalysisObservation: Identifiable, Codable, Sendable {
+    public struct Input: Codable, Sendable {
         public let series: AnalysisSeriesID
         public let date: Date
         public let value: Double
@@ -53,8 +53,8 @@ public struct AnalysisObservation: Identifiable, Sendable {
     public let inputs: [Input]
 }
 
-public struct AnalysisCoverage: Sendable {
-    public struct Gap: Identifiable, Sendable {
+public struct AnalysisCoverage: Codable, Sendable {
+    public struct Gap: Identifiable, Codable, Sendable {
         public var id: Date { firstDate }
         public let firstDate: Date
         public let lastDate: Date
@@ -85,7 +85,7 @@ public struct AnalysisCoverage: Sendable {
     }
 }
 
-public struct AnalysisResult: Sendable {
+public struct AnalysisResult: Codable, Sendable {
     public let configuration: AnalysisConfiguration
     public let outputSource: HealthMeasurement.Source?
     public let healthHistoryReadAt: Date?

@@ -1,0 +1,11 @@
+# Saved analyses
+
+`HealthAnalysisApplication.savedAnalyses` saves the complete `AnalysisConfiguration` under a stable ID. Passing that ID to `save(_:updating:completed:)` updates the question in place. Pinning appends the ID to Following. Editing and refreshing preserve its position. Unpinning removes that position, and pinning again appends it.
+
+A cached result belongs to the saved ID and the exact configuration that produced it. A configuration edit clears the previous result and invalidates its in-flight refresh, even if a later edit restores the old configuration. Refreshing reconciles Health history, including the current preferred source when the question leaves the source automatic. A successful run updates the durable result and timestamp even when the evidence is insufficient. Read and write failures keep the previous completion. In-progress and failure feedback live in memory.
+
+## Integration with questions, discovery, and refresh
+
+- **#14 and #15** — Seed the editor's full draft from the saved configuration. Keep the selected source, input and adjustment ordering, behavior window, history, time zone, and any new fields through the result and save path. Supply decoding defaults matching earlier behavior when adding required Codable fields, and keep existing case representations readable or migrate them explicitly. Questions and pin order are durable. An individual completion with an incompatible payload can be recomputed. If a model change invalidates otherwise decodable results, invalidate the cache on decode and preserve the questions.
+- **#25** — Use the same result and editor navigation with the exact configuration tested by discovery. Persist a compatible completion with its original successful evaluation time, and carry exploratory and follow-up evidence in the result model so that reopening preserves its interpretation.
+- **#27** — Route manual refresh through `refreshSavedAnalysis(_:)`. For lifecycle or Health-change batches, reconcile Health once and reuse the reconciled history for affected questions. Extend the refresh path to share that read outcome and keep per-question request validation and atomic result writes. A failed or interrupted read leaves the prior result and successful timestamp in place.

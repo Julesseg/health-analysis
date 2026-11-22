@@ -13,7 +13,10 @@ struct HealthAnalysisApp: App {
         return HealthAnalysisApplication(
             healthSource: health.source,
             healthHistoryStoreURL: health.storeURL,
-            manualLogStoreURL: ManualLogStoreLocation.url
+            manualLogStoreURL: ManualLogStoreLocation.url,
+            savedAnalysesStoreURL: URL.applicationSupportDirectory
+                .appending(path: "SavedAnalyses", directoryHint: .isDirectory)
+                .appending(path: "questions.json", directoryHint: .notDirectory)
         )
     }()
 

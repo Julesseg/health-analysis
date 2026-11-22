@@ -62,11 +62,7 @@ struct ContentView: View {
 
     private var insights: some View {
         List {
-            if !overview.hasFollowedAnalyses {
-                Section("Following") {
-                    Text("No followed analyses yet")
-                }
-            }
+            SavedAnalysisListSection(application: application, followingOnly: true)
             if !overview.hasDiscoveries {
                 Section("Discovered for you") {
                     Text("No discoveries yet")

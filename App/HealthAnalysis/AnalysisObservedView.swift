@@ -18,7 +18,14 @@ struct AnalysisObservedView: View {
         List {
             Section {
                 let outputs = result.outputEvidence.filter(\.isObserved)
-                if outputs.isEmpty {
+                if result.isClockOutput && !result.outputEvidence.isEmpty {
+                    let interval = result.clockInterval(for: result.configuration.output)
+                    let paired = outputs.filter(\.paired)
+                    if let interval, !paired.isEmpty { timeline(paired, clock: interval) }
+                    NavigationLink("Output dates and values") {
+                        AnalysisOutputValuesView(result: result)
+                    }
+                } else if outputs.isEmpty {
                     Text("No observed output measurements are available for this result.")
                 } else {
                     timeline(outputs)
@@ -29,7 +36,7 @@ struct AnalysisObservedView: View {
             } header: {
                 Text("Observed timeline")
             } footer: {
-                if result.outputEvidence.contains(where: { $0.isObserved && !$0.paired }) {
+                if !result.isClockOutput && result.outputEvidence.contains(where: { $0.isObserved && !$0.paired }) {
                     if result.categoryEvidence == nil {
                         Text("Includes output measurements with incomplete input windows.")
                     } else {
@@ -51,10 +58,12 @@ struct AnalysisObservedView: View {
                     }
                     let evidence = result.inputEvidence(for: input.series)
                     let points = evidence.observedPairs
+                    let inputClock = result.clockInterval(for: input.series)
+                    let outputClock = result.clockInterval(for: result.configuration.output)
                     if points.isEmpty {
                         Text("No pairs with explicit observations for \(input.name) and this output.")
-                    } else {
-                        scatterplot(points, input: input)
+                    } else if (!input.isClock || inputClock != nil) && (!result.isClockOutput || outputClock != nil) {
+                        scatterplot(points, input: input, inputClock: inputClock, outputClock: outputClock)
                     }
                     NavigationLink("Input provenance and paired values") {
                         AnalysisInputEvidenceView(result: result, input: input, log: log)
@@ -62,7 +71,10 @@ struct AnalysisObservedView: View {
                 } header: {
                     Text("Observed scatterplot")
                 } footer: {
-                    Text("Each point pairs a complete input window and an output, both explicitly observed.")
+                    if (!input.isClock || result.clockInterval(for: input.series) != nil) &&
+                        (!result.isClockOutput || result.clockInterval(for: result.configuration.output) != nil) {
+                        Text("Each point pairs a complete input window and an output, both explicitly observed.")
+                    }
                 }
             }
         }
@@ -71,10 +83,10 @@ struct AnalysisObservedView: View {
         .environment(\.timeZone, result.configuration.timeZone)
     }
 
-    private func timeline(_ outputs: [AnalysisOutputEvidence]) -> some View {
+    private func timeline(_ outputs: [AnalysisOutputEvidence], clock: AnalysisClockInterval? = nil) -> some View {
         let axis = ObservedAnalysisAxis(outputs.map(\.trackingValue), categories: result.outputVariable?.categories ?? [])
         return Chart(outputs) { row in
-            if let y = axis.coordinate(row.value, trackingValue: row.trackingValue) {
+            if let y = clock?.offset(row.value) ?? axis.coordinate(row.value, trackingValue: row.trackingValue) {
                 PointMark(x: .value("Output date", row.date), y: .value("Observed output", y))
             }
         }
@@ -87,7 +99,7 @@ struct AnalysisObservedView: View {
                 AxisValueLabel(format: result.analysisDateFormat)
             }
         }
-        .chartYAxisLabel { result.analysisOutputAxis }
+        .chartYAxisLabel { clockAxis(clock) ?? result.analysisOutputAxis }
         .frame(height: chartHeight)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("Observed timeline for \(result.analysisOutputTitle)"))
@@ -95,12 +107,15 @@ struct AnalysisObservedView: View {
         .accessibilityIdentifier("explore.observedTimeline")
     }
 
-    private func scatterplot(_ points: [AnalysisInputEvidence.Pair], input: AnalysisModeledInput) -> some View {
+    private func scatterplot(
+        _ points: [AnalysisInputEvidence.Pair], input: AnalysisModeledInput,
+        inputClock: AnalysisClockInterval?, outputClock: AnalysisClockInterval?
+    ) -> some View {
         let x = ObservedAnalysisAxis(points.map(\.input.trackingValue), categories: input.categories)
         let y = ObservedAnalysisAxis(points.map(\.outputTrackingValue), categories: result.outputVariable?.categories ?? [])
         return Chart(points) { pair in
-            if let inputValue = x.coordinate(pair.input.value, trackingValue: pair.input.trackingValue),
-               let outputValue = y.coordinate(pair.outputValue, trackingValue: pair.outputTrackingValue) {
+            if let inputValue = inputClock?.offset(pair.input.value) ?? x.coordinate(pair.input.value, trackingValue: pair.input.trackingValue),
+               let outputValue = outputClock?.offset(pair.outputValue) ?? y.coordinate(pair.outputValue, trackingValue: pair.outputTrackingValue) {
                 PointMark(x: .value("Observed input", inputValue), y: .value("Observed output", outputValue))
                     .opacity(0.65)
             }
@@ -109,13 +124,17 @@ struct AnalysisObservedView: View {
         .chartYScale(domain: .automatic(includesZero: y.includesZero))
         .chartXAxis { x.marks }
         .chartYAxis { y.marks }
-        .chartXAxisLabel { input.choiceLabel }
-        .chartYAxisLabel { result.analysisOutputAxis }
+        .chartXAxisLabel { clockAxis(inputClock) ?? input.choiceLabel }
+        .chartYAxisLabel { clockAxis(outputClock) ?? result.analysisOutputAxis }
         .frame(height: chartHeight)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("Observed scatterplot for \(input.name) and \(result.analysisOutputTitle)"))
         .accessibilityValue(Text("\(points.count) explicit pairs. Input and output values are listed below."))
         .accessibilityIdentifier("explore.observedScatter")
+    }
+
+    private func clockAxis(_ interval: AnalysisClockInterval?) -> Text? {
+        interval.map { Text("Minutes after \(analysisClockText(Double($0.startMinute)))") }
     }
 }
 
@@ -138,8 +157,9 @@ struct AnalysisInputEvidenceView: View {
                     if result.configuration.behaviorWindow != .precedingDay {
                         provenanceShare("Windows using assumed defaults", count: evidence.assumedDefaultCount, total: evidence.pairs.count)
                     }
-                    if let approximate = evidence.approximateCount {
-                        LabeledContent("Approximate entries", value: approximate.formatted())
+                    if input.isClock {
+                        LabeledContent("Exact entries", value: entries.count { $0.clockPrecision == .exact }.formatted())
+                        LabeledContent("Approximate entries", value: (evidence.approximateCount ?? 0).formatted())
                     }
                 }
                 LabeledContent("Source") { Text("Daily log") }
@@ -186,7 +206,8 @@ struct AnalysisInputEvidenceView: View {
                 if let source = result.outputSource {
                     LabeledContent("Source", value: source.name)
                 }
-                AnalysisOutputProvenanceRows(result: result, origin: pair.outputOrigin)
+                AnalysisOutputProvenanceRows(result: result, origin: pair.outputOrigin, trackingValue: pair.outputTrackingValue)
+                SleepTimingProvenanceRows(anchor: pair.outputAnchor, evidence: pair.sleepTimeZoneEvidence)
             }
             Section("Input window") {
                 LabeledContent(input.name) {
@@ -215,11 +236,7 @@ struct AnalysisInputEvidenceView: View {
                     LabeledContent("Default effective from") { Text(date, format: result.analysisDateFormat) }
                 }
             }
-            if let precision = entry.clockPrecision {
-                LabeledContent("Time precision") {
-                    Text(precision == .approximate ? "Approximate time" : "Exact time")
-                }
-            }
+            AnalysisClockPrecisionRow(precision: entry.clockPrecision)
             NavigationLink("Open daily log") {
                 ManualLogView(log: log, initialDay: ManualLogDay(entry.date, timeZone: result.configuration.timeZone))
             }

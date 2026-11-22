@@ -3,6 +3,7 @@ import Foundation
 public enum AnalysisSeriesID: Codable, Hashable, Sendable {
     case manualQuantity(UUID)
     case manualTyped(UUID)
+    case sleepTiming(SleepTiming, sourceBundleIdentifier: String? = nil)
     case health(metric: HealthMeasurement.Metric, sourceBundleIdentifier: String? = nil)
 }
 
@@ -113,6 +114,13 @@ public struct AnalysisObservation: Identifiable, Codable, Sendable {
     public let inputs: [Input]
     public internal(set) var outputOrigin: ManualValueOrigin? = nil
     public internal(set) var outputTrackingValue: ManualTrackingValue? = nil
+
+    public internal(set) var sleepTimeZoneEvidence: SleepEpisode.TimeZoneEvidence? = nil
+
+    public var outputClockPrecision: ManualClockPrecision? {
+        if case .timeOfDay(_, let precision)? = outputTrackingValue { return precision }
+        return nil
+    }
 }
 
 public struct AnalysisCoverage: Codable, Sendable {
@@ -192,6 +200,7 @@ public struct AnalysisResult: Codable, Sendable {
     public internal(set) var outputVariable: AnalysisVariable? = nil
     public internal(set) var inspection: AnalysisInspection? = nil
     public internal(set) var categoryEvidence: AnalysisCategoryEvidence? = nil
+    public internal(set) var clockIntervals: [AnalysisClockInterval]? = nil
 }
 
 public enum AnalysisRunFailure: Error, Equatable {
@@ -204,6 +213,8 @@ public enum AnalysisRunFailure: Error, Equatable {
     case categoryInteractionUnavailable
     case binaryWindowUnavailable
     case binaryInteractionUnavailable
+    case clockWindowUnavailable
+    case clockInteractionUnavailable
     case countWindowUnavailable
     case countInteractionUnavailable
     case ratingWindowUnavailable
@@ -233,14 +244,24 @@ extension HealthAnalysisApplication {
     ) throws(AnalysisRunFailure) -> AnalysisResult {
         let series = try validatedAnalysisSeries(for: configuration)
         let inputs = series.inputs
-        let output = series.output?.variable
         let category = series.category
+        let output: AnalysisVariable?
+        if case .sleepTiming(let timing, let sourceID) = configuration.output {
+            output = .sleepTiming(timing, sourceID: sourceID)
+        } else {
+            output = series.output?.variable
+        }
 
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = configuration.timeZone
         let outputHistory: AnalysisOutputHistory
         let practicalDifference: Double
         switch configuration.output {
+        case .sleepTiming(let timing, let sourceID):
+            outputHistory = try healthOutputs(
+                metric: .sleepAnalysis, sourceID: sourceID, asOf: asOf, calendar: calendar, timing: timing
+            )
+            practicalDifference = 0
         case .health(let metric, let sourceID):
             outputHistory = try healthOutputs(metric: metric, sourceID: sourceID, asOf: asOf, calendar: calendar)
             practicalDifference = metric == .sleepAnalysis ? 0.25 : 1
@@ -280,13 +301,24 @@ extension HealthAnalysisApplication {
         let catalog = Dictionary(uniqueKeysWithValues: manualAnalysisSeries.map { ($0.variable.id, $0) })
         var inputs: [ManualAnalysisSeries] = []
         for id in series {
-            if case .health = id { throw .unsupportedConfiguration }
+            switch id {
+            case .health, .sleepTiming: throw .unsupportedConfiguration
+            case .manualQuantity, .manualTyped: break
+            }
             guard let input = catalog[id] else { throw .inputUnavailable }
             guard input.variable.supportsInput else { throw .unsupportedConfiguration }
             inputs.append(input)
         }
         let output = catalog[configuration.output]?.variable
         let category = try CategoryAnalysis(configuration: configuration, inputs: inputs.map(\.variable), output: output)
+        let outputIsClock = switch configuration.output {
+        case .sleepTiming: true
+        default: output?.kind == .tracked(.timeOfDay)
+        }
+        if outputIsClock || inputs.contains(where: { $0.variable.kind == .tracked(.timeOfDay) }) {
+            guard configuration.behaviorWindow == .precedingDay else { throw .clockWindowUnavailable }
+            guard configuration.interaction == nil else { throw .clockInteractionUnavailable }
+        }
         if output?.kind == .tracked(.yesNo) || inputs.contains(where: { $0.variable.kind == .tracked(.yesNo) }) {
             guard configuration.behaviorWindow == .precedingDay else { throw .binaryWindowUnavailable }
             guard configuration.interaction == nil else { throw .binaryInteractionUnavailable }
@@ -301,6 +333,8 @@ extension HealthAnalysisApplication {
         }
 
         switch configuration.output {
+        case .sleepTiming:
+            return (inputs, nil, category)
         case .health(let metric, _):
             guard metric == .restingHeartRate || metric == .sleepAnalysis else { throw .unsupportedConfiguration }
             return (inputs, nil, category)
@@ -314,7 +348,7 @@ extension HealthAnalysisApplication {
     }
 
     @MainActor private func healthOutputs(
-        metric: HealthMeasurement.Metric, sourceID: String?, asOf: Date, calendar: Calendar
+        metric: HealthMeasurement.Metric, sourceID: String?, asOf: Date, calendar: Calendar, timing: SleepTiming? = nil
     ) throws(AnalysisRunFailure) -> AnalysisOutputHistory {
         let lastReadAt = healthMeasurements.lastSuccessfulReadAt
         let lastReadFailure: HealthMeasurementReadFailure?
@@ -329,7 +363,7 @@ extension HealthAnalysisApplication {
             lastReadFailure = nil
         }
 
-        let outputs = healthAnalysisOutputs(for: metric, asOf: asOf, calendar: calendar)
+        let outputs = healthAnalysisOutputs(for: metric, asOf: asOf, calendar: calendar, timing: timing)
         let outputSourceID = sourceID ?? healthMeasurements.preferredSource(for: metric)?.bundleIdentifier
         let sources = Set(outputs.compactMap { $0.source?.bundleIdentifier })
         guard outputSourceID != nil || sources.count <= 1 else { throw .chooseOutputSource }
@@ -342,14 +376,14 @@ extension HealthAnalysisApplication {
     }
 
     @MainActor func healthAnalysisOutputs(
-        for metric: HealthMeasurement.Metric, asOf: Date, calendar: Calendar
+        for metric: HealthMeasurement.Metric, asOf: Date, calendar: Calendar, timing: SleepTiming? = nil
     ) -> [TemporalAnalysisDataset.Output] {
         switch metric {
         case .sleepAnalysis:
             let episodes = healthMeasurements.deriveSleepEpisodes(
                 from: healthMeasurements.history.filter { $0.metric == metric && $0.endDate <= asOf }
             )
-            return TemporalAnalysisDataset.sleepDurationOutputs(episodes, asOf: asOf, calendar: calendar)
+            return TemporalAnalysisDataset.sleepOutputs(episodes, asOf: asOf, calendar: calendar, timing: timing)
         case .restingHeartRate:
             return TemporalAnalysisDataset.restingHeartRateOutputs(healthMeasurements.history, asOf: asOf, calendar: calendar)
         default:
@@ -374,43 +408,58 @@ extension AnalysisResult {
             )
         }
         let categoryEvidence = category?.summarize(dataset, inputs: inputs, output: output)
-        func assess() -> NumericAnalysis {
-            if let categoryEvidence, category?.outputEvent != nil {
+        let outputIsClock = output?.kind == .tracked(.timeOfDay)
+        let ratingOutputThreshold = output?.kind.ratingThreshold
+        let usesRatings = ratingOutputThreshold != nil || inputs.contains { $0.kind.ratingThreshold != nil }
+        let model: AnalysisModel
+        if category?.outputEvent != nil {
+            model = .categoryEventLogisticV1
+        } else {
+            model = switch output?.kind {
+            case .tracked(.count): .countLogLinearV1
+            case .tracked(.yesNo): .binaryLogisticV1
+            default: usesRatings ? .ratingThresholdLinearV1 : .numericLinearV1
+            }
+        }
+
+        func fit(_ rows: [AnalysisObservation]) -> NumericAnalysis {
+            if let categoryEvidence, model == .categoryEventLogisticV1 {
                 return CategoryEventAnalysis.assess(
-                    dataset.observations, inputs: modeledInputs, coverage: dataset.coverage,
+                    rows, inputs: modeledInputs, coverage: dataset.coverage,
                     categoryEvidence: categoryEvidence, calendar: calendar
                 )
             }
-            if output?.kind == .tracked(.count) {
-                return CountAnalysis.assess(
-                    dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar
+            switch model {
+            case .countLogLinearV1:
+                return CountAnalysis.assess(rows, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar)
+            case .binaryLogisticV1:
+                return BinaryAnalysis.assess(rows, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar)
+            default:
+                return NumericAnalysis.assess(
+                    rows, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar,
+                    behaviorWindow: configuration.behaviorWindow, practicalDifference: practicalDifference,
+                    interaction: configuration.interaction, ratingOutputThreshold: ratingOutputThreshold, outputIsClock: outputIsClock
                 )
             }
-            if output?.kind == .tracked(.yesNo) {
-                return BinaryAnalysis.assess(
-                    dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar
-                )
-            }
-            return NumericAnalysis.assess(
-                dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar,
-                behaviorWindow: configuration.behaviorWindow, practicalDifference: practicalDifference,
-                interaction: configuration.interaction, ratingOutputThreshold: output?.kind.ratingThreshold
+        }
+
+        func assess(_ rows: [AnalysisObservation]) -> NumericAnalysis {
+            guard let categoryEvidence else { return fit(rows) }
+            return CategoryAnalysis.assessInputContrasts(
+                categoryEvidence, observations: rows, assessment: { fit(rows) }, model: model
             )
         }
+
         let assessment: NumericAnalysis
-        if let categoryEvidence {
-            let model: AnalysisModel = if category?.outputEvent != nil {
-                .categoryEventLogisticV1
-            } else if output?.kind == .tracked(.count) {
-                .countLogLinearV1
-            } else {
-                .numericLinearV1
-            }
-            assessment = CategoryAnalysis.assessInputContrasts(
-                categoryEvidence, observations: dataset.observations, assessment: assess, model: model
+        let clockIntervals: [AnalysisClockInterval]?
+        if outputIsClock || inputs.contains(where: { $0.kind == .tracked(.timeOfDay) }) {
+            (assessment, clockIntervals) = ClockAnalysis.assess(
+                dataset.observations, inputs: modeledInputs, output: configuration.output, outputIsClock: outputIsClock,
+                model: model, fit: assess
             )
         } else {
-            assessment = assess()
+            assessment = assess(dataset.observations)
+            clockIntervals = nil
         }
         return AnalysisResult(
             configuration: configuration,
@@ -432,7 +481,8 @@ extension AnalysisResult {
                 : assessment.evidence,
             outputVariable: output,
             inspection: dataset.inspection,
-            categoryEvidence: categoryEvidence
+            categoryEvidence: categoryEvidence,
+            clockIntervals: clockIntervals
         )
     }
 

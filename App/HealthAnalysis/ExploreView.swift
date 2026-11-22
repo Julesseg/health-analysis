@@ -67,9 +67,13 @@ struct ExploreView: View {
     private var usesCategories: Bool { categoryOutput != nil || !categoryInputs.isEmpty }
     private var usesCounts: Bool { selectedKinds.contains(.tracked(.count)) }
     private var usesYesNo: Bool { selectedKinds.contains(.tracked(.yesNo)) }
+    private var usesClocks: Bool {
+        if case .sleepTiming? = output { return true }
+        return selectedKinds.contains(.tracked(.timeOfDay))
+    }
     private var usesRatings: Bool { selectedKinds.contains { $0.ratingThreshold != nil } }
     private var hasUnsupportedCategoryCombination: Bool { usesCategories && usesYesNo }
-    private var allowsLongerWindowsAndInteractions: Bool { !(usesCounts || usesYesNo || usesRatings || usesCategories) }
+    private var allowsLongerWindowsAndInteractions: Bool { !(usesCounts || usesYesNo || usesRatings || usesCategories || usesClocks) }
 
     private var configuration: AnalysisConfiguration? {
         guard let output, !inputs.isEmpty, !hasUnsupportedCategoryCombination else { return nil }
@@ -122,7 +126,7 @@ struct ExploreView: View {
                     let outputs = variables.filter(\.supportsOutput)
                     ForEach(outputs) { choice in
                         switch choice.id {
-                        case .health:
+                        case .health, .sleepTiming:
                             application.analysisSeriesTitle(choice.id).tag(choice.id as AnalysisSeriesID?)
                         default:
                             choice.analysisChoiceLabel.tag(choice.id as AnalysisSeriesID?)
@@ -209,6 +213,10 @@ struct ExploreView: View {
                     if categoryOutput != nil {
                         Text("The model estimates the odds of the selected output category versus all other categories.")
                     }
+                }
+                if usesClocks {
+                    Text("Clock analyses use the complete preceding day. The model compares times within a shared part of the day.")
+                    Text("Interactions with clock times are unavailable.")
                 } else if usesYesNo {
                     Text("Yes/no analyses use the complete preceding day.")
                     Text("Interactions with yes/no variables are unavailable.")

@@ -65,6 +65,12 @@ extension HealthAnalysisApplication {
             } else {
                 return Text("Unavailable tracking variable")
             }
+        case .sleepTiming(let timing, let sourceID):
+            if let sourceID {
+                let source = healthMeasurements.sources(for: .sleepAnalysis).first { $0.bundleIdentifier == sourceID }
+                return Text("\(Text(timing.title)) (\(source?.name ?? sourceID))")
+            }
+            return Text(timing.title)
         case .health(let metric, let sourceID):
             if let presentation = HealthMetricPresentation.supported.first(where: { $0.metric == metric }) {
                 let title: LocalizedStringKey = series.isSleepDuration ? "Sleep duration" : presentation.title

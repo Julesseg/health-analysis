@@ -26,7 +26,10 @@ public struct AnalysisModeledInput: Codable, Identifiable, Sendable {
     public internal(set) var kind: AnalysisVariable.Kind? = nil
 
     var isMilligramQuantity: Bool { unit.lowercased() == "mg" }
-    var inputIncrement: Double { isMilligramQuantity ? 100 : 1 }
+    var inputIncrement: Double {
+        if kind == .tracked(.timeOfDay) { return 60 }
+        return isMilligramQuantity ? 100 : 1
+    }
 
     func hasVariation(from lower: Double, to upper: Double) -> Bool {
         let spread = upper - lower
@@ -45,10 +48,11 @@ struct NumericAnalysis {
         _ observations: [AnalysisObservation], inputs: [AnalysisModeledInput],
         coverage: AnalysisCoverage, calendar: Calendar,
         behaviorWindow: AnalysisBehaviorWindow = .precedingDay, practicalDifference: Double = 1,
-        interaction: AnalysisInteraction? = nil, ratingOutputThreshold: Int? = nil
+        interaction: AnalysisInteraction? = nil, ratingOutputThreshold: Int? = nil, outputIsClock: Bool = false
     ) -> Self {
+        let usesClock = outputIsClock || inputs.contains { $0.kind == .tracked(.timeOfDay) }
         let usesRatings = ratingOutputThreshold != nil || inputs.contains { $0.kind?.ratingThreshold != nil }
-        if !usesRatings, interaction == nil, inputs.count == 1, inputs.first?.isMilligramQuantity == true {
+        if !usesClock, !usesRatings, interaction == nil, inputs.count == 1, inputs.first?.isMilligramQuantity == true {
             let legacy = NumericAssociation.assess(
                 observations, coverage: coverage, calendar: calendar,
                 behaviorWindow: behaviorWindow, practicalDifference: practicalDifference
@@ -61,8 +65,7 @@ struct NumericAnalysis {
 
         let count = observations.count
         let defaultDays = observations.count { row in
-            (row.outputOrigin != nil && row.outputOrigin != .observation)
-                || row.inputs.contains { $0.origin != .observation }
+            (row.outputOrigin ?? .observation) != .observation || row.inputs.contains { $0.origin != .observation }
         }
         func result(
             _ grade: AnalysisEvidence.Grade, _ reasons: [AnalysisEvidence.Reason],
@@ -160,10 +163,10 @@ struct NumericAnalysis {
                 input: input.series, inputIncrement: input.inputIncrement,
                 difference: estimate.difference, interval: interval,
                 finding: finding(
-                    interval, nearZero: ratingOutputThreshold == nil && input.isMilligramQuantity ? practicalDifference : nil
+                    interval, nearZero: !usesClock && ratingOutputThreshold == nil && input.isMilligramQuantity ? practicalDifference : nil
                 ),
                 reference: interactionDesign?.reference(for: index),
-                scale: ratingOutputThreshold == nil ? nil : .ratingThresholdProbabilityDifference
+                scale: outputIsClock ? .clockMinutesDifference : (ratingOutputThreshold == nil ? nil : .ratingThresholdProbabilityDifference)
             ))
         }
         let comparison = interactionDesign?.estimate(using: fit, practicalDifference: practicalDifference)

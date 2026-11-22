@@ -109,12 +109,6 @@ extension AnalysisModeledInput {
         return categories
     }
 
-    func displayedValue(_ value: Double, trackingValue: ManualTrackingValue?) -> Text {
-        if !categories.isEmpty {
-            return categoryValueLabel(trackingValue, categories: categories)
-        }
-        return Text("\(value, format: .number) \(unit)")
-    }
 }
 
 func categoryValueLabel(_ value: ManualTrackingValue?, categories: [TrackingCategory]) -> Text {

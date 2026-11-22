@@ -42,23 +42,7 @@ enum CategoryEventAnalysis {
         }
 
         let columns = inputs.indices.map { index in observations.map { $0.inputs[index].value } }
-        var defaultOnly: Set<AnalysisSeriesID> = []
-        var lowVariation: Set<AnalysisSeriesID> = []
-        for (index, input) in inputs.enumerated() where categoryEvidence.inputLevels[input.series] == nil {
-            let recorded = observations.compactMap { row in
-                let value = row.inputs[index]
-                return value.origin == .observation ? value.value : nil
-            }
-            if recorded.isEmpty {
-                defaultOnly.insert(input.series)
-            } else if !NumericAnalysis.hasVariation(columns[index], input: input)
-                        || !NumericAnalysis.hasVariation(recorded, input: input) {
-                lowVariation.insert(input.series)
-            }
-        }
-        var reasons: [AnalysisEvidence.Reason] = []
-        if !defaultOnly.isEmpty { reasons.append(.defaultOnlyInputs(defaultOnly)) }
-        if !lowVariation.isEmpty { reasons.append(.lowVariationInputs(lowVariation)) }
+        var reasons = NumericAnalysis.inputLimitations(observations, inputs: inputs, columns: columns)
         guard reasons.isEmpty else { return result(.insufficient, reasons) }
 
         func collinear(_ indices: Set<Int>) -> NumericAnalysis {

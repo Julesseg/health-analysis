@@ -10,7 +10,7 @@ A category output uses a selected event label. Every other output label contribu
 | Category input or adjustment with a daily count output | Poisson regression. Report the adjusted proportional change in expected count between the two input labels. |
 | Selected category output with category, quantity, or count inputs and adjustments | Bernoulli logistic regression. Report the adjusted proportional change in event odds for a named contrast, one additional count, 100 mg, or one unit of another quantity. |
 
-These questions use complete preceding local days and allow a shorter analysis period. Stored category outputs use completed days and run from the daily log. Interactions and longer behavior windows are unavailable for category questions. Automatic discovery remains restricted to its existing numeric model family.
+These questions use complete preceding local days and allow a shorter analysis period. Stored category outputs use completed days and run from the daily log. Interactions and longer behavior windows are unavailable for category questions. Mixing categories with yes/no variables is outside the validated combinations. Automatic discovery remains restricted to its existing numeric model family.
 
 ## Evidence and uncertainty
 

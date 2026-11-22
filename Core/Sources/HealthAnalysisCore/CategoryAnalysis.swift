@@ -81,6 +81,8 @@ struct CategoryAnalysis {
               outputOptions.isEmpty ? outputEvent == nil : outputOptions.contains(where: { $0.id == outputEvent })
         else { throw .categorySelectionUnavailable }
         if !categoryInputs.isEmpty || !outputOptions.isEmpty {
+            let kinds = inputs.map(\.kind) + [output?.kind].compactMap { $0 }
+            guard !kinds.contains(.tracked(.yesNo)) else { throw .categoryModelCombinationUnavailable }
             guard configuration.behaviorWindow == .precedingDay else { throw .categoryWindowUnavailable }
             guard configuration.interaction == nil else { throw .categoryInteractionUnavailable }
         }

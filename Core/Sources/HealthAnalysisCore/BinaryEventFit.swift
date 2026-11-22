@@ -1,7 +1,24 @@
 import Foundation
 
+enum BinaryEvent {
+    static let minimumSupport = 6
+
+    static func encode(_ isYes: Bool) -> Double { isYes ? 1 : 0 }
+
+    static func hasSupport(_ values: [Double], minimum: Int = minimumSupport) -> Bool {
+        values.count(where: { $0 == 0 }) >= minimum && values.count(where: { $0 == 1 }) >= minimum
+    }
+}
+
 struct BinaryEventFit {
+    struct Comparison {
+        let rowIndex: Int
+        let lower: Double
+        let upper: Double
+    }
+
     private let rows: [[Double]]
+    private let centers: [Double]
     private let scales: [Double]
     private let coefficients: [Double]
     private let residuals: [Double]
@@ -33,6 +50,7 @@ struct BinaryEventFit {
             guard maximumChange.isFinite else { return nil }
             if maximumChange < 1e-7 {
                 self.rows = rows
+                self.centers = centers
                 self.scales = scales
                 self.coefficients = coefficients
                 self.residuals = iteration.residuals
@@ -57,6 +75,35 @@ struct BinaryEventFit {
         return nil
     }
 
+    func probabilityDifference(
+        varying column: Int, comparisons: [Comparison], dayNumbers: [Int], lagDays: Int
+    ) -> (difference: Double, interval: ClosedRange<Double>)? {
+        guard !comparisons.isEmpty else { return nil }
+        let count = Double(comparisons.count)
+        let designColumn = column + 1
+        var difference = 0.0
+        var gradient = coefficients.map { _ in 0.0 }
+        for comparison in comparisons {
+            var low = rows[comparison.rowIndex]
+            var high = low
+            low[designColumn] = (comparison.lower - centers[column]) / scales[column]
+            high[designColumn] = (comparison.upper - centers[column]) / scales[column]
+            let lowProbability = Self.probability(innerProduct(low, coefficients))
+            let highProbability = Self.probability(innerProduct(high, coefficients))
+            difference += highProbability - lowProbability
+            for parameter in gradient.indices {
+                gradient[parameter] += high[parameter] * highProbability * (1 - highProbability)
+                    - low[parameter] * lowProbability * (1 - lowProbability)
+            }
+        }
+        difference /= count
+        let halfWidth = scoreHalfWidth(
+            gradient: gradient.map { $0 / count }, dayNumbers: dayNumbers, lagDays: lagDays
+        )
+        guard halfWidth > 0, (abs(difference) + halfWidth).isFinite else { return nil }
+        return (difference, max(-1, difference - halfWidth)...min(1, difference + halfWidth))
+    }
+
     func logOddsContrast(
         _ contrast: [Double], dayNumbers: [Int], lagDays: Int
     ) -> (estimate: Double, halfWidth: Double)? {
@@ -65,13 +112,17 @@ struct BinaryEventFit {
               zip(dayNumbers, dayNumbers.dropFirst()).allSatisfy(<) else { return nil }
         let weights = [0.0] + zip(contrast, scales).map(/)
         let estimate = innerProduct(weights, coefficients)
-        let influence = information.solve(weights)
-        let scores = zip(rows, residuals).map { innerProduct($0, influence) * $1 }
-        let halfWidth = CalendarHAC.halfWidth(
-            scores: scores, dayNumbers: dayNumbers, lagDays: lagDays, parameterCount: coefficients.count
-        )
+        let halfWidth = scoreHalfWidth(gradient: weights, dayNumbers: dayNumbers, lagDays: lagDays)
         guard halfWidth > 0, (abs(estimate) + halfWidth).isFinite else { return nil }
         return (estimate, halfWidth)
+    }
+
+    private func scoreHalfWidth(gradient: [Double], dayNumbers: [Int], lagDays: Int) -> Double {
+        let influence = information.solve(gradient)
+        let scores = zip(rows, residuals).map { innerProduct($0, influence) * $1 }
+        return CalendarHAC.halfWidth(
+            scores: scores, dayNumbers: dayNumbers, lagDays: lagDays, parameterCount: coefficients.count
+        )
     }
 
     private static func probability(_ predictor: Double) -> Double {

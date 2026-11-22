@@ -199,8 +199,11 @@ public enum AnalysisRunFailure: Error, Equatable {
     case inputUnavailable
     case outputUnavailable
     case categorySelectionUnavailable
+    case categoryModelCombinationUnavailable
     case categoryWindowUnavailable
     case categoryInteractionUnavailable
+    case binaryWindowUnavailable
+    case binaryInteractionUnavailable
     case countWindowUnavailable
     case countInteractionUnavailable
     case manualLogUnavailable
@@ -282,6 +285,10 @@ extension HealthAnalysisApplication {
         }
         let output = catalog[configuration.output]?.variable
         let category = try CategoryAnalysis(configuration: configuration, inputs: inputs.map(\.variable), output: output)
+        if output?.kind == .tracked(.yesNo) || inputs.contains(where: { $0.variable.kind == .tracked(.yesNo) }) {
+            guard configuration.behaviorWindow == .precedingDay else { throw .binaryWindowUnavailable }
+            guard configuration.interaction == nil else { throw .binaryInteractionUnavailable }
+        }
         if output?.kind == .tracked(.count) || inputs.contains(where: { $0.variable.kind == .tracked(.count) }) {
             guard configuration.behaviorWindow == .precedingDay else { throw .countWindowUnavailable }
             guard configuration.interaction == nil else { throw .countInteractionUnavailable }
@@ -370,6 +377,11 @@ extension AnalysisResult {
             }
             if output?.kind == .tracked(.count) {
                 return CountAnalysis.assess(
+                    dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar
+                )
+            }
+            if output?.kind == .tracked(.yesNo) {
+                return BinaryAnalysis.assess(
                     dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar
                 )
             }

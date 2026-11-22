@@ -76,6 +76,10 @@ struct AnalysisCoverageView: View {
                         }, format: .number)
                     }
                 }
+                if result.outputVariable?.kind == .tracked(.yesNo) {
+                    LabeledContent("Recorded Yes on paired output days", value: recordedOutputCount(.yesNo(true)).formatted())
+                    LabeledContent("Recorded No on paired output days", value: recordedOutputCount(.yesNo(false)).formatted())
+                }
                 if let first = result.coverage.firstDate, let last = result.coverage.lastDate {
                     LabeledContent("Usable history") {
                         dateRange(first, last)
@@ -109,14 +113,14 @@ struct AnalysisCoverageView: View {
                 if result.coverage.usableDates.isEmpty {
                     Text("No paired days.")
                 }
-                if hasStoredCounts {
+                if hasStoredCounts || includesYesNo {
                     ForEach(result.observations) { observation in
                         NavigationLink {
-                            CountObservationView(result: result, observation: observation)
+                            PairedObservationView(result: result, observation: observation, includesYesNo: includesYesNo)
                         } label: {
                             Text(observation.outputDate, format: result.analysisDateFormat)
                         }
-                        .accessibilityIdentifier("explore.pairedCounts")
+                        .accessibilityIdentifier(includesYesNo ? "explore.pairedYesNo" : "explore.pairedCounts")
                     }
                 } else {
                     ForEach(result.coverage.usableDates, id: \.self) {
@@ -132,6 +136,14 @@ struct AnalysisCoverageView: View {
 
     private var hasStoredCounts: Bool {
         result.outputVariable?.kind == .tracked(.count) || result.modeledInputs.contains { $0.kind == .tracked(.count) }
+    }
+
+    private var includesYesNo: Bool {
+        result.outputVariable?.kind == .tracked(.yesNo) || result.modeledInputs.contains { $0.kind == .tracked(.yesNo) }
+    }
+
+    private func recordedOutputCount(_ value: ManualTrackingValue) -> Int {
+        result.observations.count { $0.outputOrigin == .observation && $0.outputTrackingValue == value }
     }
 
     private var selectedSourceIdentifier: String? {
@@ -284,6 +296,7 @@ extension AnalysisResult {
 
     @MainActor var analysisOutputAxis: Text {
         if let outputVariable, !outputVariable.categories.isEmpty { return analysisOutputTitle }
+        if outputVariable?.kind == .tracked(.yesNo) { return analysisOutputTitle }
         if outputVariable?.kind == .tracked(.count) { return Text("\(analysisOutputTitle) (count)") }
         return configuration.output.isSleepDuration ? Text("Sleep duration (hours)") : Text("\(analysisOutputTitle) (bpm)")
     }
@@ -292,6 +305,7 @@ extension AnalysisResult {
         if let outputVariable, !outputVariable.categories.isEmpty {
             return categoryValueLabel(trackingValue, categories: outputVariable.categories)
         }
+        if case .yesNo(let isYes)? = trackingValue { return yesNoLabel(isYes) }
         if outputVariable?.kind == .tracked(.count) { return Text(value, format: .number.precision(.fractionLength(0))) }
         let format = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(0...2))
         return configuration.output.isSleepDuration

@@ -11,6 +11,9 @@ struct HealthAnalysisApp: App {
         if let fixture = DiscoveryUIFixture.applicationForLaunch() {
             return fixture
         }
+        if let fixture = BinaryAnalysisUIFixture.applicationForLaunch() {
+            return fixture
+        }
         if let fixture = CategoryAnalysisUIFixture.applicationForLaunch() {
             return fixture
         }

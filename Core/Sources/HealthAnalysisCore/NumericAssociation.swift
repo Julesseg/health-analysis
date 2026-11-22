@@ -17,6 +17,7 @@ public struct AnalysisEstimate: Codable, Sendable {
         case difference
         case proportionalCountChange
         case proportionalCategoryOddsChange
+        case probabilityDifference
     }
 
     public var scale: Scale { storedScale ?? .difference }
@@ -75,6 +76,11 @@ public struct AnalysisEvidence: Codable, Sendable {
         case categoryEventModelUnavailable
         case categoryEventModelLimitations
         case categoryModelLimitations
+        case sparseObservedBinaryOutput
+        case sparseBinaryCombinations(Set<AnalysisSeriesID>)
+        case binaryContrastUnavailable(Set<AnalysisSeriesID>)
+        case binaryModelUnavailable
+        case binaryModelLimitations
         case adjustedModelLimitations
         case collinearInputs(Set<AnalysisSeriesID>)
         case defaultOnlyInputs(Set<AnalysisSeriesID>)

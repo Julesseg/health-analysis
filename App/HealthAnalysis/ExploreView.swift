@@ -49,9 +49,9 @@ struct ExploreView: View {
         inputChoices.filter { !inputs.contains($0.id) }
     }
 
-    private var usesCounts: Bool {
+    private var selectedKinds: [AnalysisVariable.Kind] {
         let selected = inputs + adjustments + [output].compactMap { $0 }
-        return variables.contains { selected.contains($0.id) && $0.kind == .tracked(.count) }
+        return variables.filter { selected.contains($0.id) }.map(\.kind)
     }
 
     private var categoryOutput: AnalysisVariable? {
@@ -65,10 +65,13 @@ struct ExploreView: View {
     }
 
     private var usesCategories: Bool { categoryOutput != nil || !categoryInputs.isEmpty }
-    private var allowsLongerWindowsAndInteractions: Bool { !usesCounts && !usesCategories }
+    private var usesCounts: Bool { selectedKinds.contains(.tracked(.count)) }
+    private var usesYesNo: Bool { selectedKinds.contains(.tracked(.yesNo)) }
+    private var hasUnsupportedCategoryCombination: Bool { usesCategories && usesYesNo }
+    private var allowsLongerWindowsAndInteractions: Bool { !usesCounts && !usesYesNo && !usesCategories }
 
     private var configuration: AnalysisConfiguration? {
-        guard let output, !inputs.isEmpty else { return nil }
+        guard let output, !inputs.isEmpty, !hasUnsupportedCategoryCombination else { return nil }
         var configuration = initialConfiguration ?? .init(output: output, inputs: inputs)
         configuration.output = output
         configuration.inputs = inputs
@@ -196,12 +199,18 @@ struct ExploreView: View {
                 if inputChoices.isEmpty {
                     Text("Add a supported daily tracking variable in Settings to choose another input.")
                 }
+                if hasUnsupportedCategoryCombination {
+                    Text("Choose category variables or yes/no variables for this analysis.")
+                }
                 if usesCategories {
                     Text("Category analyses use the complete preceding day.")
                     Text("Interactions with categories are unavailable.")
                     if categoryOutput != nil {
                         Text("The model estimates the odds of the selected output category versus all other categories.")
                     }
+                } else if usesYesNo {
+                    Text("Yes/no analyses use the complete preceding day.")
+                    Text("Interactions with yes/no variables are unavailable.")
                 } else if usesCounts {
                     Text("Count analyses use the complete preceding day.")
                     Text("Interactions with counts are unavailable.")

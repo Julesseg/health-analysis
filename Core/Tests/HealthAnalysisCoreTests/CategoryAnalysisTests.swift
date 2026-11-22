@@ -256,6 +256,13 @@ struct CategoryAnalysisTests {
         configuration.behaviorWindow = .precedingDay
         configuration.interaction = .init(focal: input, moderator: other)
         #expect(throws: AnalysisRunFailure.categoryInteractionUnavailable) { try app.analyze(configuration) }
+
+        let yesNo = try app.manualLog.createTypedVariable(
+            name: "Nap", kind: .yesNo, defaultValue: .yesNo(false), startsOn: day(0)
+        )
+        configuration.interaction = nil
+        configuration.adjustmentInputs = [.manualTyped(yesNo.id)]
+        #expect(throws: AnalysisRunFailure.categoryModelCombinationUnavailable) { try app.analyze(configuration) }
     }
 
     @Test func intervalsReflectSerialDependenceForNullAndKnownCategoryOdds() throws {

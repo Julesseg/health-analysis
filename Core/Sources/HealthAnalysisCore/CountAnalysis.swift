@@ -32,23 +32,7 @@ enum CountAnalysis {
         }
 
         let columns = inputs.indices.map { index in observations.map { $0.inputs[index].value } }
-        var defaultOnly: Set<AnalysisSeriesID> = []
-        var lowVariation: Set<AnalysisSeriesID> = []
-        for (index, input) in inputs.enumerated() {
-            let observed = observations.compactMap { row in
-                let value = row.inputs[index]
-                return value.origin == .observation ? value.value : nil
-            }
-            if observed.isEmpty {
-                defaultOnly.insert(input.series)
-            } else if !NumericAnalysis.hasVariation(columns[index], input: input)
-                || !NumericAnalysis.hasVariation(observed, input: input) {
-                lowVariation.insert(input.series)
-            }
-        }
-        var limitations: [AnalysisEvidence.Reason] = []
-        if !defaultOnly.isEmpty { limitations.append(.defaultOnlyInputs(defaultOnly)) }
-        if !lowVariation.isEmpty { limitations.append(.lowVariationInputs(lowVariation)) }
+        var limitations = NumericAnalysis.inputLimitations(observations, inputs: inputs, columns: columns)
         guard limitations.isEmpty else { return result(.insufficient, limitations) }
 
         func collinear(_ indices: Set<Int>) -> NumericAnalysis {
@@ -62,6 +46,10 @@ enum CountAnalysis {
             return collinear(indices)
         } catch {
             return result(.insufficient, [.countModelUnavailable])
+        }
+
+        if let reason = BinaryAnalysis.sparseCombinations(observations, inputs: inputs) {
+            return result(.insufficient, [reason])
         }
 
         let dayNumbers = observations.compactMap { calendar.ordinality(of: .day, in: .era, for: $0.outputDate) }

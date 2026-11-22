@@ -16,6 +16,7 @@ public struct AnalysisEstimate: Codable, Sendable {
     public enum Scale: String, Codable, Sendable {
         case difference
         case proportionalCountChange
+        case probabilityDifference
     }
 
     public var scale: Scale { storedScale ?? .difference }
@@ -68,6 +69,11 @@ public struct AnalysisEvidence: Codable, Sendable {
         case sparseObservedCountOutput
         case countModelUnavailable
         case countModelLimitations
+        case sparseObservedBinaryOutput
+        case sparseBinaryCombinations(Set<AnalysisSeriesID>)
+        case binaryContrastUnavailable(Set<AnalysisSeriesID>)
+        case binaryModelUnavailable
+        case binaryModelLimitations
         case adjustedModelLimitations
         case collinearInputs(Set<AnalysisSeriesID>)
         case defaultOnlyInputs(Set<AnalysisSeriesID>)

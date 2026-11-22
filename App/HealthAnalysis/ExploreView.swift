@@ -43,10 +43,14 @@ struct ExploreView: View {
         inputChoices.filter { !inputs.contains($0.id) }
     }
 
-    private var usesCounts: Bool {
+    private var selectedKinds: [AnalysisVariable.Kind] {
         let selected = inputs + adjustments + [output].compactMap { $0 }
-        return variables.contains { selected.contains($0.id) && $0.kind == .tracked(.count) }
+        return variables.filter { selected.contains($0.id) }.map(\.kind)
     }
+
+    private var usesCounts: Bool { selectedKinds.contains(.tracked(.count)) }
+    private var usesYesNo: Bool { selectedKinds.contains(.tracked(.yesNo)) }
+    private var allowsLongerWindowsAndInteractions: Bool { !usesCounts && !usesYesNo }
 
     private var configuration: AnalysisConfiguration? {
         guard let output, !inputs.isEmpty else { return nil }
@@ -54,9 +58,9 @@ struct ExploreView: View {
         configuration.output = output
         configuration.inputs = inputs
         configuration.adjustmentInputs = adjustments
-        configuration.behaviorWindow = usesCounts ? .precedingDay : behaviorWindow
+        configuration.behaviorWindow = allowsLongerWindowsAndInteractions ? behaviorWindow : .precedingDay
         configuration.history = history
-        configuration.interaction = usesCounts ? nil : interaction
+        configuration.interaction = allowsLongerWindowsAndInteractions ? interaction : nil
         configuration.timeZone = analysisTimeZone
         return configuration
     }
@@ -129,7 +133,7 @@ struct ExploreView: View {
                 .accessibilityLabel("Account for")
                 .accessibilityValue(selectionSummary(adjustments))
                 .accessibilityIdentifier("explore.adjustments")
-                if inputs.count >= 2 && !usesCounts {
+                if inputs.count >= 2 && allowsLongerWindowsAndInteractions {
                     NavigationLink {
                         ExploreInteractionSelection(application: application, inputs: inputs, interaction: $interaction)
                     } label: {
@@ -140,13 +144,16 @@ struct ExploreView: View {
                     .accessibilityIdentifier("explore.interaction")
                 }
                 ExploreTemporalControls(
-                    behaviorWindow: $behaviorWindow, history: $history, allowsLongerWindows: !usesCounts
+                    behaviorWindow: $behaviorWindow, history: $history, allowsLongerWindows: allowsLongerWindowsAndInteractions
                 )
             } footer: {
                 if inputChoices.isEmpty {
-                    Text("Add a daily quantity or count in Settings to choose another variable.")
+                    Text("Add a daily quantity, count, or yes/no variable in Settings.")
                 }
-                if usesCounts {
+                if usesYesNo {
+                    Text("Yes/no analyses use the complete preceding day.")
+                    Text("Interactions with yes/no variables are unavailable.")
+                } else if usesCounts {
                     Text("Count analyses use the complete preceding day.")
                     Text("Interactions with counts are unavailable.")
                 }

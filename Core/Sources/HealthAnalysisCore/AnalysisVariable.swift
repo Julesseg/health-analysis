@@ -13,7 +13,7 @@ public struct AnalysisVariable: Codable, Equatable, Identifiable, Sendable {
     public var supportsInput: Bool {
         switch id {
         case .manualQuantity: true
-        case .manualTyped: kind == .tracked(.count)
+        case .manualTyped: kind == .tracked(.count) || kind == .tracked(.yesNo)
         case .health: false
         }
     }
@@ -21,7 +21,7 @@ public struct AnalysisVariable: Codable, Equatable, Identifiable, Sendable {
     public var supportsOutput: Bool {
         switch id {
         case .manualQuantity: false
-        case .manualTyped: kind == .tracked(.count)
+        case .manualTyped: kind == .tracked(.count) || kind == .tracked(.yesNo)
         case .health(let metric, _): metric == .restingHeartRate || metric == .sleepAnalysis
         }
     }
@@ -76,9 +76,15 @@ enum ManualAnalysisSeries {
             guard value.isFinite, quantity.unit.lowercased() != "mg" || value >= 0 else { return nil }
             return Sample(value: value, origin: origin)
         case .typed(let variable):
-            guard variable.kind == .count,
-                  case let (.count(count), origin)? = log.analysisValue(for: variable, on: day), count >= 0 else { return nil }
-            return Sample(value: Double(count), origin: origin, trackingValue: .count(count))
+            guard let (value, origin) = log.analysisValue(for: variable, on: day) else { return nil }
+            switch (variable.kind, value) {
+            case (.count, .count(let count)) where count >= 0:
+                return Sample(value: Double(count), origin: origin, trackingValue: value)
+            case (.yesNo, .yesNo(let isYes)):
+                return Sample(value: BinaryEvent.encode(isYes), origin: origin, trackingValue: value)
+            default:
+                return nil
+            }
         }
     }
 

@@ -4,6 +4,7 @@ struct AnalysisOutputHistory {
     let outputs: [TemporalAnalysisDataset.Output]
     var healthReadAt: Date? = nil
     var healthReadFailure: HealthMeasurementReadFailure? = nil
+    var selectedSourceIdentifier: String? = nil
 
     @MainActor static func stored(
         _ series: ManualAnalysisSeries, in log: ManualLog, asOf: Date, calendar: Calendar

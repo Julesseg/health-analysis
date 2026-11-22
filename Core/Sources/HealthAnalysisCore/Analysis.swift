@@ -69,6 +69,11 @@ public struct AnalysisObservation: Identifiable, Codable, Sendable {
             public let value: Double
             public let origin: ManualValueOrigin
             public internal(set) var trackingValue: ManualTrackingValue? = nil
+
+            public var clockPrecision: ManualClockPrecision? {
+                if case .timeOfDay(_, let precision)? = trackingValue { return precision }
+                return nil
+            }
         }
 
         public let series: AnalysisSeriesID
@@ -86,6 +91,15 @@ public struct AnalysisObservation: Identifiable, Codable, Sendable {
             self.value = value
             self.origin = origin
             self.days = days
+        }
+
+        public init(from decoder: any Decoder) throws {
+            let fields = try decoder.container(keyedBy: CodingKeys.self)
+            series = try fields.decode(AnalysisSeriesID.self, forKey: .series)
+            date = try fields.decode(Date.self, forKey: .date)
+            value = try fields.decode(Double.self, forKey: .value)
+            origin = try fields.decode(ManualValueOrigin.self, forKey: .origin)
+            days = try fields.decodeIfPresent([Day].self, forKey: .days) ?? []
         }
     }
 
@@ -118,6 +132,16 @@ public struct AnalysisCoverage: Codable, Sendable {
     public var missingDays: Int { gaps.reduce(0) { $0 + $1.dayCount } }
     public var outputDayCount: Int { usableDates.count + outputDaysWithoutCompleteInput }
 
+    public init(from decoder: any Decoder) throws {
+        let fields = try decoder.container(keyedBy: CodingKeys.self)
+        usableDates = try fields.decode([Date].self, forKey: .usableDates)
+        gaps = try fields.decode([Gap].self, forKey: .gaps)
+        outputDaysWithoutCompleteInput = try fields.decode(Int.self, forKey: .outputDaysWithoutCompleteInput)
+        outputDatesWithoutCompleteInput = try fields.decodeIfPresent([Date].self, forKey: .outputDatesWithoutCompleteInput) ?? []
+        distinctBehaviorDayCount = try fields.decodeIfPresent(Int.self, forKey: .distinctBehaviorDayCount) ?? usableDates.count
+        nonOverlappingWindowCount = try fields.decodeIfPresent(Int.self, forKey: .nonOverlappingWindowCount) ?? usableDates.count
+    }
+
     init(observations: [AnalysisObservation], outputDates: [Date], calendar: Calendar) {
         usableDates = observations.map(\.outputDate)
         let usable = Set(usableDates)
@@ -126,7 +150,7 @@ public struct AnalysisCoverage: Codable, Sendable {
         var distinctDays: Set<Date> = []
         let windows = observations.compactMap { observation -> ClosedRange<Date>? in
             guard let input = observation.inputs.first else { return nil }
-            distinctDays.formUnion(input.days.map(\.date))
+            distinctDays.formUnion(input.days.isEmpty ? [input.date] : input.days.map(\.date))
             return input.date...(input.days.last?.date ?? input.date)
         }.sorted { $0.upperBound < $1.upperBound }
         distinctBehaviorDayCount = distinctDays.count
@@ -163,6 +187,7 @@ public struct AnalysisResult: Codable, Sendable {
     public let interaction: AnalysisInteractionEstimate?
     public let evidence: AnalysisEvidence
     public internal(set) var outputVariable: AnalysisVariable? = nil
+    public internal(set) var inspection: AnalysisInspection? = nil
 }
 
 public enum AnalysisRunFailure: Error, Equatable {
@@ -234,7 +259,8 @@ extension HealthAnalysisApplication {
         }
 
         let dataset = TemporalAnalysisDataset(
-            outputs: outputHistory.outputs, inputs: inputs, manualLog: manualLog,
+            outputs: outputHistory.outputs, selectedSourceIdentifier: outputHistory.selectedSourceIdentifier,
+            inputs: inputs, manualLog: manualLog,
             window: configuration.behaviorWindow, history: configuration.history, asOf: asOf, calendar: calendar
         )
         let modeledInputs = inputs.enumerated().map { index, input in
@@ -270,7 +296,8 @@ extension HealthAnalysisApplication {
             estimates: assessment.estimates,
             interaction: assessment.interaction,
             evidence: assessment.evidence,
-            outputVariable: output
+            outputVariable: output,
+            inspection: dataset.inspection
         )
     }
 
@@ -306,6 +333,9 @@ extension HealthAnalysisApplication {
         guard outputSourceID != nil || sources.count <= 1 else { throw .chooseOutputSource }
         let selectedOutputs = outputs.filter { outputSourceID == nil || $0.source?.bundleIdentifier == outputSourceID }
 
-        return AnalysisOutputHistory(outputs: selectedOutputs, healthReadAt: lastReadAt, healthReadFailure: lastReadFailure)
+        return AnalysisOutputHistory(
+            outputs: selectedOutputs, healthReadAt: lastReadAt, healthReadFailure: lastReadFailure,
+            selectedSourceIdentifier: outputSourceID
+        )
     }
 }

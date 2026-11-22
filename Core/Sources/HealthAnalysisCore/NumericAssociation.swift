@@ -70,6 +70,7 @@ public struct AnalysisEvidence: Codable, Sendable {
         case countModelUnavailable
         case countModelLimitations
         case sparseObservedRatingOutput
+        case sparseObservedRatingInputs(Set<AnalysisSeriesID>)
         case ratingThresholdLimitations
         case adjustedModelLimitations
         case collinearInputs(Set<AnalysisSeriesID>)

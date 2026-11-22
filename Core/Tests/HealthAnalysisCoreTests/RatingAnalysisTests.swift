@@ -47,6 +47,7 @@ struct RatingAnalysisTests {
         )
         let result = try reopened.analyze(configuration, asOf: date(121))
         #expect(result.coverage.usableDates == (1...120).map(date))
+        #expect(result.model == .ratingThresholdLinearV1)
         #expect(result.evidence.grade == .low)
         #expect(result.evidence.defaultDayCount == 1)
         #expect(result.evidence.dependenceLagDays == 10)
@@ -57,12 +58,16 @@ struct RatingAnalysisTests {
         #expect(result.observations[0].outputOrigin == .assumedDefault(effectiveOn: day(1)))
         #expect(result.observations[0].inputs[0].trackingValue == .rating(1))
         #expect(result.observations[0].inputs[0].origin == .assumedDefault(effectiveOn: day(0)))
+        #expect(result.outputEvidence.first?.trackingValue == .rating(8))
+        #expect(result.outputEvidence.first?.isObserved == false)
+        #expect(result.inputEvidence(for: input).pairs.first?.input.trackingValue == .rating(1))
         #expect(Set(result.observations.map(\.outputValue)) == Set((2...8).map(Double.init)))
         #expect(result.estimates.count == 2)
         for (estimate, expected) in zip(result.estimates, [0.3, 0.2]) {
             #expect(abs(estimate.difference - expected) < 1e-10)
             #expect(estimate.interval.contains(expected))
             #expect(estimate.finding == .higher)
+            #expect(estimate.scale == .ratingThresholdProbabilityDifference)
         }
         #expect(result.healthHistoryReadAt == nil)
 
@@ -76,6 +81,43 @@ struct RatingAnalysisTests {
         #expect(refreshed.configuration == configuration)
         #expect(refreshed.observations.first?.outputOrigin == .assumedDefault(effectiveOn: day(1)))
         #expect(refreshed.estimates.count == 2)
+    }
+
+    @Test func recordedLevelsMustCrossTheThresholdAndDefaultsCannotSupplyTheMissingGroup() throws {
+        let app = HealthAnalysisApplication()
+        let stress = try app.manualLog.createTypedVariable(
+            name: "Stress", kind: .rating(-4...1), defaultValue: .rating(0), startsOn: day(0)
+        )
+        let energy = try app.manualLog.createTypedVariable(
+            name: "Energy", kind: .rating(1...5), defaultValue: .rating(3), startsOn: day(1)
+        )
+        let input = AnalysisSeriesID.manualTyped(stress.id)
+        let output = AnalysisSeriesID.manualTyped(energy.id)
+        let configuration = AnalysisConfiguration(output: output, inputs: [input], timeZone: utc)
+        #expect(app.analysisVariables.first { $0.id == input }?.kind.ratingThreshold == -1)
+        for index in 0..<60 {
+            if index % 3 != 0 {
+                app.manualLog.editTypedEntry(stress.id, on: day(index), value: .rating(-4 + index % 3))
+            }
+        }
+        let defaultOutput = try app.analyze(configuration, asOf: date(61))
+        #expect(defaultOutput.evidence.reasons == [.defaultOnlyOutput])
+        #expect(defaultOutput.estimates.isEmpty)
+
+        for index in 0..<60 where index % 3 != 0 {
+            app.manualLog.editTypedEntry(energy.id, on: day(index + 1), value: .rating(1 + index % 2))
+        }
+        let sparseOutput = try app.analyze(configuration, asOf: date(61))
+        #expect(sparseOutput.evidence.reasons == [.sparseObservedRatingOutput])
+        #expect(sparseOutput.estimates.isEmpty)
+
+        for index in 0..<60 where index % 3 == 0 {
+            app.manualLog.editTypedEntry(energy.id, on: day(index + 1), value: .rating(5))
+        }
+        let sparseInput = try app.analyze(configuration, asOf: date(61))
+        #expect(sparseInput.evidence.reasons == [.sparseObservedRatingInputs([input])])
+        #expect(sparseInput.estimates.isEmpty)
+        #expect(sparseInput.evidence.defaultDayCount == 20)
     }
 
     private let utc = TimeZone(secondsFromGMT: 0)!

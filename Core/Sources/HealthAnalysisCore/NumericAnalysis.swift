@@ -194,11 +194,14 @@ struct NumericAnalysis {
     ) -> [AnalysisEvidence.Reason] {
         var defaultOnly: Set<AnalysisSeriesID> = []
         var lowVariation: Set<AnalysisSeriesID> = []
+        var sparseRatings: Set<AnalysisSeriesID> = []
         for (index, input) in inputs.enumerated() {
             let column = columns[index]
             let observed = zip(observations, column).compactMap { $0.inputs[index].origin == .observation ? $1 : nil }
             if !observations.contains(where: { $0.inputs[index].hasObservedDay }) {
                 defaultOnly.insert(input.series)
+            } else if input.kind?.ratingThreshold != nil {
+                if !RatingAnalysis.hasSupport(observed) { sparseRatings.insert(input.series) }
             } else if !hasVariation(column, input: input) || !hasVariation(observed, input: input) {
                 lowVariation.insert(input.series)
             }
@@ -206,11 +209,11 @@ struct NumericAnalysis {
         var limitations: [AnalysisEvidence.Reason] = []
         if !defaultOnly.isEmpty { limitations.append(.defaultOnlyInputs(defaultOnly)) }
         if !lowVariation.isEmpty { limitations.append(.lowVariationInputs(lowVariation)) }
+        if !sparseRatings.isEmpty { limitations.append(.sparseObservedRatingInputs(sparseRatings)) }
         return limitations
     }
 
     private static func hasVariation(_ values: [Double], input: AnalysisModeledInput) -> Bool {
-        if input.kind?.ratingThreshold != nil { return RatingAnalysis.hasSupport(values) }
         if input.kind == .tracked(.count) { return CountAnalysis.supportingVariation(values) }
         guard !values.isEmpty else { return false }
         let sorted = values.sorted()

@@ -4,7 +4,7 @@ import SwiftUI
 struct PairedObservationView: View {
     let result: AnalysisResult
     let observation: AnalysisObservation
-    let includesYesNo: Bool
+    let countOnly: Bool
 
     var body: some View {
         List {
@@ -12,6 +12,14 @@ struct PairedObservationView: View {
                let value = observation.outputTrackingValue {
                 Section("Output") {
                     valueRow(name: output.name, value: value, date: observation.outputDate, origin: origin)
+                }
+            }
+            if let evidence = observation.sleepTimeZoneEvidence {
+                Section("Output") {
+                    LabeledContent { result.analysisOutputValue(observation.outputValue, trackingValue: nil) } label: {
+                        result.analysisOutputTitle
+                    }
+                    SleepTimingProvenanceRows(anchor: observation.outputAnchor, evidence: evidence)
                 }
             }
             Section("Inputs and adjustments") {
@@ -23,7 +31,7 @@ struct PairedObservationView: View {
                 }
             }
         }
-        .navigationTitle(includesYesNo ? "Paired values" : "Paired counts")
+        .navigationTitle(countOnly ? "Paired counts" : "Paired values")
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -33,10 +41,14 @@ struct PairedObservationView: View {
                 switch value {
                 case .count(let count): Text(count, format: .number)
                 case .yesNo(let isYes): yesNoLabel(isYes)
+                case .timeOfDay(let time, _): analysisClockText(Double(time.hour * 60 + time.minute))
                 default: EmptyView()
                 }
             }
             Text(date, format: dayFormat)
+            if case .timeOfDay(_, let precision) = value {
+                AnalysisClockPrecisionRow(precision: precision)
+            }
             switch origin {
             case .observation:
                 if case .count = value {

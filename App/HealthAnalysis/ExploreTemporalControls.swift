@@ -2,6 +2,11 @@ import HealthAnalysisCore
 import SwiftUI
 
 extension AnalysisSeriesID {
+    var isSleepTiming: Bool {
+        if case .sleepTiming = self { return true }
+        return false
+    }
+
     var isSleepDuration: Bool {
         if case .health(metric: .sleepAnalysis, _) = self { return true }
         return false

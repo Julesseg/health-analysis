@@ -61,7 +61,7 @@ extension HealthAnalysisApplication {
             switch variable.id {
             case .manualQuantity: variable.supportsInput
             case .health(let metric, _): Self.discoveryOutputMetrics.contains(metric) && variable.supportsOutput
-            case .manualTyped: false
+            case .manualTyped, .sleepTiming: false
             }
         }.map(\.id)
     }

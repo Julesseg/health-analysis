@@ -49,13 +49,18 @@ extension HealthMeasurement {
     }
 }
 
+public enum SleepTiming: String, CaseIterable, Codable, Hashable, Sendable {
+    case onset
+    case wake
+}
+
 public struct SleepEpisode: Equatable, Identifiable, Sendable {
     public struct ID: Hashable, Sendable {
         public let sourceIdentifier: String
         public let startDate: Date
     }
 
-    public enum TimeZoneEvidence: Equatable, Sendable {
+    public enum TimeZoneEvidence: Codable, Equatable, Sendable {
         case sampleMetadata(identifier: String, sampleID: UUID)
         case importTimeZone(identifier: String)
 
@@ -72,6 +77,7 @@ public struct SleepEpisode: Equatable, Identifiable, Sendable {
     public let wakeTime: Date
     public let duration: TimeInterval
     public let timeZoneEvidence: TimeZoneEvidence
+    public let onsetTimeZoneEvidence: TimeZoneEvidence
 
     public var timeZone: TimeZone { TimeZone(identifier: timeZoneEvidence.identifier) ?? .gmt }
 

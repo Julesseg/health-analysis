@@ -24,7 +24,10 @@ public struct AnalysisModeledInput: Codable, Identifiable, Sendable {
     public internal(set) var kind: AnalysisVariable.Kind? = nil
 
     var isMilligramQuantity: Bool { unit.lowercased() == "mg" }
-    var inputIncrement: Double { isMilligramQuantity ? 100 : 1 }
+    var inputIncrement: Double {
+        if kind == .tracked(.timeOfDay) { return 60 }
+        return isMilligramQuantity ? 100 : 1
+    }
 
     func hasVariation(from lower: Double, to upper: Double) -> Bool {
         let spread = upper - lower
@@ -43,9 +46,10 @@ struct NumericAnalysis {
         _ observations: [AnalysisObservation], inputs: [AnalysisModeledInput],
         coverage: AnalysisCoverage, calendar: Calendar,
         behaviorWindow: AnalysisBehaviorWindow = .precedingDay, practicalDifference: Double = 1,
-        interaction: AnalysisInteraction? = nil
+        interaction: AnalysisInteraction? = nil, outputIsClock: Bool = false
     ) -> Self {
-        if interaction == nil, inputs.count == 1, inputs.first?.isMilligramQuantity == true {
+        let usesClock = outputIsClock || inputs.contains { $0.kind == .tracked(.timeOfDay) }
+        if !usesClock, interaction == nil, inputs.count == 1, inputs.first?.isMilligramQuantity == true {
             let legacy = NumericAssociation.assess(
                 observations, coverage: coverage, calendar: calendar,
                 behaviorWindow: behaviorWindow, practicalDifference: practicalDifference
@@ -57,7 +61,9 @@ struct NumericAnalysis {
         }
 
         let count = observations.count
-        let defaultDays = observations.count { row in row.inputs.contains { $0.origin != .observation } }
+        let defaultDays = observations.count { row in
+            (row.outputOrigin ?? .observation) != .observation || row.inputs.contains { $0.origin != .observation }
+        }
         func result(
             _ grade: AnalysisEvidence.Grade, _ reasons: [AnalysisEvidence.Reason],
             estimates: [AnalysisEstimate] = [], interactionEstimate: AnalysisInteractionEstimate? = nil, lagDays: Int? = nil
@@ -139,8 +145,8 @@ struct NumericAnalysis {
             estimates.append(AnalysisEstimate(
                 input: input.series, inputIncrement: input.inputIncrement,
                 difference: estimate.difference, interval: interval,
-                finding: finding(interval, nearZero: input.isMilligramQuantity ? practicalDifference : nil),
-                reference: interactionDesign?.reference(for: index)
+                finding: finding(interval, nearZero: !usesClock && input.isMilligramQuantity ? practicalDifference : nil),
+                reference: interactionDesign?.reference(for: index), scale: outputIsClock ? .clockMinutesDifference : nil
             ))
         }
         let comparison = interactionDesign?.estimate(using: fit, practicalDifference: practicalDifference)

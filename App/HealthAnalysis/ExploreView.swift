@@ -50,7 +50,11 @@ struct ExploreView: View {
 
     private var usesCounts: Bool { selectedKinds.contains(.tracked(.count)) }
     private var usesYesNo: Bool { selectedKinds.contains(.tracked(.yesNo)) }
-    private var allowsLongerWindowsAndInteractions: Bool { !usesCounts && !usesYesNo }
+    private var usesClocks: Bool {
+        if case .sleepTiming? = output { return true }
+        return selectedKinds.contains(.tracked(.timeOfDay))
+    }
+    private var allowsLongerWindowsAndInteractions: Bool { !usesCounts && !usesYesNo && !usesClocks }
 
     private var configuration: AnalysisConfiguration? {
         guard let output, !inputs.isEmpty else { return nil }
@@ -82,7 +86,7 @@ struct ExploreView: View {
                     let outputs = variables.filter(\.supportsOutput)
                     ForEach(outputs) { choice in
                         switch choice.id {
-                        case .health:
+                        case .health, .sleepTiming:
                             application.analysisSeriesTitle(choice.id).tag(choice.id as AnalysisSeriesID?)
                         default:
                             choice.analysisChoiceLabel.tag(choice.id as AnalysisSeriesID?)
@@ -148,9 +152,12 @@ struct ExploreView: View {
                 )
             } footer: {
                 if inputChoices.isEmpty {
-                    Text("Add a daily quantity, count, or yes/no variable in Settings.")
+                    Text("Add a supported tracking variable in Settings to choose another input.")
                 }
-                if usesYesNo {
+                if usesClocks {
+                    Text("Clock analyses use the complete preceding day. The model compares times within a shared part of the day.")
+                    Text("Interactions with clock times are unavailable.")
+                } else if usesYesNo {
                     Text("Yes/no analyses use the complete preceding day.")
                     Text("Interactions with yes/no variables are unavailable.")
                 } else if usesCounts {

@@ -121,7 +121,7 @@ struct AnalysisResultScreen: View {
                     NavigationLink("Inspect Health measurements") {
                         HealthMeasurementHistoryView(
                             history: application.healthMeasurements,
-                            presentation: output?.isSleepDuration == true ? .sleep : .restingHeartRate
+                            presentation: (output?.isSleepDuration == true || output?.isSleepTiming == true) ? .sleep : .restingHeartRate
                         )
                     }
                 }
@@ -222,6 +222,8 @@ private extension AnalysisRefreshFailure {
             case .outputUnavailable: "The selected output is unavailable."
             case .binaryWindowUnavailable: "Yes/no analyses use the complete preceding day."
             case .binaryInteractionUnavailable: "Interactions with yes/no variables are unavailable."
+            case .clockWindowUnavailable: "Clock analyses use the complete preceding day."
+            case .clockInteractionUnavailable: "Interactions with clock times are unavailable."
             case .countWindowUnavailable: "Count analyses use the complete preceding day."
             case .countInteractionUnavailable: "Interactions with counts are unavailable."
             case .manualLogUnavailable: "Couldn’t open the daily log."

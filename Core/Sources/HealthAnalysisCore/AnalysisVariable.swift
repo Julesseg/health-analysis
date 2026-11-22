@@ -13,23 +13,32 @@ public struct AnalysisVariable: Codable, Equatable, Identifiable, Sendable {
     public var supportsInput: Bool {
         switch id {
         case .manualQuantity: true
-        case .manualTyped: kind == .tracked(.count) || kind == .tracked(.yesNo)
-        case .health: false
+        case .manualTyped: kind == .tracked(.count) || kind == .tracked(.yesNo) || kind == .tracked(.timeOfDay)
+        case .health, .sleepTiming: false
         }
     }
 
     public var supportsOutput: Bool {
         switch id {
         case .manualQuantity: false
-        case .manualTyped: kind == .tracked(.count) || kind == .tracked(.yesNo)
+        case .manualTyped: kind == .tracked(.count) || kind == .tracked(.yesNo) || kind == .tracked(.timeOfDay)
+        case .sleepTiming: true
         case .health(let metric, _): metric == .restingHeartRate || metric == .sleepAnalysis
         }
+    }
+
+    static func sleepTiming(_ timing: SleepTiming, sourceID: String?) -> Self {
+        .init(
+            id: .sleepTiming(timing, sourceBundleIdentifier: sourceID),
+            name: timing == .onset ? "Sleep onset time" : "Wake time", kind: .tracked(.timeOfDay)
+        )
     }
 
     var unit: String {
         switch kind {
         case .quantity(let unit): unit
         case .tracked(.count): "count"
+        case .tracked(.timeOfDay): "min"
         case .tracked: ""
         }
     }
@@ -40,7 +49,8 @@ extension HealthAnalysisApplication {
         [
             .init(id: .health(metric: .restingHeartRate), name: "Resting heart rate", kind: .quantity(unit: "bpm")),
             .init(id: .health(metric: .sleepAnalysis), name: "Sleep duration", kind: .quantity(unit: "h"))
-        ] + manualAnalysisSeries.map(\.variable)
+        ] + SleepTiming.allCases.map { AnalysisVariable.sleepTiming($0, sourceID: nil) }
+            + manualAnalysisSeries.map(\.variable)
     }
 
     @MainActor var manualAnalysisSeries: [ManualAnalysisSeries] {
@@ -82,6 +92,8 @@ enum ManualAnalysisSeries {
                 return Sample(value: Double(count), origin: origin, trackingValue: value)
             case (.yesNo, .yesNo(let isYes)):
                 return Sample(value: BinaryEvent.encode(isYes), origin: origin, trackingValue: value)
+            case (.timeOfDay, .timeOfDay(let time, _)) where variable.kind.accepts(value):
+                return Sample(value: Double(time.hour * 60 + time.minute), origin: origin, trackingValue: value)
             default:
                 return nil
             }

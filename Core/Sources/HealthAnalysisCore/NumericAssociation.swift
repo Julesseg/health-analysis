@@ -17,6 +17,7 @@ public struct AnalysisEstimate: Codable, Sendable {
         case difference
         case proportionalCountChange
         case probabilityDifference
+        case clockMinutesDifference
     }
 
     public var scale: Scale { storedScale ?? .difference }
@@ -75,6 +76,13 @@ public struct AnalysisEvidence: Codable, Sendable {
         case binaryModelUnavailable
         case binaryModelLimitations
         case adjustedModelLimitations
+        case clockIntervalUnavailable(Set<AnalysisSeriesID>)
+        case limitedRecordedClockVariation(Set<AnalysisSeriesID>)
+        case clockIncrementUnavailable(Set<AnalysisSeriesID>)
+
+        case clockModelLimitations
+        case approximateClockEntries
+        case sleepTimeZoneFallback
         case collinearInputs(Set<AnalysisSeriesID>)
         case defaultOnlyInputs(Set<AnalysisSeriesID>)
         case lowVariationInputs(Set<AnalysisSeriesID>)

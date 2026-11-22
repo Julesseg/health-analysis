@@ -16,6 +16,7 @@ public struct AnalysisInspection: Codable, Sendable {
         public let missingInputs: [MissingInput]
         public internal(set) var origin: ManualValueOrigin? = nil
         public internal(set) var trackingValue: ManualTrackingValue? = nil
+        public internal(set) var sleepTimeZoneEvidence: SleepEpisode.TimeZoneEvidence? = nil
     }
 
     public let unpairedOutputs: [OutputWithoutPair]
@@ -31,6 +32,12 @@ public struct AnalysisOutputEvidence: Identifiable, Sendable {
     public let origin: ManualValueOrigin?
     public let trackingValue: ManualTrackingValue?
     public let paired: Bool
+    public let sleepTimeZoneEvidence: SleepEpisode.TimeZoneEvidence?
+
+    public var clockPrecision: ManualClockPrecision? {
+        if case .timeOfDay(_, let precision)? = trackingValue { return precision }
+        return nil
+    }
 
     public var isObserved: Bool { origin == nil || origin == .observation }
 }
@@ -42,6 +49,8 @@ public struct AnalysisInputEvidence: Sendable {
         public let outputValue: Double
         public let outputOrigin: ManualValueOrigin?
         public let outputTrackingValue: ManualTrackingValue?
+        public let outputAnchor: Date
+        public let sleepTimeZoneEvidence: SleepEpisode.TimeZoneEvidence?
         public let input: AnalysisObservation.Input
 
         public var entries: [AnalysisObservation.Input.Day] {
@@ -78,13 +87,15 @@ extension AnalysisResult {
         let paired = observations.map {
             AnalysisOutputEvidence(
                 date: $0.outputDate, anchor: $0.outputAnchor, value: $0.outputValue, source: outputSource,
-                origin: $0.outputOrigin, trackingValue: $0.outputTrackingValue, paired: true
+                origin: $0.outputOrigin, trackingValue: $0.outputTrackingValue, paired: true,
+                sleepTimeZoneEvidence: $0.sleepTimeZoneEvidence
             )
         }
         let unpaired = (inspection?.unpairedOutputs ?? []).map {
             AnalysisOutputEvidence(
                 date: $0.date, anchor: $0.anchor, value: $0.value, source: $0.source,
-                origin: $0.origin, trackingValue: $0.trackingValue, paired: false
+                origin: $0.origin, trackingValue: $0.trackingValue, paired: false,
+                sleepTimeZoneEvidence: $0.sleepTimeZoneEvidence
             )
         }
         return (paired + unpaired).sorted { $0.date < $1.date }
@@ -95,7 +106,8 @@ extension AnalysisResult {
             guard let input = row.inputs.first(where: { $0.series == series }) else { return nil }
             return .init(
                 outputDate: row.outputDate, outputValue: row.outputValue,
-                outputOrigin: row.outputOrigin, outputTrackingValue: row.outputTrackingValue, input: input
+                outputOrigin: row.outputOrigin, outputTrackingValue: row.outputTrackingValue,
+                outputAnchor: row.outputAnchor, sleepTimeZoneEvidence: row.sleepTimeZoneEvidence, input: input
             )
         })
     }

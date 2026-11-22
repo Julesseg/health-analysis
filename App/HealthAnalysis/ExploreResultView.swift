@@ -12,6 +12,17 @@ struct ExploreResultView<Status: View>: View {
 
     var body: some View {
         findings
+        if let intervals = result.clockIntervals, !intervals.isEmpty {
+            Section("Fitted clock intervals") {
+                ForEach(intervals) { interval in
+                    LabeledContent {
+                        Text("\(analysisClockText(Double(interval.startMinute))) to \(analysisClockText(Double(interval.endMinute)))")
+                    } label: {
+                        application.analysisSeriesTitle(interval.series)
+                    }
+                }
+            }
+        }
         if result.lastHealthReadFailure != nil {
             Section {
                 Text("The latest Health check failed. This analysis uses earlier imported measurements.")
@@ -225,6 +236,9 @@ private struct AnalysisReasonRows: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(reason.description(isSleepDuration: result.configuration.output.isSleepDuration, isYesNoOutput: result.outputVariable?.kind == .tracked(.yesNo)))
+            if reason.affectedInputs.contains(result.configuration.output) {
+                result.analysisOutputTitle
+            }
             ForEach(result.modeledInputs.filter { reason.affectedInputs.contains($0.series) }) { input in
                 input.choiceLabel
             }
@@ -251,6 +265,7 @@ private struct EstimateChart: View {
     private var upper: Double { estimate.interval.upperBound * scale }
     private var axisLabel: LocalizedStringKey {
         if estimate.scale == .probabilityDifference { return "Difference in Yes probability (percentage points)" }
+        if estimate.scale == .clockMinutesDifference { return "Difference in local clock time (minutes)" }
         if estimate.scale == .proportionalCountChange { return "Change in expected daily count" }
         return isSleepDuration ? "Difference in sleep duration (minutes)" : "Difference in resting heart rate (bpm)"
     }
@@ -313,7 +328,7 @@ private struct EstimateChart: View {
     private var estimateAccessibilityValue: Text {
         let direction = Text(estimate.finding.description(isSleepDuration: isSleepDuration, output: output, input: input))
         let interval = intervalLabel(estimate, isSleepDuration: isSleepDuration)
-        if estimate.scale != .difference || input.kind == .tracked(.count) || input.kind == .tracked(.yesNo) {
+        if estimate.scale != .difference || input.kind == .tracked(.count) || input.kind == .tracked(.yesNo) || input.isClock {
             let effect = estimateLabel(estimate, input: input, isSleepDuration: isSleepDuration)
             return Text("\(direction) \(effect). Dependence-adjusted interval \(interval).")
         }
@@ -336,12 +351,30 @@ func estimateLabel(_ estimate: AnalysisEstimate, input: AnalysisModeledInput, is
         if yesNoInput {
             return Text("\(points, format: estimateNumber) percentage points in the probability of Yes (Yes versus No)")
         }
+        if input.isClock {
+            return Text("\(points, format: estimateNumber) percentage points in the probability of Yes per hour later")
+        }
         if countInput {
             return Text("\(points, format: estimateNumber) percentage points in the probability of Yes per additional event")
         }
         return Text("\(points, format: estimateNumber) percentage points in the probability of Yes per \(estimate.inputIncrement, format: .number) \(input.unit) increase")
     }
+    if estimate.scale == .clockMinutesDifference {
+        if input.isClock {
+            return Text("\(estimate.difference, format: estimateNumber) minutes per hour later")
+        }
+        if yesNoInput {
+            return Text("\(estimate.difference, format: estimateNumber) minutes for Yes versus No")
+        }
+        if countInput {
+            return Text("\(estimate.difference, format: estimateNumber) minutes per additional event")
+        }
+        return Text("\(estimate.difference, format: estimateNumber) minutes per \(estimate.inputIncrement, format: .number) \(input.unit) increase")
+    }
     if estimate.scale == .proportionalCountChange {
+        if input.isClock {
+            return Text("\(estimate.difference, format: countPercent) change in expected daily count per hour later")
+        }
         if yesNoInput {
             return Text("\(estimate.difference, format: countPercent) change in expected daily count for Yes versus No")
         }
@@ -349,6 +382,12 @@ func estimateLabel(_ estimate: AnalysisEstimate, input: AnalysisModeledInput, is
             return Text("\(estimate.difference, format: countPercent) change in expected daily count per additional event")
         }
         return Text("\(estimate.difference, format: countPercent) change in expected daily count per \(estimate.inputIncrement, format: .number) \(input.unit) increase")
+    }
+    if input.isClock {
+        if isSleepDuration {
+            return Text("\(estimate.difference * 60, format: estimateNumber) minutes per hour later")
+        }
+        return Text("\(estimate.difference, format: estimateNumber) bpm per hour later")
     }
     if isSleepDuration {
         if yesNoInput {
@@ -375,6 +414,9 @@ private func intervalLabel(_ estimate: AnalysisEstimate, isSleepDuration: Bool) 
     if estimate.scale == .proportionalCountChange {
         return String(localized: "\(estimate.interval.lowerBound, format: countPercent) to \(estimate.interval.upperBound, format: countPercent)")
     }
+    if estimate.scale == .clockMinutesDifference {
+        return String(localized: "\(estimate.interval.lowerBound, format: estimateNumber) to \(estimate.interval.upperBound, format: estimateNumber) minutes")
+    }
     if isSleepDuration {
         return String(localized: "\(estimate.interval.lowerBound * 60, format: estimateNumber) to \(estimate.interval.upperBound * 60, format: estimateNumber) minutes")
     }
@@ -383,6 +425,13 @@ private func intervalLabel(_ estimate: AnalysisEstimate, isSleepDuration: Bool) 
 
 private extension AnalysisEstimate.Finding {
     func description(isSleepDuration: Bool, output: AnalysisVariable?, input: AnalysisModeledInput) -> LocalizedStringKey {
+        if output?.kind == .tracked(.timeOfDay) {
+            switch self {
+            case .higher: return "The model estimates a later output time."
+            case .lower: return "The model estimates an earlier output time."
+            case .nearZero, .uncertain: break
+            }
+        }
         if let output, output.kind == .tracked(.yesNo) {
             switch self {
             case .higher: return "The model estimates a higher probability of Yes for \(output.name) in this comparison."
@@ -437,6 +486,7 @@ private extension AnalysisEvidence.Grade {
 private extension AnalysisEstimate.Scale {
     var accessibilityIdentifier: String {
         switch self {
+        case .clockMinutesDifference: "explore.clockEffect"
         case .difference: "explore.effect"
         case .proportionalCountChange: "explore.countEffect"
         case .probabilityDifference: "explore.binaryEffect"
@@ -491,6 +541,12 @@ private extension AnalysisEvidence.Reason {
         case .collinearInputs: "These inputs vary together too closely to estimate their separate associations."
         case .defaultOnlyInputs: "These inputs only have defaults on paired days."
         case .lowVariationInputs: "These inputs vary too little on paired days."
+        case .clockIntervalUnavailable: "These times do not fit within a single clock interval shorter than 12 hours."
+        case .limitedRecordedClockVariation: "Each clock field needs at least 12 paired observations and at least 30 minutes between its recorded quartiles."
+        case .clockIncrementUnavailable: "A clock input needs recorded times at least one hour apart."
+        case .clockModelLimitations: "The model compares earlier and later times within each fitted clock interval."
+        case .approximateClockEntries: "Some paired times are approximate. The uncertainty interval does not account for recall error."
+        case .sleepTimeZoneFallback: "Some sleep times use the time zone at import because the samples lack usable time zone metadata."
         case .poorlyRepresentedInteraction: "Too few fully recorded windows support the lower and higher combinations."
         }
     }
@@ -498,6 +554,7 @@ private extension AnalysisEvidence.Reason {
     var affectedInputs: Set<AnalysisSeriesID> {
         switch self {
         case .collinearInputs(let inputs), .defaultOnlyInputs(let inputs), .lowVariationInputs(let inputs),
+             .clockIntervalUnavailable(let inputs), .limitedRecordedClockVariation(let inputs), .clockIncrementUnavailable(let inputs),
              .sparseBinaryCombinations(let inputs), .binaryContrastUnavailable(let inputs): inputs
         default: []
         }

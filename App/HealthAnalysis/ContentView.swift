@@ -72,11 +72,7 @@ struct ContentView: View {
                     Text("No discoveries yet")
                 }
             }
-            if !overview.hasReadableMeasurements {
-                Section("Latest measurements") {
-                    Text("No readable measurements")
-                }
-            }
+            LatestHealthMeasurementsSection(history: application.healthMeasurements)
         }
     }
 
@@ -88,16 +84,14 @@ struct ContentView: View {
                 systemImage: "magnifyingglass",
                 description: Text("Explore uses readable measurements and manually tracked variables.")
             )
+        } else if overview.hasReadableMeasurements {
+            ContentUnavailableView("No analyses available yet", systemImage: "magnifyingglass")
         }
     }
 
     private var data: some View {
         List {
-            if !overview.hasReadableMeasurements {
-                Section("Health measurements") {
-                    Text("No readable measurements")
-                }
-            }
+            HealthMeasurementsSection(history: application.healthMeasurements)
             if !overview.hasTrackingVariables {
                 Section("Daily log") {
                     Text("No tracking variables")

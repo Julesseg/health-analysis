@@ -6,11 +6,15 @@ public struct HealthAnalysisApplication: Sendable {
         public let hasDiscoveries: Bool
     }
 
-    public let overview: Overview
+    public let healthMeasurements: HealthMeasurementHistory
 
-    public init() {
-        overview = Overview(
-            hasReadableMeasurements: false,
+    public init(healthSource: (any HealthMeasurementSource)? = nil) {
+        healthMeasurements = HealthMeasurementHistory(source: healthSource)
+    }
+
+    @MainActor public var overview: Overview {
+        Overview(
+            hasReadableMeasurements: !healthMeasurements.history.isEmpty,
             hasTrackingVariables: false,
             hasFollowedAnalyses: false,
             hasDiscoveries: false

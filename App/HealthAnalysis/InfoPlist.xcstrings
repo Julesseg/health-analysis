@@ -1,0 +1,16 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "NSHealthShareUsageDescription": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Health Analysis reads resting heart rate to show your measurements over time."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

@@ -19,14 +19,19 @@ struct ExploreView: View {
         _analysisTimeZone = State(initialValue: editing?.configuration.timeZone ?? .current)
     }
 
-    private var quantities: [TrackingQuantity] { application.analysisNumericQuantities }
+    private var variables: [AnalysisVariable] { application.analysisVariables }
 
-    private var adjustmentChoices: [TrackingQuantity] {
-        let inputIDs = inputs.compactMap { series -> UUID? in
-            if case .manualQuantity(let id) = series { return id }
-            return nil
-        }
-        return application.analysisAdjustmentSuggestions(excluding: inputIDs)
+    private var inputChoices: [AnalysisVariable] {
+        variables.filter { $0.supportsInput && $0.id != output }
+    }
+
+    private var adjustmentChoices: [AnalysisVariable] {
+        inputChoices.filter { !inputs.contains($0.id) }
+    }
+
+    private var usesCounts: Bool {
+        let selected = inputs + adjustments + [output].compactMap { $0 }
+        return variables.contains { selected.contains($0.id) && $0.kind == .tracked(.count) }
     }
 
     private var configuration: AnalysisConfiguration? {
@@ -53,17 +58,28 @@ struct ExploreView: View {
             Section {
                 Picker("Output", selection: $output) {
                     Text("Choose output").tag(nil as AnalysisSeriesID?)
-                    let restingHeartRate = AnalysisSeriesID.health(metric: .restingHeartRate)
-                    Text("Resting heart rate").tag(restingHeartRate as AnalysisSeriesID?)
-                    if let savedOutput = editing?.configuration.output, savedOutput != restingHeartRate {
+                    let outputs = variables.filter(\.supportsOutput)
+                    ForEach(outputs) { choice in
+                        switch choice.id {
+                        case .health:
+                            application.analysisSeriesTitle(choice.id).tag(choice.id as AnalysisSeriesID?)
+                        default:
+                            choice.analysisChoiceLabel.tag(choice.id as AnalysisSeriesID?)
+                        }
+                    }
+                    if let savedOutput = editing?.configuration.output, !outputs.contains(where: { $0.id == savedOutput }) {
                         application.analysisSeriesTitle(savedOutput).tag(savedOutput as AnalysisSeriesID?)
                     }
                 }
                 .accessibilityIdentifier("explore.output")
+                .onChange(of: output) { _, selected in
+                    inputs.removeAll { $0 == selected }
+                    adjustments.removeAll { $0 == selected }
+                }
 
                 NavigationLink {
-                    ExploreQuantitySelection(
-                        title: "Inputs", quantities: quantities,
+                    ExploreInputSelection(
+                        title: "Inputs", choices: inputChoices,
                         selection: Binding(
                             get: { inputs },
                             set: { selected in
@@ -75,14 +91,14 @@ struct ExploreView: View {
                 } label: {
                     LabeledContent("Inputs") { selectionSummary(inputs) }
                 }
-                .disabled(quantities.isEmpty)
+                .disabled(inputChoices.isEmpty)
                 .accessibilityLabel("Inputs")
                 .accessibilityValue(selectionSummary(inputs))
                 .accessibilityIdentifier("explore.inputs")
 
                 NavigationLink {
-                    ExploreQuantitySelection(
-                        title: "Account for", quantities: adjustmentChoices,
+                    ExploreInputSelection(
+                        title: "Account for", choices: adjustmentChoices,
                         selection: $adjustments, showsSuggestions: true
                     )
                 } label: {
@@ -97,8 +113,11 @@ struct ExploreView: View {
                 LabeledContent("History") { Text("Full usable history") }
                     .accessibilityIdentifier("explore.history")
             } footer: {
-                if quantities.isEmpty {
-                    Text("Add a daily quantity in Settings to choose an input.")
+                if inputChoices.isEmpty {
+                    Text("Add a daily quantity or count in Settings to choose another variable.")
+                }
+                if usesCounts {
+                    Text("Interactions with counts are unavailable.")
                 }
             }
 
@@ -129,19 +148,18 @@ struct ExploreView: View {
     }
 }
 
-private struct ExploreQuantitySelection: View {
+private struct ExploreInputSelection: View {
     let title: LocalizedStringKey
-    let quantities: [TrackingQuantity]
+    let choices: [AnalysisVariable]
     @Binding var selection: [AnalysisSeriesID]
     var showsSuggestions = false
 
     var body: some View {
         Form {
             Section {
-                ForEach(quantities) { quantity in
-                    let series = AnalysisSeriesID.manualQuantity(quantity.id)
+                ForEach(choices) { choice in
+                    let series = choice.id
                     Toggle(
-                        "\(quantity.name) (\(quantity.unit))",
                         isOn: Binding(
                             get: { selection.contains(series) },
                             set: { selected in
@@ -152,13 +170,15 @@ private struct ExploreQuantitySelection: View {
                                 }
                             }
                         )
-                    )
+                    ) {
+                        choice.analysisChoiceLabel
+                    }
                 }
             } header: {
                 if showsSuggestions { Text("Suggested adjustments") }
             } footer: {
                 if showsSuggestions {
-                    Text("These are other logged quantities. Choose the ones you want to account for in this analysis.")
+                    Text("Choose other logged variables to account for in this analysis.")
                 }
             }
         }

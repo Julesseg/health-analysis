@@ -28,10 +28,11 @@ struct ExploreResultView<Status: View>: View {
         ForEach(Array(result.estimates.enumerated()), id: \.element.input) { index, estimate in
             if let input = result.modeledInputs.first(where: { $0.series == estimate.input }) {
                 Section {
-                    Text(estimate.finding.description)
+                    Text(estimate.finding.description(output: result.outputVariable))
                         .font(.headline)
-                    Text("\(estimate.difference, format: estimateNumber) bpm per \(estimate.inputIncrement, format: .number) \(input.unit) increase")
+                    estimateLabel(estimate, input: input)
                         .monospacedDigit()
+                        .accessibilityIdentifier(estimate.scale == .proportionalCountChange ? "explore.countEffect" : "explore.effect")
                     LabeledContent("Approximate 95% uncertainty interval") {
                         Text(intervalLabel(estimate))
                     }
@@ -69,7 +70,7 @@ struct ExploreResultView<Status: View>: View {
             ForEach(result.evidence.reasons, id: \.self) { reason in
                 Text(reason.description)
                 ForEach(result.modeledInputs.filter { reason.affectedInputs.contains($0.series) }) { input in
-                    Text("\(input.name) (\(input.unit))")
+                    input.choiceLabel
                 }
             }
             if let days = result.evidence.dependenceLagDays {
@@ -79,8 +80,13 @@ struct ExploreResultView<Status: View>: View {
                 Text("Each estimate accounts for the other modeled inputs and has its own uncertainty interval.")
                     .foregroundStyle(.secondary)
             }
-            Text("Other variables may also be associated with resting heart rate.")
-                .foregroundStyle(.secondary)
+            if let output = result.outputVariable {
+                Text("Other variables may also be associated with \(output.name).")
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Other variables may also be associated with resting heart rate.")
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -91,7 +97,7 @@ struct ExploreResultView<Status: View>: View {
                     Text(input.defaultDayCount, format: .number)
                 } label: {
                     VStack(alignment: .leading) {
-                        Text("\(input.name) (\(input.unit))")
+                        input.choiceLabel
                         Text(input.role == .input ? "Input" : "Adjustment input")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -102,7 +108,7 @@ struct ExploreResultView<Status: View>: View {
         } header: {
             Text("Modeled inputs")
         } footer: {
-            Text("Quantities come from the daily log. Counts show paired days using a default for each input.")
+            Text("Each input shows how many paired days used its configured default.")
         }
     }
 
@@ -122,6 +128,15 @@ struct ExploreResultView<Status: View>: View {
             LabeledContent("Paired days using a default") {
                 Text(result.evidence.defaultDayCount, format: .number)
             }
+            if let output = result.outputVariable {
+                LabeledContent("Output") { Text(output.name) }
+                LabeledContent("Paired output days using a default") {
+                    Text(result.observations.count { $0.outputOrigin != .observation }, format: .number)
+                }
+                LabeledContent("Recorded zeros for the paired output") {
+                    Text(result.observations.count { $0.outputOrigin == .observation && $0.outputValue == 0 }, format: .number)
+                }
+            }
             if let source = result.outputSource {
                 LabeledContent("Resting heart rate source") {
                     Text(source.name)
@@ -130,7 +145,7 @@ struct ExploreResultView<Status: View>: View {
             NavigationLink("Usable dates and gaps") {
                 ExploreCoverageView(result: result)
             }
-            measurementsLink
+            if result.outputVariable == nil { measurementsLink }
         }
     }
 
@@ -173,14 +188,34 @@ private struct EstimateChart: View {
             .foregroundStyle(Color.accentColor)
         }
         .chartXScale(domain: domain)
-        .chartXAxisLabel("Difference in resting heart rate (bpm)", position: .bottom, alignment: .center)
+        .chartXAxis {
+            if estimate.scale == .proportionalCountChange {
+                AxisMarks { value in
+                    AxisGridLine()
+                    AxisTick()
+                    if let fraction = value.as(Double.self) {
+                        AxisValueLabel { Text(fraction, format: countPercent) }
+                    }
+                }
+            } else {
+                AxisMarks()
+            }
+        }
+        .chartXAxisLabel(axisLabel, position: .bottom, alignment: .center)
         .chartYAxis(.hidden)
         .frame(height: 95)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Estimated difference and uncertainty for \(input.name)")
         .accessibilityValue(
-            Text("\(estimate.difference, format: estimateNumber) bpm per \(estimate.inputIncrement, format: .number) \(input.unit) increase, with an approximate 95% interval of \(intervalLabel(estimate)).")
+            Text("\(estimateLabel(estimate, input: input)), with an approximate 95% interval of \(intervalLabel(estimate)).")
         )
+    }
+
+    private var axisLabel: LocalizedStringKey {
+        switch estimate.scale {
+        case .difference: "Difference in resting heart rate (bpm)"
+        case .proportionalCountChange: "Change in expected daily count"
+        }
     }
 }
 
@@ -188,11 +223,20 @@ private struct ExploreCoverageView: View {
     let result: AnalysisResult
 
     private var timeZone: TimeZone { result.configuration.timeZone }
+    private var hasStoredCounts: Bool {
+        result.outputVariable?.kind == .tracked(.count) || result.modeledInputs.contains { $0.kind == .tracked(.count) }
+    }
 
     var body: some View {
         List {
             Section("Question") {
-                LabeledContent("Output") { Text("Resting heart rate") }
+                LabeledContent("Output") {
+                    if let output = result.outputVariable {
+                        Text(output.name)
+                    } else {
+                        Text("Resting heart rate")
+                    }
+                }
                 LabeledContent("Behavior window") { Text("Complete preceding day") }
                 LabeledContent("History") { Text("Full usable history") }
                 LabeledContent("Analysis time zone") {
@@ -208,7 +252,11 @@ private struct ExploreCoverageView: View {
                         Text(source.bundleIdentifier)
                     }
                 }
-                Text("Each pair uses a complete input window before the resting heart rate sample began.")
+                if result.outputVariable != nil {
+                    Text("Each pair uses counts from a completed output day and inputs from before that day began.")
+                } else {
+                    Text("Each pair uses a complete input window before the resting heart rate sample began.")
+                }
             }
 
             Section("Gaps") {
@@ -227,8 +275,17 @@ private struct ExploreCoverageView: View {
                 if result.coverage.usableDates.isEmpty {
                     Text("No paired days.")
                 }
-                ForEach(result.coverage.usableDates, id: \.self) { date in
-                    AnalysisDateRange(first: date, last: date, timeZone: timeZone)
+                ForEach(result.observations) { observation in
+                    let date = observation.outputDate
+                    if hasStoredCounts {
+                        NavigationLink {
+                            CountObservationView(result: result, observation: observation)
+                        } label: {
+                            AnalysisDateRange(first: date, last: date, timeZone: timeZone)
+                        }
+                    } else {
+                        AnalysisDateRange(first: date, last: date, timeZone: timeZone)
+                    }
                 }
             }
         }
@@ -259,13 +316,50 @@ private struct AnalysisDateRange: View {
 
 private let estimateNumber = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(0...2))
 
+private let countPercent = FloatingPointFormatStyle<Double>.Percent.percent.precision(.fractionLength(0...2))
+
+private func estimateLabel(_ estimate: AnalysisEstimate, input: AnalysisModeledInput) -> Text {
+    switch (estimate.scale, input.kind) {
+    case (.proportionalCountChange, .tracked(.count)):
+        Text("\(estimate.difference, format: countPercent) in expected daily count per additional event")
+    case (.proportionalCountChange, _):
+        Text("\(estimate.difference, format: countPercent) in expected daily count per \(estimate.inputIncrement, format: .number) \(input.unit) increase")
+    case (.difference, .tracked(.count)):
+        Text("\(estimate.difference, format: estimateNumber) bpm per additional event")
+    case (.difference, _):
+        Text("\(estimate.difference, format: estimateNumber) bpm per \(estimate.inputIncrement, format: .number) \(input.unit) increase")
+    }
+}
+
 private func intervalLabel(_ estimate: AnalysisEstimate) -> String {
-    String(localized: "\(estimate.interval.lowerBound, format: estimateNumber) to \(estimate.interval.upperBound, format: estimateNumber) bpm")
+    switch estimate.scale {
+    case .difference:
+        String(localized: "\(estimate.interval.lowerBound, format: estimateNumber) to \(estimate.interval.upperBound, format: estimateNumber) bpm")
+    case .proportionalCountChange:
+        String(localized: "\(estimate.interval.lowerBound, format: countPercent) to \(estimate.interval.upperBound, format: countPercent)")
+    }
+}
+
+private extension AnalysisModeledInput {
+    var choiceLabel: Text {
+        if kind == .tracked(.count) {
+            Text("\(name) (count)")
+        } else {
+            Text("\(name) (\(unit))")
+        }
+    }
 }
 
 private extension AnalysisEstimate.Finding {
-    var description: LocalizedStringKey {
-        switch self {
+    func description(output: AnalysisVariable?) -> LocalizedStringKey {
+        if let output {
+            switch self {
+            case .higher: return "Higher values were associated with a higher daily count for \(output.name)."
+            case .lower: return "Higher values were associated with a lower daily count for \(output.name)."
+            case .nearZero, .uncertain: break
+            }
+        }
+        return switch self {
         case .higher: "Higher values were associated with higher resting heart rate."
         case .lower: "Higher values were associated with lower resting heart rate."
         case .nearZero: "The estimated association was close to zero."
@@ -289,6 +383,7 @@ private extension AnalysisModel {
         switch self {
         case .caffeineLinearV1: "Single-input linear association"
         case .numericLinearV1: "Numeric linear regression"
+        case .countLogLinearV1: "Poisson regression for daily counts"
         }
     }
 }
@@ -303,10 +398,15 @@ private extension AnalysisEvidence.Reason {
         case .uncertaintyUnavailable: "The paired values could not support a usable uncertainty interval."
         case .limitedHistory: "The analysis uses fewer than 90 paired days."
         case .sparseCoverage: "Fewer than three quarters of days in the usable history had a pair."
-        case .manyDefaults: "More than one quarter of paired days used at least one assumed input."
+        case .manyDefaults: "More than one quarter of paired days used at least one assumed value."
         case .wideInterval: "The uncertainty interval spans more than 2 bpm for the reported increment."
-        case .indeterminateInterval: "An interval includes zero and allows differences away from zero."
+        case .indeterminateInterval: "An interval includes no change and also allows an increase or decrease."
         case .adequateCoverageAndPrecision: "The analysis has at least 90 paired days, good overlap, limited default use, and a narrow interval."
+        case .defaultOnlyOutput: "Every paired output count comes from a default."
+        case .lowVariationOutput: "Recorded output counts do not vary on paired days."
+        case .sparseObservedCountOutput: "Too few recorded output counts show repeated variation and nonzero counts."
+        case .countModelUnavailable: "The count model could not estimate a stable association. Some input values may only occur with zero output counts."
+        case .countModelLimitations: "The model assumes a constant proportional change per input increment. Longer dependence, unmeasured variables, and default values can affect the estimate."
         case .adjustedModelLimitations: "Evidence is limited to this history and the variables included in the model."
         case .collinearInputs: "These inputs vary together too closely to estimate their separate associations."
         case .defaultOnlyInputs: "These inputs only have defaults on paired days."

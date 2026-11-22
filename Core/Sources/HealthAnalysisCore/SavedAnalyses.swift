@@ -68,7 +68,7 @@ public final class SavedAnalyses {
     }
 
     public var questions: [SavedAnalysis] { snapshot?.questions ?? [] }
-    public var following: [SavedAnalysis] { (snapshot?.pinnedIDs ?? []).compactMap(question(id:)) }
+    public var following: [SavedAnalysis] { (snapshot?.pinnedIDs ?? []).compactMap { question(id: $0) } }
 
     public func question(id: SavedAnalysis.ID) -> SavedAnalysis? {
         questions.first { $0.id == id }

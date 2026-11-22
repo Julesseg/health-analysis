@@ -59,6 +59,12 @@ extension HealthAnalysisApplication {
             } else {
                 return Text("Unavailable quantity")
             }
+        case .manualTyped:
+            if let variable = analysisVariables.first(where: { $0.id == series }) {
+                return Text(variable.name)
+            } else {
+                return Text("Unavailable tracking variable")
+            }
         case .health(let metric, let sourceID):
             if let presentation = HealthMetricPresentation.supported.first(where: { $0.metric == metric }) {
                 if let sourceID {

@@ -8,11 +8,19 @@ public struct AnalysisEstimate: Codable, Sendable {
         case uncertain
     }
 
+    public enum Scale: String, Codable, Sendable {
+        case difference
+        case proportionalCountChange
+    }
+
+    public var scale: Scale { storedScale ?? .difference }
+
     public let input: AnalysisSeriesID
     public let inputIncrement: Double
     public let difference: Double
     public let interval: ClosedRange<Double>
     public let finding: Finding
+    var storedScale: Scale? = nil
 }
 
 public struct AnalysisEvidence: Codable, Sendable {
@@ -34,6 +42,11 @@ public struct AnalysisEvidence: Codable, Sendable {
         case wideInterval
         case indeterminateInterval
         case adequateCoverageAndPrecision
+        case defaultOnlyOutput
+        case lowVariationOutput
+        case sparseObservedCountOutput
+        case countModelUnavailable
+        case countModelLimitations
         case adjustedModelLimitations
         case collinearInputs(Set<AnalysisSeriesID>)
         case defaultOnlyInputs(Set<AnalysisSeriesID>)

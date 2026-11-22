@@ -117,7 +117,7 @@ public struct HealthMeasurementChanges: Sendable {
     }
 }
 
-public enum HealthMeasurementReadFailure: Error, Equatable {
+public enum HealthMeasurementReadFailure: Error, Equatable, Codable {
     case unavailable
     case protectedData
     case request

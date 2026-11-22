@@ -2,37 +2,19 @@ import Charts
 import HealthAnalysisCore
 import SwiftUI
 
-struct ExploreResultView: View {
+struct ExploreResultView<Status: View>: View {
     let application: HealthAnalysisApplication
-    let configuration: AnalysisConfiguration
+    let result: AnalysisResult
+    @ViewBuilder let status: () -> Status
 
-    @State private var run: Result<AnalysisResult, AnalysisRunFailure>?
-
-    private var isSleepDuration: Bool { configuration.output.isSleepDuration }
+    private var isSleepDuration: Bool { result.configuration.output.isSleepDuration }
 
     var body: some View {
-        List {
-            switch run {
-            case .success(let result):
-                findings(result)
-                evidence(result)
-                modeledInputs(result)
-                coverage(result)
-            case .failure(let failure):
-                Section {
-                    Text(failure.description)
-                    Button("Retry", action: analyze)
-                    measurementsLink
-                }
-            case nil:
-                ProgressView("Analyzing…")
-            }
-        }
-        .navigationTitle("Analysis result")
-        .navigationBarTitleDisplayMode(.inline)
-        .task {
-            if run == nil { analyze() }
-        }
+        findings(result)
+        status()
+        evidence(result)
+        modeledInputs(result)
+        coverage(result)
     }
 
     @ViewBuilder
@@ -142,7 +124,7 @@ struct ExploreResultView: View {
             }
             if let first = result.coverage.firstDate, let last = result.coverage.lastDate {
                 LabeledContent("Usable history") {
-                    AnalysisDateRange(first: first, last: last, timeZone: configuration.timeZone)
+                    AnalysisDateRange(first: first, last: last, timeZone: result.configuration.timeZone)
                 }
                 LabeledContent("Days without a usable pair in this range") {
                     Text(result.coverage.missingDays, format: .number)
@@ -168,14 +150,6 @@ struct ExploreResultView: View {
             HealthMeasurementHistoryView(
                 history: application.healthMeasurements, presentation: isSleepDuration ? .sleep : .restingHeartRate
             )
-        }
-    }
-
-    private func analyze() {
-        do {
-            run = .success(try application.analyze(configuration))
-        } catch {
-            run = .failure(error)
         }
     }
 }
@@ -243,9 +217,9 @@ private struct EstimateChart: View {
     private var accessibilityValue: Text {
         let interval = intervalLabel(estimate, isSleepDuration: isSleepDuration)
         if isSleepDuration {
-            return Text("\(estimate.difference * scale, format: estimateNumber) minutes. Dependence-adjusted interval \(interval).")
+            return Text("\(estimate.difference * scale, format: estimateNumber) minutes per \(estimate.inputIncrement, format: .number) \(input.unit) increase. Dependence-adjusted interval \(interval).")
         }
-        return Text("\(estimate.difference, format: estimateNumber) beats per minute. Dependence-adjusted interval \(interval).")
+        return Text("\(estimate.difference, format: estimateNumber) beats per minute per \(estimate.inputIncrement, format: .number) \(input.unit) increase. Dependence-adjusted interval \(interval).")
     }
 }
 
@@ -352,13 +326,6 @@ private func intervalLabel(_ estimate: AnalysisEstimate, isSleepDuration: Bool) 
     return String(localized: "\(estimate.interval.lowerBound, format: estimateNumber) to \(estimate.interval.upperBound, format: estimateNumber) bpm")
 }
 
-private extension AnalysisSeriesID {
-    var isSleepDuration: Bool {
-        if case .health(metric: .sleepAnalysis, _) = self { return true }
-        return false
-    }
-}
-
 private extension AnalysisEstimate.Finding {
     func description(isSleepDuration: Bool) -> LocalizedStringKey {
         switch (self, isSleepDuration) {
@@ -421,19 +388,6 @@ private extension AnalysisEvidence.Reason {
         switch self {
         case .collinearInputs(let inputs), .defaultOnlyInputs(let inputs), .lowVariationInputs(let inputs): inputs
         default: []
-        }
-    }
-}
-
-private extension AnalysisRunFailure {
-    var description: LocalizedStringKey {
-        switch self {
-        case .unsupportedConfiguration: "This analysis configuration is unavailable."
-        case .inputUnavailable: "A selected quantity is unavailable."
-        case .manualLogUnavailable: "Couldn’t open the daily log."
-        case .chooseOutputSource: "Choose a preferred source for this output in Health measurements."
-        case .healthHistoryUnavailable: "Couldn’t use Health history. Check Health measurements and try again."
-        case .healthHistoryLoading: "Health measurements are still being checked. Try again when the check finishes."
         }
     }
 }

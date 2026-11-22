@@ -29,7 +29,7 @@ final class ExploreAnalysisUITests: XCTestCase {
         inputs.tap()
         let caffeine = app.switches["Caffeine (mg)"]
         XCTAssertTrue(caffeine.waitForExistence(timeout: 5))
-        caffeine.tap()
+        caffeine.tapExploreSwitch()
         app.navigationBars["Inputs"].buttons.firstMatch.tap()
 
         let analyze = app.buttons["Analyze"]
@@ -99,7 +99,7 @@ final class ExploreAnalysisUITests: XCTestCase {
         for label in ["Caffeine (mg)", "Fluids (L)", "Exercise log (min)"] {
             let choice = app.switches[label]
             XCTAssertTrue(choice.waitForExistence(timeout: 5))
-            choice.tap()
+            choice.tapExploreSwitch()
         }
         app.navigationBars["Inputs"].buttons.firstMatch.tap()
 
@@ -108,7 +108,7 @@ final class ExploreAnalysisUITests: XCTestCase {
         let supplement = app.switches["Supplement (mg)"]
         XCTAssertTrue(supplement.waitForExistence(timeout: 5))
         XCTAssertFalse(app.switches["Caffeine (mg)"].exists)
-        supplement.tap()
+        supplement.tapExploreSwitch()
         app.navigationBars["Account for"].buttons.firstMatch.tap()
 
         let analyze = app.buttons["Analyze"]
@@ -123,8 +123,16 @@ final class ExploreAnalysisUITests: XCTestCase {
         for _ in 0..<3 where !accountFor.isHittable { app.swipeDown() }
         accountFor.tap()
         XCTAssertEqual(supplement.value as? String, "1")
-        supplement.tap()
+        supplement.tapExploreSwitch()
         app.navigationBars["Account for"].buttons.firstMatch.tap()
         XCTAssertTrue(accountFor.label.contains("None") || (accountFor.value as? String)?.contains("None") == true)
+    }
+}
+
+extension XCUIElement {
+    @MainActor
+    func tapExploreSwitch() {
+        let control = switches.firstMatch
+        (control.exists ? control : self).tap()
     }
 }

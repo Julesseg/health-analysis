@@ -138,7 +138,6 @@ struct AdjustedAnalysisTests {
             #expect((0.90...0.995).contains(Double(hits[index]) / Double(trials)))
             #expect(widths[index] / Double(trials) < 2)
         }
-        print("Adjusted \(window) coverage \(hits) / \(trials); widths \(widths.map { $0 / Double(trials) })")
     }
 
     private func simulate(

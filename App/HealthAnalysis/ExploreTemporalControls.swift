@@ -1,6 +1,13 @@
 import HealthAnalysisCore
 import SwiftUI
 
+extension AnalysisSeriesID {
+    var isSleepDuration: Bool {
+        if case .health(metric: .sleepAnalysis, _) = self { return true }
+        return false
+    }
+}
+
 struct ExploreTemporalControls: View {
     @Binding var behaviorWindow: AnalysisBehaviorWindow
     @Binding var history: AnalysisPeriod

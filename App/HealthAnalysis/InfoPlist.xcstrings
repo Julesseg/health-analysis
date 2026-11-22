@@ -6,7 +6,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Health Analysis reads your resting heart rate, sleep, workouts, and workout distance to show your history over time."
+            "value": "Health Analysis reads your resting heart rate, heart rate variability, sleep, workouts, and workout distance to show your history over time."
           }
         }
       }

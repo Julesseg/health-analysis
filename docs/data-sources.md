@@ -38,3 +38,18 @@ Its App Store history mentions automatic Garmin history sync and background sync
 - Check sleep duration, timing, resting heart rate, and activity coverage in Apple Health before enabling the initial presets.
 
 Public documentation can establish intended behavior. Stored-record checks are needed to establish what the user's installation actually supplies.
+
+## On-device HRV inspection for #10
+
+On a signed iPhone build, request read access under **Data → Health access and sources**. Open **Data → Heart rate variability**, refresh, and open a saving source under each HealthKit type. RMSSD reads require iOS 27 or later. Coverage counts imported records and calendar days with a sample start for each stored type and saver.
+
+Open a sample to inspect the value in milliseconds, its start and end, any recorded time zone, the HealthKit value count, saver identity and revision, available device metadata, and sample UUID and sync identity/version where present. Sample duration and the HealthKit value count describe the saved object. The app marks the original HRV measure and summary as unverified and gates analysis until they are established.
+
+Xcode account and provisioning blocked signed physical verification. The following evidence from the user's installation is still unavailable.
+
+- Which stored type or types Livity writes, the saving bundle and revision, any original-device metadata, and the values and unit reported by the signed app.
+- Comparison across representative nights against Garmin's overnight average, five-minute readings, highest five-minute average, and seven-day average, including how HealthKit timestamps, time zones, and records per night relate to those summaries.
+- Actual readable history, backfill bounds, gaps, and lag between a Garmin reading and its appearance in Apple Health.
+- Whether repeated syncs produce distinct UUIDs for the same reading or whether real corrections change values, sync versions, or UUIDs. Compare the current records before and after a resync or correction where one occurs.
+
+Compare records on the phone. If documenting the verification, record the mapping, scope, and conclusions without copying individual health values, sample identifiers, or screenshots off the device.

@@ -129,7 +129,10 @@ public final class HealthMeasurementHistory {
         if metric == .sleepAnalysis {
             return SleepDerivation.coverage(for: sleepEpisodes)
         }
-        let records = measurements(for: metric)
+        return Self.sampleCoverage(records: measurements(for: metric), calendar: calendar)
+    }
+
+    static func sampleCoverage(records: [HealthMeasurement], calendar: Calendar) -> Coverage? {
         guard let first = records.last?.startDate, let latest = records.first?.startDate else { return nil }
         let measuredDays = Set(records.map { calendar.startOfDay(for: $0.startDate) }).count
         let firstDay = calendar.startOfDay(for: first)

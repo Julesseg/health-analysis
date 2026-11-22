@@ -17,6 +17,7 @@ enum HealthMeasurementUIFixture: String {
             .appending(path: "measurements.json", directoryHint: .notDirectory)
         if name == "workouts" { return (WorkoutUIFixture(), url) }
         if name == "sleepHistory" { return (SleepHistoryUIFixture(), url) }
+        if name == "hrv" { return (HRVUIFixture(), url) }
         guard let fixture = Self(rawValue: name) else { return nil }
         return (Source(fixture: fixture), url)
     }

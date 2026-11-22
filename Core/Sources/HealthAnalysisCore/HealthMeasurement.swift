@@ -13,6 +13,7 @@ public struct HealthMeasurement: Codable, Equatable, Identifiable, Sendable {
 
     public enum Unit: String, Codable, Sendable {
         case beatsPerMinute
+        case milliseconds
         case sleepStage
     }
 
@@ -47,6 +48,7 @@ public struct HealthMeasurement: Codable, Equatable, Identifiable, Sendable {
     public let source: Source
     public let timeZoneIdentifier: String?
     public let sourceRevision: SourceRevision?
+    public let hrvProvenance: HRVProvenance?
 
     public init(
         id: UUID,
@@ -72,7 +74,8 @@ public struct HealthMeasurement: Codable, Equatable, Identifiable, Sendable {
         endDate: Date,
         source: Source,
         timeZoneIdentifier: String?,
-        sourceRevision: SourceRevision? = nil
+        sourceRevision: SourceRevision? = nil,
+        hrvProvenance: HRVProvenance? = nil
     ) {
         self.id = id
         self.metric = metric
@@ -83,6 +86,7 @@ public struct HealthMeasurement: Codable, Equatable, Identifiable, Sendable {
         self.source = source
         self.timeZoneIdentifier = timeZoneIdentifier
         self.sourceRevision = sourceRevision
+        self.hrvProvenance = hrvProvenance
     }
 }
 

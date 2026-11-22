@@ -1,3 +1,4 @@
+import Foundation
 import HealthAnalysisCore
 import SwiftUI
 
@@ -33,6 +34,9 @@ struct HealthMeasurementsSection: View {
                 NavigationLink(presentation.title) {
                     HealthMeasurementHistoryView(history: history, presentation: presentation)
                 }
+            }
+            NavigationLink("Heart rate variability") {
+                HRVHistoryView(history: history)
             }
             NavigationLink("Health access and sources") {
                 HealthAccessAndSourcesView(history: history)
@@ -108,14 +112,7 @@ struct HealthMeasurementRow: View {
                 Text(metricTitle)
                     .font(.headline)
             }
-            let format = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(0...2))
-            switch measurement.unit {
-            case .beatsPerMinute:
-                Text("\(measurement.value, format: format) bpm")
-                    .accessibilityLabel(Text("\(measurement.value, format: format) beats per minute"))
-            case .sleepStage:
-                Text(measurement.value, format: format)
-            }
+            HealthMeasurementValue(measurement: measurement)
             let timestamp = Date.FormatStyle.dateTime.year().month(.abbreviated).day().hour().minute()
             Group {
                 if measurement.endDate > measurement.startDate {
@@ -127,6 +124,28 @@ struct HealthMeasurementRow: View {
             }
             .font(.subheadline)
             .foregroundStyle(.secondary)
+        }
+    }
+}
+
+struct HealthMeasurementValue: View {
+    let measurement: HealthMeasurement
+
+    var body: some View {
+        let format = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(0...2))
+        switch measurement.unit {
+        case .beatsPerMinute:
+            Text("\(measurement.value, format: format) bpm")
+                .accessibilityLabel(Text("\(measurement.value, format: format) beats per minute"))
+        case .milliseconds:
+            let value = Measurement(value: measurement.value, unit: UnitDuration.milliseconds)
+            let number = format.precision(.fractionLength(0...3))
+            Text(value, format: .measurement(width: .abbreviated, usage: .asProvided, numberFormatStyle: number))
+                .accessibilityLabel(
+                    Text(value, format: .measurement(width: .wide, usage: .asProvided, numberFormatStyle: number))
+                )
+        case .sleepStage:
+            Text(measurement.value, format: format)
         }
     }
 }

@@ -20,7 +20,7 @@ final class HealthMeasurementUITests: XCTestCase {
     func testEmptyReadOffersAccessAndSourceReview() {
         let app = launch(fixture: "empty")
         openAccessAndSources(in: app)
-        XCTAssertTrue(app.staticTexts["Health Analysis reads your resting heart rate, workouts, and workout distance to show your history over time."].exists)
+        XCTAssertTrue(app.staticTexts["Health Analysis reads your resting heart rate, sleep, workouts, and workout distance to show your history over time."].exists)
 
         app.buttons["Request read access"].tap()
 

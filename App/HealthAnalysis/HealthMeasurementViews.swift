@@ -1,14 +1,38 @@
 import HealthAnalysisCore
 import SwiftUI
 
+struct HealthMetricPresentation: Identifiable {
+    @MainActor
+    static let restingHeartRate = Self(
+        metric: .restingHeartRate,
+        title: "Resting heart rate",
+        emptyHistoryTitle: "No imported resting heart rate measurements"
+    )
+    @MainActor
+    static let supported: [Self] = [
+        restingHeartRate,
+        .sleep,
+    ]
+
+    let metric: HealthMeasurement.Metric
+    let title: LocalizedStringKey
+    var emptyHistoryTitle: LocalizedStringKey = "No readable measurements"
+    var recordCountTitle: LocalizedStringKey = "Imported records"
+    var firstDateTitle: LocalizedStringKey = "First measurement"
+    var latestDateTitle: LocalizedStringKey = "Latest measurement"
+    var id: HealthMeasurement.Metric { metric }
+}
+
 struct HealthMeasurementsSection: View {
     let history: HealthMeasurementHistory
 
     var body: some View {
         Section("Health measurements") {
             HealthReadStatus(history: history)
-            NavigationLink("Resting heart rate") {
-                HealthMeasurementHistoryView(history: history)
+            ForEach(HealthMetricPresentation.supported) { presentation in
+                NavigationLink(presentation.title) {
+                    HealthMeasurementHistoryView(history: history, presentation: presentation)
+                }
             }
             NavigationLink("Health access and sources") {
                 HealthAccessAndSourcesView(history: history)
@@ -24,7 +48,7 @@ struct LatestHealthMeasurementsSection: View {
         Section("Latest measurements") {
             HealthReadStatus(history: history)
             if let measurement = history.latest {
-                HealthMeasurementRow(measurement: measurement, showsMetric: true)
+                HealthMeasurementRow(measurement: measurement, metricTitle: HealthMetricPresentation.restingHeartRate.title)
             } else if history.preferredSource(for: .restingHeartRate) != nil {
                 Text("No imported measurements for this source.")
             }
@@ -35,18 +59,19 @@ struct LatestHealthMeasurementsSection: View {
 struct HealthReadStatus: View {
     let history: HealthMeasurementHistory
     var showsInitialState = true
+    var showsEmptyHistory = true
 
     var body: some View {
         switch history.readState {
         case .idle:
-            if showsInitialState && !history.hasReadableRecords {
+            if showsInitialState && showsEmptyHistory && !history.hasReadableRecords {
                 Text("No readable measurements")
             }
         case .loading:
             ProgressView("Checking Health measurements…")
                 .accessibilityIdentifier("health.readProgress")
         case .loaded:
-            if !history.hasReadableRecords {
+            if showsEmptyHistory && !history.hasReadableRecords {
                 Text("No readable measurements")
             }
         case .failed(let failure):
@@ -75,17 +100,22 @@ struct HealthReadStatus: View {
 
 struct HealthMeasurementRow: View {
     let measurement: HealthMeasurement
-    var showsMetric = false
+    var metricTitle: LocalizedStringKey?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if showsMetric {
-                Text("Resting heart rate")
+            if let metricTitle {
+                Text(metricTitle)
                     .font(.headline)
             }
             let format = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(0...2))
-            Text("\(measurement.value, format: format) bpm")
-                .accessibilityLabel(Text("\(measurement.value, format: format) beats per minute"))
+            switch measurement.unit {
+            case .beatsPerMinute:
+                Text("\(measurement.value, format: format) bpm")
+                    .accessibilityLabel(Text("\(measurement.value, format: format) beats per minute"))
+            case .sleepStage:
+                Text(measurement.value, format: format)
+            }
             let timestamp = Date.FormatStyle.dateTime.year().month(.abbreviated).day().hour().minute()
             Group {
                 if measurement.endDate > measurement.startDate {

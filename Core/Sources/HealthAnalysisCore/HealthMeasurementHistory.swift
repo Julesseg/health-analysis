@@ -20,6 +20,8 @@ public final class HealthMeasurementHistory {
         public let recordCount: Int
         public let firstMeasurement: Date
         public let latestMeasurement: Date
+        public let firstMeasurementTimeZone: TimeZone?
+        public let latestMeasurementTimeZone: TimeZone?
         public let measuredDays: Int
         public let daysWithoutMeasurements: Int
     }
@@ -30,6 +32,7 @@ public final class HealthMeasurementHistory {
         var deletedRecordIDs: Set<UUID> = []
         var preferredSources: [String: HealthMeasurement.Source] = [:]
         var lastSuccessfulReadAt: Date?
+        var sleepFallbackTimeZoneIdentifier: String?
         var workouts: [HealthWorkout]?
 
         static func load(from url: URL) throws -> Self {
@@ -47,6 +50,10 @@ public final class HealthMeasurementHistory {
     public var hasReadableRecords: Bool { !history.isEmpty || !workouts.isEmpty }
     public var lastSuccessfulReadAt: Date? { snapshot?.lastSuccessfulReadAt }
     public var latest: HealthMeasurement? { measurements(for: .restingHeartRate).first }
+    public var sleepEpisodes: [SleepEpisode] {
+        let fallback = snapshot?.sleepFallbackTimeZoneIdentifier.flatMap(TimeZone.init(identifier:)) ?? .current
+        return SleepDerivation.episodes(from: measurements(for: .sleepAnalysis), fallback: fallback)
+    }
 
     private let source: (any HealthMeasurementSource)?
     private let storeURL: URL?
@@ -119,6 +126,9 @@ public final class HealthMeasurementHistory {
     }
 
     public func coverage(for metric: HealthMeasurement.Metric, calendar: Calendar = .current) -> Coverage? {
+        if metric == .sleepAnalysis {
+            return SleepDerivation.coverage(for: sleepEpisodes)
+        }
         let records = measurements(for: metric)
         guard let first = records.last?.startDate, let latest = records.first?.startDate else { return nil }
         let measuredDays = Set(records.map { calendar.startOfDay(for: $0.startDate) }).count
@@ -129,6 +139,8 @@ public final class HealthMeasurementHistory {
             recordCount: records.count,
             firstMeasurement: first,
             latestMeasurement: latest,
+            firstMeasurementTimeZone: nil,
+            latestMeasurementTimeZone: nil,
             measuredDays: measuredDays,
             daysWithoutMeasurements: max(0, span - measuredDays)
         )
@@ -184,6 +196,10 @@ public final class HealthMeasurementHistory {
                 let left = ($0.startDate, $0.endDate)
                 let right = ($1.startDate, $1.endDate)
                 return left == right ? $0.id.uuidString < $1.id.uuidString : left > right
+            }
+            if updated.sleepFallbackTimeZoneIdentifier == nil,
+               updated.records.contains(where: { $0.metric == .sleepAnalysis }) {
+                updated.sleepFallbackTimeZoneIdentifier = TimeZone.current.identifier
             }
             updated.workouts = reconciledWorkouts(changes, deletedIDs: updated.deletedRecordIDs)
             updated.lastSuccessfulReadAt = .now

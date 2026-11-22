@@ -4,6 +4,7 @@ public enum AnalysisModel: String, Codable, Hashable, Sendable {
     case caffeineLinearV1
     case numericLinearV1
     case countLogLinearV1
+    case categoryEventLogisticV1
     case binaryLogisticV1
     case ratingThresholdLinearV1
     case numericInteractionV1
@@ -221,6 +222,9 @@ struct NumericAnalysis {
     private static func hasVariation(_ values: [Double], input: AnalysisModeledInput) -> Bool {
         if input.kind == .tracked(.yesNo) { return BinaryEvent.hasSupport(values) }
         if input.kind == .tracked(.count) { return CountAnalysis.supportingVariation(values) }
+        if case .tracked(.category)? = input.kind {
+            return BinaryEvent.hasSupport(values, minimum: CategoryAnalysis.minimumRecordedDaysPerLevel)
+        }
         guard !values.isEmpty else { return false }
         let sorted = values.sorted()
         let upper = sorted[3 * sorted.count / 4]

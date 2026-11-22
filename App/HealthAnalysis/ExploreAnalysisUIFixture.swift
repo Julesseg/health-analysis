@@ -5,13 +5,16 @@ import HealthAnalysisCore
 enum ExploreAnalysisUIFixture {
     @MainActor
     static func applicationForLaunch() -> HealthAnalysisApplication? {
-        guard ProcessInfo.processInfo.environment["HEALTH_ANALYSIS_EXPLORE_UI_FIXTURE"] == "1" else { return nil }
+        let environment = ProcessInfo.processInfo.environment
+        let interaction = InteractionScenario(rawValue: environment["HEALTH_ANALYSIS_INTERACTION_UI_FIXTURE"] ?? "")
+        guard environment["HEALTH_ANALYSIS_EXPLORE_UI_FIXTURE"] == "1" || interaction != nil else { return nil }
 
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .current
         let first = calendar.date(byAdding: .day, value: -113, to: calendar.startOfDay(for: .now))!
         let source = HealthMeasurement.Source(name: "Fixture watch", bundleIdentifier: "fixture.explore")
-        let days = (0..<112).map { index in
+        let dayCount = interaction == nil ? 112 : 144
+        let days = (0..<dayCount).map { index in
             let inputDate = calendar.date(byAdding: .day, value: index, to: first)!
             let next = calendar.date(byAdding: .day, value: 1, to: inputDate)!
             let outputDate = calendar.date(byAdding: .hour, value: 9, to: next)!
@@ -21,11 +24,12 @@ enum ExploreAnalysisUIFixture {
             let supplement = 50 + index % 11 * 10
             let bpm = 60 + Double(amount) / 50 + Double(index % 7 - 3) * 0.17
                 + Double(fluids) * 0.2 - Double(exercise) * 0.01 + Double(supplement) * 0.003
+            let values = interaction?.values(on: index) ?? (amounts: [amount, fluids, exercise, supplement], bpm: bpm)
             return (
                 day: ManualLogDay(inputDate, timeZone: calendar.timeZone),
-                amounts: [amount, fluids, exercise, supplement],
+                amounts: values.amounts,
                 measurement: HealthMeasurement(
-                    id: UUID(), metric: .restingHeartRate, value: bpm, unit: .beatsPerMinute,
+                    id: UUID(), metric: .restingHeartRate, value: values.bpm, unit: .beatsPerMinute,
                     startDate: outputDate, endDate: outputDate, source: source
                 )
             )
@@ -46,12 +50,40 @@ enum ExploreAnalysisUIFixture {
                 application.manualLog.editQuantity(quantity.id, on: day.day, text: String(amount), locale: locale)
             }
         }
-        if ProcessInfo.processInfo.environment["HEALTH_ANALYSIS_SAVED_ANALYSIS_UI_FIXTURE"] == "1" {
+        if environment["HEALTH_ANALYSIS_SAVED_ANALYSIS_UI_FIXTURE"] == "1" {
             _ = try! application.manualLog.createQuantity(
                 name: "Evening caffeine", unit: "mg", defaultValue: 0, startsOn: days[0].day
             )
         }
         return application
+    }
+
+    private enum InteractionScenario: String {
+        case planted
+        case null
+        case collinear
+        case sparse
+
+        func values(on index: Int) -> (amounts: [Int], bpm: Double) {
+            var caffeine = 100 + index % 3 * 50
+            var fluids = 1 + index / 3 % 3
+            if self == .sparse, index % 9 == 6, index >= 27 {
+                if (index / 9).isMultiple(of: 2) {
+                    caffeine = 150
+                } else {
+                    fluids = 2
+                }
+            }
+            let exercise = self == .collinear ? caffeine / 5 : 15 + index / 9 % 2 * 20
+            let supplement = 60 + index / 18 % 2 * 20
+            let noise = index / 36 % 2 == 0 ? -0.2 : 0.2
+            let caffeineChange = Double(caffeine - 150) / 100
+            let fluidChange = Double(fluids - 2)
+            let strength: Double = self == .null ? 0 : 3
+            let bpm = 65 + 5 * caffeineChange + 0.7 * fluidChange - 0.04 * Double(exercise - 25)
+                + strength * caffeineChange * fluidChange + noise
+            return ([caffeine, fluids, exercise, supplement], bpm)
+        }
     }
 
     private struct Source: HealthMeasurementSource {

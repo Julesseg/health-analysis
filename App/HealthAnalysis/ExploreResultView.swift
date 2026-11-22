@@ -36,10 +36,17 @@ struct ExploreResultView<Status: View>: View {
 
     @ViewBuilder
     private var findings: some View {
+        if let pair = result.interactionInputs {
+            InteractionResultSection(
+                focal: pair.focal, moderator: pair.moderator, estimate: result.interaction, isSleepDuration: isSleepDuration
+            )
+        }
         if result.estimates.isEmpty {
             Section {
-                Text("There isn’t enough evidence to estimate this association.")
-                    .font(.headline)
+                if result.interactionInputs == nil {
+                    Text("There isn’t enough evidence to estimate this association.")
+                        .font(.headline)
+                }
                 confidence
                 LabeledContent("Paired days", value: result.coverage.usableDates.count.formatted())
                 if result.evidence.reasons.contains(.limitedNonOverlappingWindows) {
@@ -53,6 +60,7 @@ struct ExploreResultView<Status: View>: View {
         }
         ForEach(Array(result.estimates.enumerated()), id: \.element.input) { index, estimate in
             if let input = result.modeledInputs.first(where: { $0.series == estimate.input }) {
+                let reference = referenceCondition(for: estimate)
                 Section {
                     let estimateTitle: LocalizedStringKey = isAdjusted ? "Adjusted estimate" : "Association estimate"
                     Text(estimateTitle)
@@ -62,12 +70,18 @@ struct ExploreResultView<Status: View>: View {
                         .font(.headline)
                     EstimateDifference(estimate: estimate, input: input, isSleepDuration: isSleepDuration)
                         .monospacedDigit()
+                    if let reference {
+                        reference.foregroundStyle(.secondary)
+                    }
                     LabeledContent("Dependence-adjusted interval") {
                         Text(intervalLabel(estimate, isSleepDuration: isSleepDuration))
                     }
                     .accessibilityIdentifier(index == 0 ? "explore.uncertainty" : "explore.uncertainty.\(index)")
-                    EstimateChart(estimate: estimate, input: input, isSleepDuration: isSleepDuration, isAdjusted: isAdjusted)
-                        .accessibilityIdentifier(index == 0 ? "explore.estimateChart" : "explore.estimateChart.\(index)")
+                    EstimateChart(
+                        estimate: estimate, input: input, isSleepDuration: isSleepDuration,
+                        isAdjusted: isAdjusted, reference: reference
+                    )
+                    .accessibilityIdentifier(index == 0 ? "explore.estimateChart" : "explore.estimateChart.\(index)")
                     if estimate.finding == .nearZero {
                         Text(isSleepDuration
                             ? "The full interval is within 15 minutes of zero for the reported increment."
@@ -90,18 +104,25 @@ struct ExploreResultView<Status: View>: View {
         }
     }
 
+    private func referenceCondition(for estimate: AnalysisEstimate) -> Text? {
+        guard let reference = estimate.reference,
+              let other = result.modeledInputs.first(where: { $0.series == reference.input }) else { return nil }
+        return Text("With \(other.name) at \(reference.value, format: .number) \(other.unit).")
+    }
+
     private var confidence: some View {
         LabeledContent("Confidence") {
             Text(result.evidence.grade.description)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Confidence")
+        .accessibilityValue(Text(result.evidence.grade.description))
+        .accessibilityIdentifier("explore.confidence")
     }
 
     @ViewBuilder
     private var insufficientDataLink: some View {
-        let affected = Set(result.evidence.reasons.flatMap(\.affectedInputs))
-        if let input = result.modeledInputs.first(where: { affected.contains($0.series) })
-            ?? (result.evidence.reasons.contains(.noObservedInputs) || result.evidence.reasons.contains(.limitedInputVariation)
-                ? result.modeledInputs.first : nil) {
+        if let input = affectedInput {
             NavigationLink("Inspect input records") {
                 AnalysisObservedView(result: result, log: application.manualLog, initialInput: input.series)
                     .id(result.configuration)
@@ -111,6 +132,21 @@ struct ExploreResultView<Status: View>: View {
                 AnalysisCoverageView(result: result, application: application)
             }
         }
+    }
+
+    private var affectedInput: AnalysisModeledInput? {
+        let affected = Set(result.evidence.reasons.flatMap(\.affectedInputs))
+        if let input = result.modeledInputs.first(where: { affected.contains($0.series) }) { return input }
+        if result.evidence.reasons.contains(where: { reason in
+            if case .poorlyRepresentedInteraction = reason { return true }
+            return false
+        }) {
+            return result.interactionInputs?.focal
+        }
+        if result.evidence.reasons.contains(.noObservedInputs) || result.evidence.reasons.contains(.limitedInputVariation) {
+            return result.modeledInputs.first
+        }
+        return nil
     }
 }
 
@@ -150,6 +186,11 @@ private struct AnalysisModelView: View {
                     }
                     .accessibilityLabel(Text("\(input.name) (\(input.unit)), \(Text(role))"))
                 }
+                if let pair = result.interactionInputs {
+                    LabeledContent("Interaction") {
+                        Text("\(pair.focal.name) × \(pair.moderator.name)")
+                    }
+                }
             } header: {
                 Text(hasEstimates ? "Modeled inputs" : "Inputs assessed")
             }
@@ -157,6 +198,12 @@ private struct AnalysisModelView: View {
                 LabeledContent("Confidence") { Text(result.evidence.grade.description) }
                 ForEach(result.evidence.reasons, id: \.self) { reason in
                     AnalysisReasonRows(reason: reason, result: result)
+                    if case .poorlyRepresentedInteraction(let support) = reason {
+                        InteractionSupportRows(support: support)
+                    }
+                }
+                if let comparison = result.interaction {
+                    InteractionSupportRows(support: comparison.support)
                 }
             }
         }
@@ -200,6 +247,7 @@ private struct EstimateChart: View {
     let isSleepDuration: Bool
 
     let isAdjusted: Bool
+    let reference: Text?
     @ScaledMetric private var chartHeight = 95.0
 
     private var scale: Double { isSleepDuration ? 60 : 1 }
@@ -247,6 +295,11 @@ private struct EstimateChart: View {
     }
 
     private var accessibilityValue: Text {
+        if let reference { return Text("\(estimateAccessibilityValue) \(reference)") }
+        return estimateAccessibilityValue
+    }
+
+    private var estimateAccessibilityValue: Text {
         let direction = Text(estimate.finding.description(isSleepDuration: isSleepDuration))
         let interval = intervalLabel(estimate, isSleepDuration: isSleepDuration)
         if isSleepDuration {
@@ -293,6 +346,7 @@ private extension AnalysisModel {
         switch self {
         case .caffeineLinearV1: "Single-input linear association"
         case .numericLinearV1: "Numeric linear regression"
+        case .numericInteractionV1: "Numeric linear regression with an interaction"
         }
     }
 }
@@ -320,6 +374,7 @@ private extension AnalysisEvidence.Reason {
         case .collinearInputs: "These inputs vary together too closely to estimate their separate associations."
         case .defaultOnlyInputs: "These inputs only have defaults on paired days."
         case .lowVariationInputs: "These inputs vary too little on paired days."
+        case .poorlyRepresentedInteraction: "Too few fully recorded windows support the lower and higher combinations."
         }
     }
 
@@ -328,5 +383,14 @@ private extension AnalysisEvidence.Reason {
         case .collinearInputs(let inputs), .defaultOnlyInputs(let inputs), .lowVariationInputs(let inputs): inputs
         default: []
         }
+    }
+}
+
+private extension AnalysisResult {
+    var interactionInputs: (focal: AnalysisModeledInput, moderator: AnalysisModeledInput)? {
+        guard let pair = configuration.interaction,
+              let focal = modeledInputs.first(where: { $0.series == pair.focal }),
+              let moderator = modeledInputs.first(where: { $0.series == pair.moderator }) else { return nil }
+        return (focal, moderator)
     }
 }

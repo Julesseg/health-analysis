@@ -1,6 +1,11 @@
 import Foundation
 
 public struct AnalysisEstimate: Codable, Sendable {
+    public struct Reference: Codable, Sendable {
+        public let input: AnalysisSeriesID
+        public let value: Double
+    }
+
     public enum Finding: Codable, Sendable {
         case higher
         case lower
@@ -13,6 +18,19 @@ public struct AnalysisEstimate: Codable, Sendable {
     public let difference: Double
     public let interval: ClosedRange<Double>
     public let finding: Finding
+    public let reference: Reference?
+
+    init(
+        input: AnalysisSeriesID, inputIncrement: Double, difference: Double, interval: ClosedRange<Double>,
+        finding: Finding, reference: Reference? = nil
+    ) {
+        self.input = input
+        self.inputIncrement = inputIncrement
+        self.difference = difference
+        self.interval = interval
+        self.finding = finding
+        self.reference = reference
+    }
 }
 
 public struct AnalysisEvidence: Codable, Sendable {
@@ -40,6 +58,7 @@ public struct AnalysisEvidence: Codable, Sendable {
         case collinearInputs(Set<AnalysisSeriesID>)
         case defaultOnlyInputs(Set<AnalysisSeriesID>)
         case lowVariationInputs(Set<AnalysisSeriesID>)
+        case poorlyRepresentedInteraction(AnalysisInteractionSupport)
     }
 
     public let grade: Grade

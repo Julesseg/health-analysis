@@ -37,6 +37,7 @@ public struct AnalysisConfiguration: Codable, Hashable, Sendable {
     public var output: AnalysisSeriesID
     public var inputs: [AnalysisSeriesID]
     public var adjustmentInputs: [AnalysisSeriesID]
+    public var interaction: AnalysisInteraction?
     public var behaviorWindow: AnalysisBehaviorWindow
     public var history: AnalysisPeriod
     public var timeZone: TimeZone
@@ -45,6 +46,7 @@ public struct AnalysisConfiguration: Codable, Hashable, Sendable {
         output: AnalysisSeriesID,
         inputs: [AnalysisSeriesID],
         adjustmentInputs: [AnalysisSeriesID] = [],
+        interaction: AnalysisInteraction? = nil,
         behaviorWindow: AnalysisBehaviorWindow = .precedingDay,
         history: AnalysisPeriod = .fullHistory,
         timeZone: TimeZone = .current
@@ -52,6 +54,7 @@ public struct AnalysisConfiguration: Codable, Hashable, Sendable {
         self.output = output
         self.inputs = inputs
         self.adjustmentInputs = adjustmentInputs
+        self.interaction = interaction
         self.behaviorWindow = behaviorWindow
         self.history = history
         self.timeZone = timeZone
@@ -172,6 +175,7 @@ public struct AnalysisResult: Codable, Sendable {
     public let model: AnalysisModel
     public let modeledInputs: [AnalysisModeledInput]
     public let estimates: [AnalysisEstimate]
+    public let interaction: AnalysisInteractionEstimate?
     public let evidence: AnalysisEvidence
     public internal(set) var inspection: AnalysisInspection?
 }
@@ -206,6 +210,9 @@ extension HealthAnalysisApplication {
         guard case .health(let metric, let sourceID) = configuration.output,
               metric == .restingHeartRate || metric == .sleepAnalysis,
               !configuration.inputs.isEmpty, Set(series).count == series.count else { throw .unsupportedConfiguration }
+        if let interaction = configuration.interaction, !interaction.isValid(for: configuration.inputs) {
+            throw .unsupportedConfiguration
+        }
         guard manualLog.isStoreAvailable else { throw .manualLogUnavailable }
         let availableQuantities = Dictionary(uniqueKeysWithValues: analysisNumericQuantities.map { ($0.id, $0) })
         var quantities: [TrackingQuantity] = []
@@ -259,7 +266,8 @@ extension HealthAnalysisApplication {
         }
         let assessment = NumericAnalysis.assess(
             dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar,
-            behaviorWindow: configuration.behaviorWindow, practicalDifference: metric == .sleepAnalysis ? 0.25 : 1
+            behaviorWindow: configuration.behaviorWindow, practicalDifference: metric == .sleepAnalysis ? 0.25 : 1,
+            interaction: configuration.interaction
         )
         return AnalysisResult(
             configuration: configuration,
@@ -271,6 +279,7 @@ extension HealthAnalysisApplication {
             model: assessment.model,
             modeledInputs: modeledInputs,
             estimates: assessment.estimates,
+            interaction: assessment.interaction,
             evidence: assessment.evidence,
             inspection: dataset.inspection
         )

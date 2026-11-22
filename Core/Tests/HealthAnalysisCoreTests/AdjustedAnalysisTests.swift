@@ -143,7 +143,7 @@ struct AdjustedAnalysisTests {
     private func simulate(
         slope: Double, seed: UInt64, persistence: Double, window: AnalysisBehaviorWindow = .precedingDay
     ) async throws -> AnalysisResult {
-        var random = GaussianSequence(seed: seed)
+        var random = AdjustedGaussianSequence(seed: seed)
         var state = (0..<4).map { _ in random.next() }
         let scale = sqrt(1 - persistence * persistence)
         let length = window == .precedingMonth ? 360 : 252
@@ -171,7 +171,7 @@ struct AdjustedAnalysisTests {
         return try app.analyze(question)
     }
 
-    private struct Day {
+    struct Day {
         var amounts: [Double?]
         var bpm: Double?
     }
@@ -188,7 +188,7 @@ struct AdjustedAnalysisTests {
         }
     }
 
-    private func configuration(inputs: [UUID], adjustments: [UUID] = []) -> AnalysisConfiguration {
+    func configuration(inputs: [UUID], adjustments: [UUID] = []) -> AnalysisConfiguration {
         .init(
             output: .health(metric: .restingHeartRate, sourceBundleIdentifier: "fixture.adjusted"),
             inputs: inputs.map(AnalysisSeriesID.manualQuantity),
@@ -200,8 +200,8 @@ struct AdjustedAnalysisTests {
     private let utc = TimeZone(secondsFromGMT: 0)!
     private let locale = Locale(identifier: "en_US_POSIX")
 
-    private func prepare(
-        history: [Day], units: [String], reopen: Bool = false
+    func prepare(
+        history: [Day], units: [String], reopen: Bool = false, defaults: [Decimal]? = nil, savedURL: URL? = nil
     ) async throws -> (HealthAnalysisApplication, [UUID]) {
         let first = Date(timeIntervalSince1970: 1_735_689_600)
         func date(_ index: Int) -> Date { first.addingTimeInterval(Double(index) * 86_400) }
@@ -220,11 +220,12 @@ struct AdjustedAnalysisTests {
         let healthURL = reopen ? directory.appending(path: "health.json") : nil
         let logURL = reopen ? directory.appending(path: "log.json") : nil
         let app = HealthAnalysisApplication(
-            healthSource: Source(records: records), healthHistoryStoreURL: healthURL, manualLogStoreURL: logURL
+            healthSource: Source(records: records), healthHistoryStoreURL: healthURL,
+            manualLogStoreURL: logURL, savedAnalysesStoreURL: savedURL
         )
         let quantities = try units.enumerated().map { index, unit in
             try app.manualLog.createQuantity(
-                name: "Quantity \(index + 1)", unit: unit, defaultValue: 0,
+                name: "Quantity \(index + 1)", unit: unit, defaultValue: defaults?[index] ?? 0,
                 startsOn: ManualLogDay(first, timeZone: utc)
             )
         }
@@ -257,7 +258,7 @@ struct AdjustedAnalysisTests {
     }
 }
 
-private struct GaussianSequence {
+struct AdjustedGaussianSequence {
     var seed: UInt64
 
     mutating func next() -> Double {

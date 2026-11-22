@@ -84,6 +84,8 @@ final class SavedAnalysisUITests: XCTestCase {
         question.tap()
         XCTAssertTrue(app.staticTexts["There isn’t enough evidence to estimate this association."]
             .waitForExistence(timeout: 5))
+        let confidence = app.descendants(matching: .any)["explore.confidence"].firstMatch
+        XCTAssertEqual(confidence.value as? String, "Insufficient")
         XCTAssertTrue(app.staticTexts["Evening caffeine (mg)"].exists)
         let inspect = app.buttons["Inspect input records"]
         for _ in 0..<3 where !inspect.isHittable { app.swipeUp() }

@@ -3,18 +3,25 @@ import SwiftUI
 
 @main
 struct HealthAnalysisApp: App {
-    private let application = HealthAnalysisApplication(
-        healthSource: HealthAnalysisApp.healthSource(),
-        manualLogStoreURL: ManualLogStoreLocation.url
-    )
+    private let application: HealthAnalysisApplication = {
+        let health = healthConfiguration()
+        return HealthAnalysisApplication(
+            healthSource: health.source,
+            healthHistoryStoreURL: health.storeURL,
+            manualLogStoreURL: ManualLogStoreLocation.url
+        )
+    }()
 
-    private static func healthSource() -> any HealthMeasurementSource {
+    private static func healthConfiguration() -> (source: any HealthMeasurementSource, storeURL: URL) {
         #if DEBUG
-        if let fixture = HealthMeasurementUIFixture.sourceForLaunch() {
+        if let fixture = HealthMeasurementUIFixture.configurationForLaunch() {
             return fixture
         }
         #endif
-        return HealthKitMeasurementSource()
+        let url = URL.applicationSupportDirectory
+            .appending(path: "HealthHistory", directoryHint: .isDirectory)
+            .appending(path: "measurements.json", directoryHint: .notDirectory)
+        return (HealthKitMeasurementSource(), url)
     }
 
     var body: some Scene {

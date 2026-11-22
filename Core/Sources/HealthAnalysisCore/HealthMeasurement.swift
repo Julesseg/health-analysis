@@ -1,15 +1,21 @@
 import Foundation
 
-public struct HealthMeasurement: Equatable, Identifiable, Sendable {
-    public enum Metric: Sendable {
-        case restingHeartRate
+public struct HealthMeasurement: Codable, Equatable, Identifiable, Sendable {
+    public struct Metric: RawRepresentable, Codable, Hashable, Sendable {
+        public static let restingHeartRate = Self(rawValue: "restingHeartRate")
+
+        public let rawValue: String
+
+        public init(rawValue: String) {
+            self.rawValue = rawValue
+        }
     }
 
-    public enum Unit: Sendable {
+    public enum Unit: String, Codable, Sendable {
         case beatsPerMinute
     }
 
-    public struct Source: Equatable, Sendable {
+    public struct Source: Codable, Equatable, Sendable {
         public let name: String
         public let bundleIdentifier: String
 
@@ -48,7 +54,21 @@ public struct HealthMeasurement: Equatable, Identifiable, Sendable {
 
 public protocol HealthMeasurementSource: Sendable {
     func requestReadAccess() async throws
-    func readMeasurements() async throws -> [HealthMeasurement]
+    func readChanges(after anchors: [String: Data], includingPreviouslySaved: Bool) async throws -> [HealthMeasurementChanges]
+}
+
+public struct HealthMeasurementChanges: Sendable {
+    public let queryID: String
+    public let anchor: Data
+    public let added: [HealthMeasurement]
+    public let deleted: [UUID]
+
+    public init(queryID: String, anchor: Data, added: [HealthMeasurement], deleted: [UUID] = []) {
+        self.queryID = queryID
+        self.anchor = anchor
+        self.added = added
+        self.deleted = deleted
+    }
 }
 
 public enum HealthMeasurementReadFailure: Error, Equatable {
@@ -56,4 +76,5 @@ public enum HealthMeasurementReadFailure: Error, Equatable {
     case protectedData
     case request
     case read
+    case persistence
 }

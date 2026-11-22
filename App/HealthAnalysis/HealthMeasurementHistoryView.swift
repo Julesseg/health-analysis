@@ -3,37 +3,81 @@ import SwiftUI
 
 struct HealthMeasurementHistoryView: View {
     let history: HealthMeasurementHistory
+    @Environment(\.calendar) private var calendar
+    @State private var preferenceSaveFailed = false
+    private let metric = HealthMeasurement.Metric.restingHeartRate
+
+    private var selectedSource: Binding<String?> {
+        Binding {
+            history.preferredSource(for: metric)?.bundleIdentifier
+        } set: { identifier in
+            do {
+                try history.setPreferredSource(identifier, for: metric)
+                preferenceSaveFailed = false
+            } catch {
+                preferenceSaveFailed = true
+            }
+        }
+    }
 
     var body: some View {
+        let sources = history.sources(for: metric)
         List {
             Section {
                 HealthReadStatus(history: history)
                 if let lastChecked = history.lastSuccessfulReadAt {
                     LabeledContent("Last successful check") {
-                        Text(lastChecked, format: .dateTime.month(.abbreviated).day().hour().minute())
+                        Text(lastChecked, format: .dateTime.year().month(.abbreviated).day().hour().minute())
                     }
+                    .accessibilityIdentifier("health.lastSuccessfulCheck")
                 }
                 Button("Refresh Health measurements") {
                     Task { await history.refresh() }
                 }
                 .disabled(history.readState == .loading)
             }
-            if let first = history.history.last, let latest = history.latest {
+            if !sources.isEmpty {
+                Section {
+                    Picker("Preferred source", selection: selectedSource) {
+                        Text("All imported sources").tag(nil as String?)
+                        ForEach(sources, id: \.bundleIdentifier) { source in
+                            Text("\(source.name) (\(source.bundleIdentifier))")
+                                .tag(Optional(source.bundleIdentifier))
+                        }
+                    }
+                    .pickerStyle(.navigationLink)
+                    .accessibilityIdentifier("health.preferredSource")
+                    if preferenceSaveFailed {
+                        Text("Couldn’t save the preferred source. Try again.")
+                    }
+                }
+            }
+            if let coverage = history.coverage(for: metric, calendar: calendar) {
                 Section("Coverage") {
                     LabeledContent("Imported records") {
-                        Text(history.history.count, format: .number)
+                        Text(coverage.recordCount, format: .number)
+                    }
+                    LabeledContent("Days with measurements") {
+                        Text(coverage.measuredDays, format: .number)
+                    }
+                    LabeledContent("Days without measurements in this range") {
+                        Text(coverage.daysWithoutMeasurements, format: .number)
                     }
                     LabeledContent("First measurement") {
-                        Text(first.startDate, format: .dateTime.year().month(.abbreviated).day())
+                        Text(coverage.firstMeasurement, format: .dateTime.year().month(.abbreviated).day())
                     }
                     LabeledContent("Latest measurement") {
-                        Text(latest.startDate, format: .dateTime.year().month(.abbreviated).day())
+                        Text(coverage.latestMeasurement, format: .dateTime.year().month(.abbreviated).day())
                     }
                 }
                 Section("History") {
-                    ForEach(history.history) { measurement in
+                    ForEach(history.measurements(for: metric)) { measurement in
                         HealthMeasurementRow(measurement: measurement)
                     }
+                }
+            } else if history.preferredSource(for: metric) != nil {
+                Section("History") {
+                    Text("No imported measurements for this source.")
                 }
             }
         }
@@ -46,11 +90,7 @@ struct HealthAccessAndSourcesView: View {
     let history: HealthMeasurementHistory
 
     private var sources: [HealthMeasurement.Source] {
-        var seen: Set<String> = []
-        return history.history.compactMap { measurement in
-            let source = measurement.source
-            return seen.insert(source.bundleIdentifier).inserted ? source : nil
-        }
+        history.sources(for: .restingHeartRate)
     }
 
     var body: some View {

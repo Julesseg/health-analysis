@@ -25,6 +25,8 @@ struct LatestHealthMeasurementsSection: View {
             HealthReadStatus(history: history)
             if let measurement = history.latest {
                 HealthMeasurementRow(measurement: measurement, showsMetric: true)
+            } else if history.preferredSource(for: .restingHeartRate) != nil {
+                Text("No imported measurements for this source.")
             }
         }
     }
@@ -37,21 +39,15 @@ struct HealthReadStatus: View {
     var body: some View {
         switch history.readState {
         case .idle:
-            if showsInitialState {
+            if showsInitialState && history.history.isEmpty {
                 Text("No readable measurements")
             }
         case .loading:
             ProgressView("Checking Health measurements…")
                 .accessibilityIdentifier("health.readProgress")
-        case .loaded(let readableCount):
-            if readableCount == 0 {
+        case .loaded:
+            if history.history.isEmpty {
                 Text("No readable measurements")
-                if !history.history.isEmpty {
-                    earlierMeasurementsNotice
-                }
-            } else if readableCount < history.history.count {
-                Text("Some measurements are from earlier checks.")
-                    .foregroundStyle(.secondary)
             }
         case .failed(let failure):
             Text(message(for: failure))
@@ -72,6 +68,7 @@ struct HealthReadStatus: View {
         case .protectedData: "Health data is protected. Unlock your iPhone and try again."
         case .request: "Couldn’t request Health access. Try again."
         case .read: "Couldn’t read Health measurements. Try again."
+        case .persistence: "Couldn’t load or save Health history. Try again."
         }
     }
 }

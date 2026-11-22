@@ -94,7 +94,7 @@ struct HealthMeasurementHistoryView: View {
                     } else if history.preferredSource(for: metric) != nil {
                         Text("No imported measurements for this source.")
                     } else {
-                        Text("No readable measurements")
+                        Text(history.hasReadableRecords ? presentation.emptyHistoryTitle : "No readable measurements")
                     }
                 }
             }
@@ -117,7 +117,7 @@ struct HealthAccessAndSourcesView: View {
         let metricsWithSources = HealthMetricPresentation.supported.filter { !history.sources(for: $0.metric).isEmpty }
         List {
             Section {
-                Text("Health Analysis reads Apple Health to show your measurements over time.")
+                Text("Health Analysis reads your resting heart rate, sleep, workouts, and workout distance to show your history over time.")
                 Button("Request read access") {
                     Task { await history.requestAccessAndRefresh() }
                 }

@@ -8,6 +8,7 @@ struct HealthKitMeasurementSource: HealthMeasurementSource {
     private static let queries: [HealthKitMeasurementQuery] = [
         restingHeartRate,
         .sleep,
+        HealthKitWorkoutStream.query,
     ]
 
     private static let restingHeartRate: HealthKitMeasurementQuery = {

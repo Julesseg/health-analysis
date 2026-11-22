@@ -96,12 +96,20 @@ public struct HealthMeasurementChanges: Sendable {
     public let anchor: Data
     public let added: [HealthMeasurement]
     public let deleted: [UUID]
+    public let workouts: [HealthWorkout]
 
-    public init(queryID: String, anchor: Data, added: [HealthMeasurement], deleted: [UUID] = []) {
+    public init(
+        queryID: String,
+        anchor: Data,
+        added: [HealthMeasurement],
+        deleted: [UUID] = [],
+        workouts: [HealthWorkout] = []
+    ) {
         self.queryID = queryID
         self.anchor = anchor
         self.added = added
         self.deleted = deleted
+        self.workouts = workouts
     }
 }
 

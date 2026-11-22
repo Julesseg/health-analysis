@@ -6,21 +6,19 @@ enum HealthMeasurementUIFixture: String {
     case loading
     case empty
     case protectedAfterImport
-    case sleepHistory
 
     static func configurationForLaunch() -> (source: any HealthMeasurementSource, storeURL: URL)? {
         let environment = ProcessInfo.processInfo.environment
-        guard let name = environment["HEALTH_MEASUREMENT_UI_FIXTURE"],
-              let fixture = Self(rawValue: name) else { return nil }
+        guard let name = environment["HEALTH_MEASUREMENT_UI_FIXTURE"] else { return nil }
         let id = environment["HEALTH_MEASUREMENT_UI_FIXTURE_STORE"].flatMap(UUID.init(uuidString:)) ?? UUID()
         let url = URL.temporaryDirectory
             .appending(path: "HealthMeasurementUITests", directoryHint: .isDirectory)
             .appending(path: id.uuidString, directoryHint: .isDirectory)
             .appending(path: "measurements.json", directoryHint: .notDirectory)
-        let source: any HealthMeasurementSource = fixture == .sleepHistory
-            ? SleepHistoryUIFixture()
-            : Source(fixture: fixture)
-        return (source, url)
+        if name == "workouts" { return (WorkoutUIFixture(), url) }
+        if name == "sleepHistory" { return (SleepHistoryUIFixture(), url) }
+        guard let fixture = Self(rawValue: name) else { return nil }
+        return (Source(fixture: fixture), url)
     }
 
     private struct Source: HealthMeasurementSource {
@@ -39,7 +37,7 @@ enum HealthMeasurementUIFixture: String {
             case .loading:
                 try await Task.sleep(for: .seconds(30))
                 return []
-            case .empty, .sleepHistory:
+            case .empty:
                 return []
             case .protectedAfterImport:
                 guard anchor == nil else { throw HealthMeasurementReadFailure.protectedData }

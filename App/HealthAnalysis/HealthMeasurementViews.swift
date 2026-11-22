@@ -3,7 +3,11 @@ import SwiftUI
 
 struct HealthMetricPresentation: Identifiable {
     @MainActor
-    static let restingHeartRate = Self(metric: .restingHeartRate, title: "Resting heart rate")
+    static let restingHeartRate = Self(
+        metric: .restingHeartRate,
+        title: "Resting heart rate",
+        emptyHistoryTitle: "No imported resting heart rate measurements"
+    )
     @MainActor
     static let supported: [Self] = [
         restingHeartRate,
@@ -12,6 +16,7 @@ struct HealthMetricPresentation: Identifiable {
 
     let metric: HealthMeasurement.Metric
     let title: LocalizedStringKey
+    var emptyHistoryTitle: LocalizedStringKey = "No readable measurements"
     var recordCountTitle: LocalizedStringKey = "Imported records"
     var firstDateTitle: LocalizedStringKey = "First measurement"
     var latestDateTitle: LocalizedStringKey = "Latest measurement"
@@ -59,19 +64,19 @@ struct HealthReadStatus: View {
     var body: some View {
         switch history.readState {
         case .idle:
-            if showsInitialState && showsEmptyHistory && history.history.isEmpty {
+            if showsInitialState && showsEmptyHistory && !history.hasReadableRecords {
                 Text("No readable measurements")
             }
         case .loading:
             ProgressView("Checking Health measurements…")
                 .accessibilityIdentifier("health.readProgress")
         case .loaded:
-            if showsEmptyHistory && history.history.isEmpty {
+            if showsEmptyHistory && !history.hasReadableRecords {
                 Text("No readable measurements")
             }
         case .failed(let failure):
             Text(message(for: failure))
-            if !history.history.isEmpty {
+            if history.hasReadableRecords {
                 earlierMeasurementsNotice
             }
         }

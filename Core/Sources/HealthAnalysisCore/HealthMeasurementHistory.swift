@@ -33,6 +33,7 @@ public final class HealthMeasurementHistory {
         var preferredSources: [String: HealthMeasurement.Source] = [:]
         var lastSuccessfulReadAt: Date?
         var sleepFallbackTimeZoneIdentifier: String?
+        var workouts: [HealthWorkout]?
 
         static func load(from url: URL) throws -> Self {
             do {
@@ -45,6 +46,8 @@ public final class HealthMeasurementHistory {
 
     public private(set) var readState: ReadState = .idle
     public var history: [HealthMeasurement] { snapshot?.records ?? [] }
+    public var workouts: [HealthWorkout] { snapshot?.workouts ?? [] }
+    public var hasReadableRecords: Bool { !history.isEmpty || !workouts.isEmpty }
     public var lastSuccessfulReadAt: Date? { snapshot?.lastSuccessfulReadAt }
     public var latest: HealthMeasurement? { measurements(for: .restingHeartRate).first }
     public var sleepEpisodes: [SleepEpisode] {
@@ -73,12 +76,19 @@ public final class HealthMeasurementHistory {
     }
 
     public func sources(for metric: HealthMeasurement.Metric) -> [HealthMeasurement.Source] {
+        let records = history.reversed().filter { $0.metric == metric }.map(\.source)
+        return availableSources(records, preferred: preferredSource(for: metric))
+    }
+
+    func availableSources(
+        _ records: [HealthMeasurement.Source], preferred: HealthMeasurement.Source?
+    ) -> [HealthMeasurement.Source] {
         var sources: [String: HealthMeasurement.Source] = [:]
-        if let preferred = preferredSource(for: metric) {
+        if let preferred {
             sources[preferred.bundleIdentifier] = preferred
         }
-        for record in history.reversed() where record.metric == metric {
-            sources[record.source.bundleIdentifier] = record.source
+        for source in records {
+            sources[source.bundleIdentifier] = source
         }
         return sources.values.sorted {
             ($0.name, $0.bundleIdentifier) < ($1.name, $1.bundleIdentifier)
@@ -86,9 +96,15 @@ public final class HealthMeasurementHistory {
     }
 
     public func setPreferredSource(_ bundleIdentifier: String?, for metric: HealthMeasurement.Metric) throws(PreferenceFailure) {
+        try setPreferredSource(bundleIdentifier, for: metric, among: sources(for: metric))
+    }
+
+    func setPreferredSource(
+        _ bundleIdentifier: String?, for metric: HealthMeasurement.Metric, among sources: [HealthMeasurement.Source]
+    ) throws(PreferenceFailure) {
         guard var updated = snapshot else { throw .persistence }
         if let bundleIdentifier {
-            guard let source = sources(for: metric).first(where: { $0.bundleIdentifier == bundleIdentifier }) else {
+            guard let source = sources.first(where: { $0.bundleIdentifier == bundleIdentifier }) else {
                 throw .unknownSource
             }
             updated.preferredSources[metric.rawValue] = source
@@ -185,6 +201,7 @@ public final class HealthMeasurementHistory {
                updated.records.contains(where: { $0.metric == .sleepAnalysis }) {
                 updated.sleepFallbackTimeZoneIdentifier = TimeZone.current.identifier
             }
+            updated.workouts = reconciledWorkouts(changes, deletedIDs: updated.deletedRecordIDs)
             updated.lastSuccessfulReadAt = .now
             failure = .persistence
             try persist(updated)
@@ -193,6 +210,22 @@ public final class HealthMeasurementHistory {
             readState = previousState
         } catch {
             readState = .failed(error as? HealthMeasurementReadFailure ?? failure)
+        }
+    }
+
+    private func reconciledWorkouts(_ changes: [HealthMeasurementChanges], deletedIDs: Set<UUID>) -> [HealthWorkout] {
+        var imported = Dictionary(uniqueKeysWithValues: workouts.map { ($0.id, $0) })
+        for change in changes {
+            for id in change.deleted {
+                imported.removeValue(forKey: id)
+            }
+            for workout in change.workouts where !deletedIDs.contains(workout.id) {
+                imported[workout.id] = workout
+            }
+        }
+        return imported.values.sorted {
+            if $0.endDate != $1.endDate { return $0.endDate > $1.endDate }
+            return $0.id.uuidString < $1.id.uuidString
         }
     }
 

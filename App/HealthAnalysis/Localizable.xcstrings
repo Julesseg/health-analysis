@@ -212,7 +212,28 @@
     "Discovery is waiting for the Health check.": {},
     "Discovery needs more paired days with enough variation to estimate an association.": {},
     "Discovery needs recorded observations spread across five parts of the past year.": {},
-    "Discovery uses the first four enabled inputs. %lld enabled inputs are outside this search.": {},
+    "Discovery uses the first four enabled inputs. %lld enabled inputs are outside this search.": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Discovery uses the first four enabled inputs. %lld enabled input is outside this search."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Discovery uses the first four enabled inputs. %lld enabled inputs are outside this search."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "Discovery variables": {},
     "Distance": {},
     "Distinct behavior days": {},

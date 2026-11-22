@@ -26,6 +26,9 @@ struct DiscoveryTests {
         #expect(finding.completed.result.estimates.first.map { abs($0.difference - 4) < 0.1 } == true)
         #expect(finding.completed.discovery?.familySize == 3)
         #expect(finding.completed.result.evidence.grade == .low)
+        let opened = try application.analyze(finding.configuration, asOf: fixture.cutoff)
+        #expect(opened.estimates.first?.difference == finding.completed.result.estimates.first?.difference)
+        #expect(opened.coverage.usableDates == finding.completed.result.coverage.usableDates)
     }
     @Test func savingAndRefreshingPreservesTheOriginalSelectionForTheSameQuestion() async throws {
         let store = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -209,29 +212,37 @@ struct DiscoveryTests {
         #expect(empty.status == .noEnabledInputs)
     }
 
-    @Test func familyIsBoundedAndIndependentOfOutputStrength() async throws {
+    @Test func theMaximumFamilyIsBoundedDeterministicAndScreensTwoDependentNullOutputs() async throws {
         let fixture = DiscoveryHistory()
         let sleep = HealthMeasurement.Source(name: "Synthetic sleep", bundleIdentifier: "fixture.sleep")
+        var noise = DiscoveryNoise(seed: 77_819)
+        let behavior = (0..<5).map { _ in noise.series(count: 395, dependence: 0.72) }
+        let sleepNoise = noise.series(count: 396, dependence: 0.82)
+        let restingNoise = noise.series(count: 396, dependence: 0.82)
         let sleepRecords = (1...395).map { day in
             HealthMeasurement(
                 id: UUID(), metric: .sleepAnalysis, value: 3, unit: .sleepStage,
-                startDate: fixture.date(day), endDate: fixture.date(day).addingTimeInterval(7 * 3600),
+                startDate: fixture.date(day),
+                endDate: fixture.date(day).addingTimeInterval((7 + 0.4 * sleepNoise[day]) * 3_600),
                 source: sleep, timeZoneIdentifier: fixture.timeZone.identifier
             )
         }
         let (application, inputs) = try await fixture.application(
             days: 395, inputNames: ["Caffeine", "Second", "Third", "Fourth", "Beyond limit"],
             additionalRecords: sleepRecords,
-            values: { day in [71, 59, 43, 23, 13].map { 100 + day * $0 % 251 } },
-            output: { day, values in 60 + 0.04 * Double(values[day - 1][0]) + Double(day * 13 % 17) / 20 }
+            values: { day in behavior.map { Int((220 + 35 * $0[day]).rounded()) } },
+            output: { day, _ in 70 + 2 * restingNoise[day] }
         )
         let clock = ContinuousClock()
         let start = clock.now
         let report = try #require(await application.discover(asOf: fixture.cutoff, timeZone: fixture.timeZone))
-        print("Maximum discovery family: \(report.candidates.count) configurations in \(start.duration(to: clock.now))")
+        let tested = report.candidates.compactMap(\.adjustedPValue)
+        print("Maximum discovery family: \(tested.count)/\(report.candidates.count) testable in \(start.duration(to: clock.now))")
         #expect(report.candidates.count == 132)
         #expect(report.omittedInputCount == 1)
-        #expect(report.findings.count <= 5)
+        #expect(tested.count >= 96)
+        #expect(tested.allSatisfy { $0 > 0.05 })
+        #expect(report.findings.isEmpty)
         #expect(Set(report.candidates.map(\.configuration.output)) == [
             fixture.output, .health(metric: .sleepAnalysis, sourceBundleIdentifier: sleep.bundleIdentifier)
         ])

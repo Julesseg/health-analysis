@@ -87,7 +87,9 @@ struct AnalysisResultScreen: View {
         Section("Discovery evidence") {
             if showingOriginal {
                 Text("Low confidence. The search screened \(selection.familySize) comparisons and checked the result across separate parts of the history.")
-                let format = FloatingPointFormatStyle<Double>.number.precision(.significantDigits(2...3))
+                let format = FloatingPointFormatStyle<Double>.number
+                    .notation(selection.adjustedPValue < 0.001 ? .scientific : .automatic)
+                    .precision(.significantDigits(2...3))
                 LabeledContent("Search-adjusted p-value") {
                     Text(selection.adjustedPValue, format: format)
                 }

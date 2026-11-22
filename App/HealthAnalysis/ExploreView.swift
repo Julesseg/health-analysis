@@ -6,6 +6,8 @@ struct ExploreView: View {
 
     @State private var output: AnalysisSeriesID?
     @State private var inputID: UUID?
+    @State private var behaviorWindow: AnalysisBehaviorWindow = .precedingDay
+    @State private var history: AnalysisPeriod = .fullHistory
     @State private var analysisTimeZone = TimeZone.current
 
     private var caffeine: TrackingQuantity? {
@@ -27,6 +29,7 @@ struct ExploreView: View {
                 Picker("Output", selection: $output) {
                     Text("Choose output").tag(nil as AnalysisSeriesID?)
                     Text("Resting heart rate").tag(AnalysisSeriesID.health(metric: .restingHeartRate) as AnalysisSeriesID?)
+                    Text("Sleep duration").tag(AnalysisSeriesID.health(metric: .sleepAnalysis) as AnalysisSeriesID?)
                 }
                 .accessibilityIdentifier("explore.output")
 
@@ -41,10 +44,7 @@ struct ExploreView: View {
 
                 LabeledContent("Account for") { Text("Unavailable") }
                     .accessibilityIdentifier("explore.adjustments")
-                LabeledContent("Behavior window") { Text("Complete preceding day") }
-                    .accessibilityIdentifier("explore.behaviorWindow")
-                LabeledContent("History") { Text("Full usable history") }
-                    .accessibilityIdentifier("explore.history")
+                ExploreTemporalControls(behaviorWindow: $behaviorWindow, history: $history)
             } footer: {
                 if application.analysisCaffeineQuantities.isEmpty {
                     Text("Add a daily caffeine quantity in milligrams (mg) in Settings.")
@@ -59,7 +59,8 @@ struct ExploreView: View {
                         ExploreResultView(
                             application: application,
                             configuration: AnalysisConfiguration(
-                                output: output, inputs: [.manualQuantity(caffeine.id)], timeZone: analysisTimeZone
+                                output: output, inputs: [.manualQuantity(caffeine.id)],
+                                behaviorWindow: behaviorWindow, history: history, timeZone: analysisTimeZone
                             ),
                             inputName: caffeine.name
                         )

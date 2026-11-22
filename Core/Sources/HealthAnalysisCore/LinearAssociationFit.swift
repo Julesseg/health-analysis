@@ -12,9 +12,13 @@ struct LinearAssociationFit {
     private let dayNumbers: [Int]
     private let lagDays: Int
     private let windowDays: Int
+    private let adjustsForResidualDependence: Bool
     private let hasResidualVariation: Bool
 
-    init(columns: [[Double]], outputs: [Double], dayNumbers: [Int], lagDays: Int, windowDays: Int = 1) throws(Failure) {
+    init(
+        columns: [[Double]], outputs: [Double], dayNumbers: [Int], lagDays: Int, windowDays: Int = 1,
+        adjustsForResidualDependence: Bool = false
+    ) throws(Failure) {
         guard !columns.isEmpty, outputs.count > columns.count + 1, dayNumbers.count == outputs.count,
               (0..<outputs.count).contains(lagDays),
               zip(dayNumbers, dayNumbers.dropFirst()).allSatisfy(<),
@@ -35,6 +39,7 @@ struct LinearAssociationFit {
         self.dayNumbers = dayNumbers
         self.lagDays = lagDays
         self.windowDays = windowDays
+        self.adjustsForResidualDependence = adjustsForResidualDependence
         hasResidualVariation = (residuals.map(abs).max() ?? 0) > 64 * Double.ulpOfOne * abs(mean)
     }
 
@@ -53,7 +58,7 @@ struct LinearAssociationFit {
         let parameterCount = design.basis.count + 1
         let halfWidth: Double
         let maximumLag: Int
-        if windowDays > 1 {
+        if windowDays > 1 || adjustsForResidualDependence {
             (halfWidth, maximumLag) = TemporalAssociationUncertainty.assess(
                 scores: scores, residuals: residuals, dayNumbers: dayNumbers,
                 windowDays: windowDays, parameterCount: parameterCount

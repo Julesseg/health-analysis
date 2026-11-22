@@ -67,29 +67,16 @@ struct AnalysisObservedView: View {
         .environment(\.timeZone, result.configuration.timeZone)
     }
 
-    private var isYesNoOutput: Bool { result.outputVariable?.kind == .tracked(.yesNo) }
-
-    private var yesNoAxis: some AxisContent {
-        AxisMarks(values: [0.0, 1.0]) { value in
-            AxisGridLine()
-            AxisTick()
-            if let number = value.as(Double.self) {
-                AxisValueLabel { yesNoLabel(number == 1) }
-            }
-        }
-    }
-
     private func timeline(_ outputs: [AnalysisOutputEvidence]) -> some View {
-        Chart(outputs) { row in
+        let axis = ObservedAnalysisAxis(outputs.map(\.trackingValue))
+        return Chart(outputs) { row in
             PointMark(
                 x: .value("Output date", row.date),
-                y: .value("Observed output", row.value)
+                y: .value("Observed output", axis.coordinate(row.value, trackingValue: row.trackingValue))
             )
         }
-        .chartYScale(domain: .automatic(includesZero: isYesNoOutput))
-        .chartYAxis {
-            if isYesNoOutput { yesNoAxis } else { AxisMarks() }
-        }
+        .chartYAxis { axis.marks }
+        .chartYScale(domain: .automatic(includesZero: axis.includesZero))
         .chartXAxis {
             AxisMarks(values: .automatic(desiredCount: 3)) {
                 AxisGridLine()
@@ -106,21 +93,19 @@ struct AnalysisObservedView: View {
     }
 
     private func scatterplot(_ points: [AnalysisInputEvidence.Pair], input: AnalysisModeledInput) -> some View {
-        Chart(points) { pair in
+        let x = ObservedAnalysisAxis(points.map(\.input.trackingValue))
+        let y = ObservedAnalysisAxis(points.map(\.outputTrackingValue))
+        return Chart(points) { pair in
             PointMark(
-                x: .value("Observed input", pair.input.value),
-                y: .value("Observed output", pair.outputValue)
+                x: .value("Observed input", x.coordinate(pair.input.value, trackingValue: pair.input.trackingValue)),
+                y: .value("Observed output", y.coordinate(pair.outputValue, trackingValue: pair.outputTrackingValue))
             )
             .opacity(0.65)
         }
-        .chartXScale(domain: .automatic(includesZero: input.kind == .tracked(.yesNo)))
-        .chartXAxis {
-            if input.kind == .tracked(.yesNo) { yesNoAxis } else { AxisMarks() }
-        }
-        .chartYScale(domain: .automatic(includesZero: isYesNoOutput))
-        .chartYAxis {
-            if isYesNoOutput { yesNoAxis } else { AxisMarks() }
-        }
+        .chartXScale(domain: .automatic(includesZero: x.includesZero))
+        .chartYScale(domain: .automatic(includesZero: y.includesZero))
+        .chartXAxis { x.marks }
+        .chartYAxis { y.marks }
         .chartXAxisLabel { input.choiceLabel }
         .chartYAxisLabel { result.analysisOutputAxis }
         .frame(height: chartHeight)
@@ -164,7 +149,7 @@ struct AnalysisInputEvidenceView: View {
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(pair.outputDate, format: result.analysisDateFormat)
-                                let inputValue = input.analysisValue(pair.input.value, trackingValue: pair.input.trackingValue)
+                                let inputValue = input.displayedValue(pair.input.value, trackingValue: pair.input.trackingValue)
                                 let outputValue = result.analysisOutputValue(pair.outputValue, trackingValue: pair.outputTrackingValue)
                                 Text("\(inputValue) and \(outputValue)")
                                     .foregroundStyle(.secondary)
@@ -201,7 +186,9 @@ struct AnalysisInputEvidenceView: View {
                 AnalysisOutputProvenanceRows(result: result, origin: pair.outputOrigin)
             }
             Section("Input window") {
-                LabeledContent(input.name) { input.analysisValue(pair.input.value, trackingValue: pair.input.trackingValue) }
+                LabeledContent(input.name) {
+                    input.displayedValue(pair.input.value, trackingValue: pair.input.trackingValue)
+                }
             }
             ForEach(pair.entries, id: \.date) { entry in
                 entryDetails(entry)
@@ -213,7 +200,7 @@ struct AnalysisInputEvidenceView: View {
 
     private func entryDetails(_ entry: AnalysisObservation.Input.Day) -> some View {
         Section {
-            LabeledContent(input.name) { input.analysisValue(entry.value, trackingValue: entry.trackingValue) }
+            LabeledContent(input.name) { input.displayedValue(entry.value, trackingValue: entry.trackingValue) }
             switch entry.origin {
             case .observation:
                 LabeledContent("Provenance") { Text("Explicit observation") }
@@ -236,5 +223,53 @@ struct AnalysisInputEvidenceView: View {
         } header: {
             Text(entry.date, format: result.analysisDateFormat)
         }
+    }
+}
+
+private struct ObservedAnalysisAxis {
+    let includesZero: Bool
+    private let levels: [Int]
+    private let positions: [Int: Int]
+
+    init(_ values: [ManualTrackingValue?]) {
+        includesZero = values.contains {
+            if case .yesNo? = $0 { return true }
+            return false
+        }
+        levels = Set(values.compactMap(Self.level)).sorted()
+        positions = Dictionary(uniqueKeysWithValues: levels.enumerated().map { ($1, $0) })
+    }
+
+    func coordinate(_ value: Double, trackingValue: ManualTrackingValue?) -> Double {
+        Self.level(trackingValue).flatMap { positions[$0] }.map(Double.init) ?? value
+    }
+
+    @AxisContentBuilder var marks: some AxisContent {
+        if includesZero {
+            AxisMarks(values: [0.0, 1.0]) { mark in
+                AxisGridLine()
+                AxisTick()
+                if let value = mark.as(Double.self) {
+                    AxisValueLabel { yesNoLabel(value == 1) }
+                }
+            }
+        } else if levels.isEmpty {
+            AxisMarks()
+        } else {
+            let last = levels.count - 1
+            let ticks = last <= 4 ? Array(0...last) : (0...4).map { $0 * last / 4 }
+            AxisMarks(values: ticks.map(Double.init)) { mark in
+                AxisGridLine()
+                AxisTick()
+                if let position = mark.as(Double.self), let index = Int(exactly: position), levels.indices.contains(index) {
+                    AxisValueLabel { Text(levels[index], format: .number) }
+                }
+            }
+        }
+    }
+
+    private static func level(_ value: ManualTrackingValue?) -> Int? {
+        if case .rating(let level)? = value { return level }
+        return nil
     }
 }

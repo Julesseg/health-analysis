@@ -122,5 +122,6 @@ public enum HealthMeasurementReadFailure: Error, Equatable, Codable {
     case protectedData
     case request
     case read
+    case interrupted
     case persistence
 }

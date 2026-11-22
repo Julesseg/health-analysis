@@ -101,6 +101,7 @@ extension HealthMeasurementReadFailure {
         case .protectedData: "Health data is protected. Unlock your iPhone and try again."
         case .request: "Couldn’t request Health access. Try again."
         case .read: "Couldn’t read Health measurements. Try again."
+        case .interrupted: "The Health check was interrupted. Try again."
         case .persistence: "Couldn’t load or save Health history. Try again."
         }
     }

@@ -94,6 +94,7 @@ public final class ManualLog {
 
     private let storeURL: URL?
     private var snapshot: Snapshot?
+    @ObservationIgnored private(set) var analysisRevision = 0
     private var edits: [Entry: Edit] = [:]
     private var typedEdits: [TypedLogEntryKey: TypedLogEdit] = [:]
 
@@ -417,5 +418,6 @@ public final class ManualLog {
             try JSONEncoder().encode(updated).write(to: storeURL, options: .atomic)
         }
         snapshot = updated
+        analysisRevision += 1
     }
 }

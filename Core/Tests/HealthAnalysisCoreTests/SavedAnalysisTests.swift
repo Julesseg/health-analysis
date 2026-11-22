@@ -4,6 +4,140 @@ import Testing
 
 @MainActor
 struct SavedAnalysisTests {
+    @Test func reconciledCheckpointRefreshesAffectedFollowedQuestionsAndDiscovery() async throws {
+        let store = TemporaryAnalysisStore()
+        let fixture = SavedQuestionHistory()
+        let watch = fixture.records(source: "fixture.watch", slope: 2)
+        let bridge = fixture.records(source: "fixture.bridge", slope: -2)
+        let corrected = fixture.measurement(day: 2, value: 62, source: "fixture.bridge")
+        let cutoff = fixture.first.addingTimeInterval(57 * 86_400)
+        let initial = store.open(source: SavedQuestionSource(reads: [
+            .success(.init(queryID: "restingHeartRate", anchor: Data([1]), added: watch + bridge))
+        ]))
+        let question = try fixture.configure(initial)
+        let followed = try initial.savedAnalyses.save(question)
+        var pinnedSource = question
+        pinnedSource.output = .health(metric: .restingHeartRate, sourceBundleIdentifier: "fixture.watch")
+        let other = try initial.savedAnalyses.save(pinnedSource)
+        try initial.savedAnalyses.setPinned(true, for: followed.id)
+        try initial.savedAnalyses.setPinned(true, for: other.id)
+        await initial.healthMeasurements.refresh()
+        try initial.healthMeasurements.setPreferredSource("fixture.watch", for: .restingHeartRate)
+        await initial.refreshReconciledHealthInsights(asOf: cutoff, timeZone: fixture.timeZone)
+        let unchanged = try #require(initial.savedAnalyses.state(for: other.id).completed)
+        #expect(initial.savedAnalyses.state(for: followed.id).completed?.result.observations.count == 56)
+
+        let reopened = store.open(source: SavedQuestionSource(reads: [
+            .success(.init(
+                queryID: "restingHeartRate", anchor: Data([2]),
+                added: [corrected], deleted: [bridge[0].id, bridge[1].id]
+            )),
+            .success(.init(queryID: "restingHeartRate", anchor: Data([2]), added: [corrected], deleted: [bridge[0].id]))
+        ]))
+        try reopened.healthMeasurements.setPreferredSource("fixture.bridge", for: .restingHeartRate)
+        await reopened.healthMeasurements.refresh()
+        await reopened.refreshReconciledHealthInsights(asOf: cutoff, timeZone: fixture.timeZone)
+
+        let completed = try #require(store.open().savedAnalyses.state(for: followed.id).completed)
+        let result = completed.result
+        #expect(result.outputSource?.bundleIdentifier == "fixture.bridge")
+        #expect(result.observations.count == 55)
+        #expect(result.observations.first?.outputValue == 62)
+        #expect(reopened.savedAnalyses.state(for: other.id).completed?.updatedAt == unchanged.updatedAt)
+        let report = try #require(reopened.discovery.report)
+        #expect(!report.candidates.isEmpty)
+        #expect(report.candidates.allSatisfy {
+            $0.configuration.output == .health(metric: .restingHeartRate, sourceBundleIdentifier: "fixture.bridge")
+        })
+
+        await reopened.healthMeasurements.refresh()
+        await reopened.refreshReconciledHealthInsights(asOf: cutoff.addingTimeInterval(60), timeZone: fixture.timeZone)
+        #expect(reopened.savedAnalyses.state(for: followed.id).completed?.updatedAt == completed.updatedAt)
+        #expect(reopened.discovery.report?.cutoff == cutoff)
+    }
+
+    @Test func automaticRetryRetainsResultsAndManualEntriesWhenTheCheckpointIsInterrupted() async throws {
+        let store = TemporaryAnalysisStore()
+        let fixture = SavedQuestionHistory()
+        let records = fixture.records(source: "fixture.watch", slope: 2)
+        let cutoff = fixture.first.addingTimeInterval(57 * 86_400)
+        let source = SavedQuestionSource(reads: [
+            .success(.init(queryID: "restingHeartRate", anchor: Data([1]), added: records)),
+            .failure(HealthMeasurementReadFailure.protectedData),
+            .failure(CancellationError()),
+            .success(.init(queryID: "restingHeartRate", anchor: Data([2]), added: [], deleted: [records[0].id]))
+        ], expectedAnchors: [nil, Data([1]), Data([1]), Data([1])])
+        let app = store.open(source: source)
+        let configuration = try fixture.configure(app)
+        let question = try app.savedAnalyses.save(configuration)
+        try app.savedAnalyses.setPinned(true, for: question.id)
+        await app.healthMeasurements.refresh()
+        await app.refreshReconciledHealthInsights(asOf: cutoff, timeZone: fixture.timeZone)
+        let original = try #require(app.savedAnalyses.state(for: question.id).completed)
+        let checkedAt = try #require(app.healthMeasurements.lastSuccessfulReadAt)
+        let discovery = try #require(app.discovery.report)
+
+        for failure in [HealthMeasurementReadFailure.protectedData, .interrupted] {
+            await app.healthMeasurements.refresh()
+            await app.refreshReconciledHealthInsights(asOf: cutoff, timeZone: fixture.timeZone)
+            let state = app.savedAnalyses.state(for: question.id)
+            #expect(state.failure == .analysis(.healthHistoryUnavailable(failure)))
+            #expect(state.completed?.updatedAt == original.updatedAt)
+            #expect(app.healthMeasurements.lastSuccessfulReadAt == checkedAt)
+            #expect(app.discovery.report?.cutoff == discovery.cutoff)
+            #expect(app.discovery.unavailableStatus == .healthHistoryUnavailable(failure))
+        }
+
+        let quantity = try #require(app.manualLog.quantities.first)
+        app.manualLog.editQuantity(
+            quantity.id, on: ManualLogDay(fixture.first.addingTimeInterval(86_400), timeZone: fixture.timeZone),
+            text: "345", locale: Locale(identifier: "en_US")
+        )
+        await app.healthMeasurements.refresh()
+        await app.refreshReconciledHealthInsights(asOf: cutoff, timeZone: fixture.timeZone)
+
+        let completion = try #require(store.open().savedAnalyses.state(for: question.id).completed)
+        #expect(completion.updatedAt > original.updatedAt)
+        #expect(completion.result.observations.count == 55)
+        #expect(completion.result.observations.first?.inputs.first?.value == 345)
+        #expect(app.savedAnalyses.state(for: question.id).failure == nil)
+        #expect(app.discovery.unavailableStatus == nil)
+    }
+
+    @Test func aHealthChangeDuringAnExistingCheckIsReconciledFromItsNewAnchor() async throws {
+        let store = TemporaryAnalysisStore()
+        let fixture = SavedQuestionHistory()
+        let records = fixture.records(source: "fixture.watch", slope: 2)
+        let (reads, started) = AsyncStream<Void>.makeStream()
+        let (responses, respond) = AsyncStream<[HealthMeasurement]>.makeStream()
+        let source = HealthChangeDuringRead(started: started, responses: responses, removed: records[0].id)
+        let app = store.open(source: source)
+        let configuration = try fixture.configure(app)
+        let question = try app.savedAnalyses.save(configuration)
+        try app.savedAnalyses.setPinned(true, for: question.id)
+        let foreground = Task { await app.healthMeasurements.refresh() }
+        var initial = reads.makeAsyncIterator()
+        await initial.next()
+
+        let (signals, signaled) = AsyncStream<Void>.makeStream()
+        let observer = Task {
+            signaled.yield()
+            await app.healthMeasurements.refreshAfterHealthChange()
+        }
+        var signal = signals.makeAsyncIterator()
+        await signal.next()
+        respond.yield(records)
+        respond.finish()
+        await foreground.value
+        await observer.value
+        await app.refreshReconciledHealthInsights()
+
+        let reopened = store.open()
+        #expect(reopened.healthMeasurements.history.count == 55)
+        #expect(!reopened.healthMeasurements.history.contains { $0.id == records[0].id })
+        #expect(reopened.savedAnalyses.state(for: question.id).completed?.result.coverage.usableDates.count == 55)
+    }
+
     @Test func reopensWholeQuestionsInStablePinOrderAfterEditing() throws {
         let store = TemporaryAnalysisStore()
         let app = store.open()
@@ -319,10 +453,12 @@ private struct SavedQuestionHistory {
 }
 
 private actor SavedQuestionSource: HealthMeasurementSource {
-    private var reads: [Result<HealthMeasurementChanges, HealthMeasurementReadFailure>]
+    private var reads: [Result<HealthMeasurementChanges, any Error>]
+    private var expectedAnchors: [Data?]?
 
-    init(reads: [Result<HealthMeasurementChanges, HealthMeasurementReadFailure>]) {
+    init(reads: [Result<HealthMeasurementChanges, any Error>], expectedAnchors: [Data?]? = nil) {
         self.reads = reads
+        self.expectedAnchors = expectedAnchors
     }
 
     func requestReadAccess() async throws {}
@@ -330,7 +466,10 @@ private actor SavedQuestionSource: HealthMeasurementSource {
     func readChanges(
         after anchors: [String: Data], includingPreviouslySaved: Bool
     ) async throws -> [HealthMeasurementChanges] {
-        [try reads.removeFirst().get()]
+        if let expected = expectedAnchors?.removeFirst() {
+            #expect(anchors["restingHeartRate"] == expected)
+        }
+        return [try reads.removeFirst().get()]
     }
 }
 
@@ -348,5 +487,27 @@ private struct SuspendedQuestionSource: HealthMeasurementSource {
         var results = responses.makeAsyncIterator()
         guard let result = await results.next() else { throw HealthMeasurementReadFailure.read }
         return [try result.get()]
+    }
+}
+
+private struct HealthChangeDuringRead: HealthMeasurementSource {
+    let started: AsyncStream<Void>.Continuation
+    let responses: AsyncStream<[HealthMeasurement]>
+    let removed: UUID
+
+    func requestReadAccess() async throws {}
+
+    func readChanges(after anchors: [String: Data], includingPreviouslySaved: Bool) async throws -> [HealthMeasurementChanges] {
+        switch anchors["restingHeartRate"] {
+        case nil:
+            started.yield()
+            var incoming = responses.makeAsyncIterator()
+            guard let records = await incoming.next() else { throw HealthMeasurementReadFailure.read }
+            return [.init(queryID: "restingHeartRate", anchor: Data([1]), added: records)]
+        case Data([1]):
+            return [.init(queryID: "restingHeartRate", anchor: Data([2]), added: [], deleted: [removed])]
+        default:
+            throw HealthMeasurementReadFailure.read
+        }
     }
 }

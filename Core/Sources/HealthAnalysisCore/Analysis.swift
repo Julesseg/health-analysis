@@ -221,6 +221,12 @@ extension HealthAnalysisApplication {
     @MainActor public func analyze(
         _ configuration: AnalysisConfiguration, asOf: Date = .now
     ) throws(AnalysisRunFailure) -> AnalysisResult {
+        try prepareAnalysis(configuration, asOf: asOf).assess()
+    }
+
+    @MainActor func prepareAnalysis(
+        _ configuration: AnalysisConfiguration, asOf: Date
+    ) throws(AnalysisRunFailure) -> PreparedAnalysis {
         let series = try validatedAnalysisSeries(for: configuration)
         let inputs = series.inputs
         let output = series.output?.variable
@@ -246,7 +252,7 @@ extension HealthAnalysisApplication {
             inputs: inputs, manualLog: manualLog,
             window: configuration.behaviorWindow, history: configuration.history, asOf: asOf, calendar: calendar
         )
-        return AnalysisResult.assess(
+        return PreparedAnalysis(
             configuration: configuration, dataset: dataset, inputs: inputs.map(\.variable), output: output,
             calendar: calendar, practicalDifference: practicalDifference,
             lastReadAt: outputHistory.healthReadAt, lastReadFailure: outputHistory.healthReadFailure
@@ -336,6 +342,25 @@ extension HealthAnalysisApplication {
         default:
             return []
         }
+    }
+}
+
+struct PreparedAnalysis: Sendable {
+    let configuration: AnalysisConfiguration
+    let dataset: TemporalAnalysisDataset
+    let inputs: [AnalysisVariable]
+    let output: AnalysisVariable?
+    let calendar: Calendar
+    let practicalDifference: Double
+    let lastReadAt: Date?
+    let lastReadFailure: HealthMeasurementReadFailure?
+
+    func assess() -> AnalysisResult {
+        AnalysisResult.assess(
+            configuration: configuration, dataset: dataset, inputs: inputs, output: output,
+            calendar: calendar, practicalDifference: practicalDifference,
+            lastReadAt: lastReadAt, lastReadFailure: lastReadFailure
+        )
     }
 }
 

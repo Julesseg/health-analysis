@@ -33,6 +33,13 @@ public struct AnalysisRefreshState: Sendable {
     }
 }
 
+actor AnalysisFitter {
+    func assess(_ analysis: PreparedAnalysis) -> AnalysisResult? {
+        guard !Task.isCancelled else { return nil }
+        return analysis.assess()
+    }
+}
+
 extension HealthAnalysisApplication {
     @MainActor
     public func refreshAnalysis(
@@ -40,14 +47,16 @@ extension HealthAnalysisApplication {
     ) async -> Result<CompletedAnalysis, AnalysisRunFailure>? {
         guard !Task.isCancelled else { return nil }
         if case .manualTyped = configuration.output {
-            do {
-                return .success(CompletedAnalysis(result: try analyze(configuration), updatedAt: .now))
-            } catch {
-                return .failure(error)
-            }
+            return analyzeForRefresh(configuration, asOf: .now)
         }
         guard let read = await healthMeasurements.refreshForAnalysis(), !Task.isCancelled else { return nil }
+        guard healthMeasurements.readState == read else { return nil }
+        return analyzeReconciled(configuration, read: read, asOf: .now)
+    }
 
+    @MainActor private func analyzeReconciled(
+        _ configuration: AnalysisConfiguration, read: HealthMeasurementHistory.ReadState, asOf: Date
+    ) -> Result<CompletedAnalysis, AnalysisRunFailure> {
         switch read {
         case .failed(let failure):
             return .failure(.healthHistoryUnavailable(failure))
@@ -56,15 +65,21 @@ extension HealthAnalysisApplication {
         case .loading:
             return .failure(.healthHistoryLoading)
         case .loaded:
-            do {
-                let result = try analyze(configuration)
-                if let failure = result.lastHealthReadFailure {
-                    return .failure(.healthHistoryUnavailable(failure))
-                }
-                return .success(CompletedAnalysis(result: result, updatedAt: .now))
-            } catch {
-                return .failure(error)
+            return analyzeForRefresh(configuration, asOf: asOf)
+        }
+    }
+
+    @MainActor private func analyzeForRefresh(
+        _ configuration: AnalysisConfiguration, asOf: Date
+    ) -> Result<CompletedAnalysis, AnalysisRunFailure> {
+        do {
+            let result = try analyze(configuration, asOf: asOf)
+            if let failure = result.lastHealthReadFailure {
+                return .failure(.healthHistoryUnavailable(failure))
             }
+            return .success(CompletedAnalysis(result: result, updatedAt: .now))
+        } catch {
+            return .failure(error)
         }
     }
 
@@ -74,5 +89,56 @@ extension HealthAnalysisApplication {
         let requestID = savedAnalyses.beginRefresh(for: id)
         let result = await refreshAnalysis(question.configuration)
         savedAnalyses.finishRefresh(for: id, requestID: requestID, result: result)
+    }
+
+    @MainActor public func refreshReconciledHealthInsights(
+        asOf cutoff: Date = .now, timeZone: TimeZone = .current, enabledSeries: Set<AnalysisSeriesID>? = nil
+    ) async {
+        let read = healthMeasurements.readState
+        guard read != .loading, !Task.isCancelled else { return }
+        let version = healthMeasurements.reconciliationVersion
+        if read != .idle {
+            savedAnalyses.reloadIfUnavailable()
+            for question in savedAnalyses.following {
+                guard !Task.isCancelled, healthMeasurements.reconciliationVersion == version,
+                      healthMeasurements.readState == read else { return }
+                let output = question.configuration.output
+                guard case .health = output,
+                      savedAnalyses.isPinned(question.id),
+                      savedAnalyses.question(id: question.id)?.configuration == question.configuration else { continue }
+                let state = savedAnalyses.state(for: question.id)
+                if read == .loaded {
+                    if let completed = state.completed, state.failure == nil,
+                       !(healthMeasurements.analysisChangeDate(for: output).map { $0 > completed.updatedAt } ?? false) {
+                        continue
+                    }
+                }
+                guard let requestID = savedAnalyses.beginAutomaticRefresh(for: question.id) else { continue }
+                let result: Result<CompletedAnalysis, AnalysisRunFailure>?
+                if read == .loaded {
+                    result = await fitReconciled(question.configuration, version: version, asOf: cutoff)
+                } else {
+                    result = analyzeReconciled(question.configuration, read: read, asOf: cutoff)
+                }
+                savedAnalyses.finishRefresh(for: question.id, requestID: requestID, result: result)
+            }
+        }
+        guard healthMeasurements.reconciliationVersion == version, healthMeasurements.readState == read else { return }
+        await refreshDiscoveriesIfNeeded(asOf: cutoff, timeZone: timeZone, enabledSeries: enabledSeries)
+    }
+
+    @MainActor private func fitReconciled(
+        _ configuration: AnalysisConfiguration, version: Int, asOf: Date
+    ) async -> Result<CompletedAnalysis, AnalysisRunFailure>? {
+        let logRevision = manualLog.analysisRevision
+        do {
+            let prepared = try prepareAnalysis(configuration, asOf: asOf)
+            guard let result = await analysisFitter.assess(prepared), !Task.isCancelled,
+                  healthMeasurements.reconciliationVersion == version, healthMeasurements.readState == .loaded,
+                  manualLog.analysisRevision == logRevision else { return nil }
+            return .success(CompletedAnalysis(result: result, updatedAt: .now))
+        } catch {
+            return .failure(error)
+        }
     }
 }

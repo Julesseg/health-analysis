@@ -3,26 +3,35 @@ import SwiftUI
 
 @main
 struct HealthAnalysisApp: App {
-    private let application: HealthAnalysisApplication = {
+    @UIApplicationDelegateAdaptor private var lifecycle: HealthRefreshLifecycle
+    @Environment(\.scenePhase) private var scenePhase
+
+    struct Configuration {
+        let application: HealthAnalysisApplication
+        var observedSource: HealthKitMeasurementSource? = nil
+        var checksOnActivation = false
+    }
+
+    static let configuration: Configuration = {
         #if DEBUG
         if let fixture = FirstUseUIFixture.applicationForLaunch() {
-            return fixture
+            return Configuration(application: fixture)
         }
         if let fixture = DiscoveryUIFixture.applicationForLaunch() {
-            return fixture
+            return Configuration(application: fixture, checksOnActivation: DiscoveryUIFixture.checksOnActivation)
         }
         if let fixture = BinaryAnalysisUIFixture.applicationForLaunch() {
-            return fixture
+            return Configuration(application: fixture)
         }
         if let fixture = CountAnalysisUIFixture.applicationForLaunch() {
-            return fixture
+            return Configuration(application: fixture)
         }
         if let fixture = ExploreAnalysisUIFixture.applicationForLaunch() {
-            return fixture
+            return Configuration(application: fixture)
         }
         #endif
         let health = healthConfiguration()
-        return HealthAnalysisApplication(
+        let application = HealthAnalysisApplication(
             healthSource: health.source,
             healthHistoryStoreURL: health.storeURL,
             manualLogStoreURL: ManualLogStoreLocation.url,
@@ -32,6 +41,8 @@ struct HealthAnalysisApp: App {
             firstUseStoreURL: URL.applicationSupportDirectory
                 .appending(path: "first-use-complete", directoryHint: .notDirectory)
         )
+        let source = health.source as? HealthKitMeasurementSource
+        return Configuration(application: application, observedSource: source, checksOnActivation: source != nil)
     }()
 
     private static func healthConfiguration() -> (source: any HealthMeasurementSource, storeURL: URL) {
@@ -48,7 +59,10 @@ struct HealthAnalysisApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(application: application)
+            ContentView(application: Self.configuration.application)
+                .onChange(of: scenePhase, initial: true) { _, phase in
+                    lifecycle.scenePhaseChanged(phase)
+                }
         }
     }
 }

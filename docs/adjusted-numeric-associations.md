@@ -41,4 +41,4 @@ The overlapping-window tests use 144 trials per scenario with the same regular g
 | 7 days over 252 calendar days | 141/144 (97.9%) | 140/144 (97.2%) |
 | 30 days over 360 calendar days | 136/144 (94.4%) | 136/144 (94.4%) |
 
-`LinearAssociationFit` accepts prepared numeric columns, outputs, civil-day positions, and lag and window lengths. Its contrast takes a vector of differences in the original column units. An expanded design can supply indicator or product columns and evaluate a specified comparison using the same fit and uncertainty calculation. Typed or interaction analyses still need their own encoding, support diagnostics, labeled comparisons, and validation.
+`LinearAssociationFit` accepts prepared numeric columns, outputs, civil-day positions, and lag and window lengths. Its contrast takes a vector of differences in the original column units. An expanded design can supply indicator or product columns and evaluate a specified comparison using the same fit and uncertainty calculation. The [numeric interaction model](numeric-interactions.md) defines the product encoding, support checks, and condition contrasts.

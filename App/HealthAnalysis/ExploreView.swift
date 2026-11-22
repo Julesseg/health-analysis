@@ -10,6 +10,7 @@ struct ExploreView: View {
     @State private var adjustments: [AnalysisSeriesID]
     @State private var behaviorWindow: AnalysisBehaviorWindow
     @State private var history: AnalysisPeriod
+    @State private var interaction: AnalysisInteraction?
     @State private var analysisTimeZone: TimeZone
 
     init(application: HealthAnalysisApplication, editing: SavedAnalysis? = nil) {
@@ -20,6 +21,7 @@ struct ExploreView: View {
         _adjustments = State(initialValue: editing?.configuration.adjustmentInputs ?? [])
         _behaviorWindow = State(initialValue: editing?.configuration.behaviorWindow ?? .precedingDay)
         _history = State(initialValue: editing?.configuration.history ?? .fullHistory)
+        _interaction = State(initialValue: editing?.configuration.interaction)
         _analysisTimeZone = State(initialValue: editing?.configuration.timeZone ?? .current)
     }
 
@@ -41,6 +43,7 @@ struct ExploreView: View {
         configuration.adjustmentInputs = adjustments
         configuration.behaviorWindow = behaviorWindow
         configuration.history = history
+        configuration.interaction = interaction
         configuration.timeZone = analysisTimeZone
         return configuration
     }
@@ -78,6 +81,10 @@ struct ExploreView: View {
                             set: { selected in
                                 inputs = selected
                                 adjustments.removeAll { selected.contains($0) }
+                                if let pair = interaction,
+                                   !selected.contains(pair.focal) || !selected.contains(pair.moderator) {
+                                    interaction = nil
+                                }
                             }
                         )
                     )
@@ -101,6 +108,16 @@ struct ExploreView: View {
                 .accessibilityLabel("Account for")
                 .accessibilityValue(selectionSummary(adjustments))
                 .accessibilityIdentifier("explore.adjustments")
+                if inputs.count >= 2 {
+                    NavigationLink {
+                        ExploreInteractionSelection(application: application, inputs: inputs, interaction: $interaction)
+                    } label: {
+                        LabeledContent("Interaction") { interactionSummary }
+                    }
+                    .accessibilityLabel("Interaction")
+                    .accessibilityValue(interactionSummary)
+                    .accessibilityIdentifier("explore.interaction")
+                }
                 ExploreTemporalControls(behaviorWindow: $behaviorWindow, history: $history)
             } footer: {
                 if quantities.isEmpty {
@@ -124,6 +141,13 @@ struct ExploreView: View {
                 SavedAnalysisListSection(application: application)
             }
         }
+    }
+
+    private var interactionSummary: Text {
+        guard let interaction else { return Text("None") }
+        let focal = application.analysisSeriesTitle(interaction.focal)
+        let moderator = application.analysisSeriesTitle(interaction.moderator)
+        return Text("\(focal) across \(moderator)")
     }
 
     private func selectionSummary(_ selected: [AnalysisSeriesID]) -> Text {

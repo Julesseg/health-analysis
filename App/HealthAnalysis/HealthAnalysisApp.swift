@@ -4,6 +4,11 @@ import SwiftUI
 @main
 struct HealthAnalysisApp: App {
     private let application: HealthAnalysisApplication = {
+        #if DEBUG
+        if let fixture = ExploreAnalysisUIFixture.applicationForLaunch() {
+            return fixture
+        }
+        #endif
         let health = healthConfiguration()
         return HealthAnalysisApplication(
             healthSource: health.source,

@@ -184,6 +184,10 @@ public final class ManualLog {
         )
     }
 
+    func analysisValue(for quantity: TrackingQuantity, on day: ManualLogDay) -> (Decimal, ManualValueOrigin)? {
+        reviewField(for: quantity, on: day).map { ($0.value, $0.origin) }
+    }
+
     public func review(on day: ManualLogDay) -> DayReview? {
         snapshot?.reviews?[day]?.status(
             for: reviewFields(on: day), typed: typedReviewFields(on: day), hasUnresolvedEdits: hasUnresolvedEdits(on: day)

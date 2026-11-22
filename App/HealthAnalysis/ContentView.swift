@@ -20,7 +20,7 @@ struct ContentView: View {
                 destination("Insights") { insights }
             }
             Tab("Explore", systemImage: "magnifyingglass") {
-                destination("Explore") { explore }
+                destination("Explore") { ExploreView(application: application) }
             }
             Tab("Data", systemImage: "list.bullet") {
                 destination("Data") { data }
@@ -73,19 +73,6 @@ struct ContentView: View {
                 }
             }
             LatestHealthMeasurementsSection(history: application.healthMeasurements)
-        }
-    }
-
-    @ViewBuilder
-    private var explore: some View {
-        if !overview.hasReadableMeasurements && !overview.hasTrackingVariables {
-            ContentUnavailableView(
-                "No variables to explore",
-                systemImage: "magnifyingglass",
-                description: Text("Explore uses readable measurements and manually tracked variables.")
-            )
-        } else if overview.hasReadableMeasurements {
-            ContentUnavailableView("No analyses available yet", systemImage: "magnifyingglass")
         }
     }
 

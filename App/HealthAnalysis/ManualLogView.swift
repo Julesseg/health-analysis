@@ -43,7 +43,7 @@ struct ManualLogView: View {
                 }
                 .id(day)
             }
-            if !rows.isEmpty {
+            if !rows.isEmpty || !typedRows.isEmpty {
                 ManualLogReviewSection(log: log, day: day)
             }
         }

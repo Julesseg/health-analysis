@@ -5,6 +5,7 @@ public enum TrackingVariableKind: Codable, Equatable, Sendable {
     case yesNo
     case rating(ClosedRange<Int>)
     case category([TrackingCategory])
+    case timeOfDay
 
     public func accepts(_ value: ManualTrackingValue) -> Bool {
         switch (self, value) {
@@ -20,9 +21,16 @@ public enum TrackingVariableKind: Codable, Equatable, Sendable {
                 && Set(options.map(\.id)).count == options.count
                 && Set(options.map { $0.name.lowercased() }).count == options.count
                 && options.contains { $0.id == id }
+        case (.timeOfDay, .timeOfDay(let time, _)):
+            (0..<24).contains(time.hour) && (0..<60).contains(time.minute)
         default:
             false
         }
+    }
+
+    func acceptsDefault(_ value: ManualTrackingValue) -> Bool {
+        if case .timeOfDay(_, .some) = value { return false }
+        return accepts(value)
     }
 }
 
@@ -31,6 +39,27 @@ public enum ManualTrackingValue: Codable, Equatable, Sendable {
     case yesNo(Bool)
     case rating(Int)
     case category(TrackingCategory.ID)
+    case timeOfDay(ManualClockTime, precision: ManualClockPrecision? = nil)
+
+    var asObservation: Self {
+        if case .timeOfDay(let time, nil) = self { return .timeOfDay(time, precision: .exact) }
+        return self
+    }
+}
+
+public struct ManualClockTime: Codable, Equatable, Sendable {
+    public let hour: Int
+    public let minute: Int
+
+    public init(hour: Int, minute: Int) {
+        self.hour = hour
+        self.minute = minute
+    }
+}
+
+public enum ManualClockPrecision: String, Codable, Equatable, Sendable {
+    case exact
+    case approximate
 }
 
 public struct TrackingCategory: Codable, Equatable, Identifiable, Sendable {

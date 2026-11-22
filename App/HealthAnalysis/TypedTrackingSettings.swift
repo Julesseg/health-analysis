@@ -29,6 +29,7 @@ private enum TypedTrackingKind: CaseIterable, Identifiable {
     case yesNo
     case rating
     case category
+    case timeOfDay
 
     var id: Self { self }
 
@@ -38,6 +39,7 @@ private enum TypedTrackingKind: CaseIterable, Identifiable {
         case .yesNo: "Yes/no"
         case .rating: "Rating"
         case .category: "Category"
+        case .timeOfDay: "Time of day"
         }
     }
 
@@ -47,6 +49,7 @@ private enum TypedTrackingKind: CaseIterable, Identifiable {
         case .yesNo: "Add yes/no"
         case .rating: "Add rating"
         case .category: "Add category"
+        case .timeOfDay: "Add time of day"
         }
     }
 
@@ -56,6 +59,7 @@ private enum TypedTrackingKind: CaseIterable, Identifiable {
         case .yesNo: "New yes/no"
         case .rating: "New rating"
         case .category: "New category"
+        case .timeOfDay: "New time of day"
         }
     }
 }
@@ -67,6 +71,7 @@ private extension TrackingVariableKind {
         case .yesNo: TypedTrackingKind.yesNo.title
         case .rating: TypedTrackingKind.rating.title
         case .category: TypedTrackingKind.category.title
+        case .timeOfDay: TypedTrackingKind.timeOfDay.title
         }
     }
 }
@@ -86,6 +91,7 @@ private struct CreateTypedTrackingVariableView: View {
     @State private var rating = "3"
     @State private var categories = [CategoryDraft(), CategoryDraft()]
     @State private var selectedCategoryID: TrackingCategory.ID?
+    @State private var defaultTime = ManualClockTime(hour: 12, minute: 0)
     @State private var didFailToSave = false
 
     private struct CategoryDraft: Identifiable {
@@ -122,6 +128,8 @@ private struct CreateTypedTrackingVariableView: View {
             let kind = TrackingVariableKind.category(options)
             let value = ManualTrackingValue.category(defaultCategoryID)
             return kind.accepts(value) ? (kind, value) : nil
+        case .timeOfDay:
+            return (.timeOfDay, .timeOfDay(defaultTime))
         }
     }
 
@@ -173,6 +181,8 @@ private struct CreateTypedTrackingVariableView: View {
             }
         case .category:
             categoryFields
+        case .timeOfDay:
+            ManualClockPicker(label: Text("Default time"), time: $defaultTime)
         }
     }
 

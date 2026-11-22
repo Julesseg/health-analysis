@@ -45,7 +45,7 @@ struct ExploreTemporalSummary: View {
     }
 }
 
-private extension AnalysisBehaviorWindow {
+extension AnalysisBehaviorWindow {
     var title: LocalizedStringKey {
         switch self {
         case .precedingDay: "Complete preceding day"

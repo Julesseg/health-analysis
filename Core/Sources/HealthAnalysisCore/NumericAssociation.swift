@@ -70,7 +70,7 @@ public struct AnalysisEvidence: Codable, Sendable {
         case countModelUnavailable
         case countModelLimitations
         case sparseCategoryInputs(Set<AnalysisSeriesID>)
-        case sparseCategoryOutput
+        case sparseCategoryOutput(minimumRecordedDays: Int)
         case sparseCategoryEventByInput(Set<AnalysisSeriesID>)
         case categoryEventModelUnavailable
         case categoryEventModelLimitations

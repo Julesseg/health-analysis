@@ -1,7 +1,7 @@
 import Foundation
 
 struct TemporalAnalysisDataset {
-    struct Output {
+    struct Output: Sendable {
         let date: Date
         let anchor: Date
         let behaviorCutoff: Date
@@ -43,6 +43,56 @@ struct TemporalAnalysisDataset {
         }
     }
 
+    struct InputWindow {
+        let value: AnalysisObservation.Input?
+        let missingDates: [Date]
+        var excludedCategoryInput: AnalysisInspection.OutputWithoutPair.ExcludedCategoryInput? = nil
+    }
+
+    struct Plan: Sendable {
+        struct Row: Sendable {
+            let output: Output
+            let behaviorDates: [Date]
+        }
+
+        let outputDates: [Date]
+        let rows: [Row]
+        let outputSource: HealthMeasurement.Source?
+        let selectedSourceIdentifier: String?
+
+        init(
+            outputs: [Output], selectedSourceIdentifier: String? = nil, window: AnalysisBehaviorWindow, history: AnalysisPeriod,
+            asOf: Date, calendar: Calendar
+        ) {
+            var dailyOutputs: [Date: Output] = [:]
+            let historyEnd = calendar.startOfDay(for: asOf)
+            let historyStart = history.dayCount.flatMap {
+                calendar.day(byGoingBack: $0 - 1, from: historyEnd)
+            }
+            for output in outputs {
+                if let historyStart, !(historyStart...historyEnd).contains(output.date) { continue }
+                if dailyOutputs[output.date] == nil { dailyOutputs[output.date] = output }
+            }
+            let outputDates = dailyOutputs.keys.sorted()
+            self.outputDates = outputDates
+            self.selectedSourceIdentifier = selectedSourceIdentifier
+            outputSource = outputDates.last.flatMap { dailyOutputs[$0]?.source }
+            rows = outputDates.compactMap { date in
+                guard let output = dailyOutputs[date] else { return nil }
+                var cursor = output.behaviorCutoff
+                var dates: [Date] = []
+                for _ in 0..<window.dayCount {
+                    guard let preceding = calendar.precedingDay(before: cursor) else {
+                        return Row(output: output, behaviorDates: [])
+                    }
+                    dates.append(preceding)
+                    cursor = preceding
+                }
+                return Row(output: output, behaviorDates: dates.reversed())
+            }
+        }
+    }
+
     let observations: [AnalysisObservation]
     let coverage: AnalysisCoverage
     let outputSource: HealthMeasurement.Source?
@@ -53,96 +103,117 @@ struct TemporalAnalysisDataset {
         window: AnalysisBehaviorWindow, history: AnalysisPeriod, asOf: Date, calendar: Calendar,
         categoryInputs: [AnalysisSeriesID: AnalysisCategoryContrast] = [:]
     ) {
-        var dailyOutputs: [Date: Output] = [:]
-        let historyEnd = calendar.startOfDay(for: asOf)
-        let historyStart = history.dayCount.flatMap {
-            calendar.day(byGoingBack: $0 - 1, from: historyEnd)
-        }
-        for output in outputs {
-            if let historyStart, !(historyStart...historyEnd).contains(output.date) { continue }
-            if dailyOutputs[output.date] == nil { dailyOutputs[output.date] = output }
-        }
-
-        var dailyInputs: [AnalysisSeriesID: [Date: ManualAnalysisSeries.Sample?]] = [:]
-        func inputDay(_ date: Date, for series: ManualAnalysisSeries) -> ManualAnalysisSeries.Sample? {
-            let id = series.variable.id
-            if let cached = dailyInputs[id]?[date] { return cached }
-            let day = ManualLogDay(date, timeZone: calendar.timeZone)
-            let input = series.numericValue(
-                in: manualLog, on: day, category: categoryInputs[id].map(CategoryAnalysis.Transform.contrast)
-            )
-            dailyInputs[id, default: [:]][date] = .some(input)
-            return input
-        }
-
-        let outputDates = dailyOutputs.keys.sorted()
-        var unpaired: [AnalysisInspection.OutputWithoutPair] = []
-        observations = outputDates.compactMap { date -> AnalysisObservation? in
-            guard let output = dailyOutputs[date] else { return nil }
-            func recordUnpaired(
-                _ missing: [AnalysisInspection.OutputWithoutPair.MissingInput],
-                excluded: [AnalysisInspection.OutputWithoutPair.ExcludedCategoryInput] = []
-            ) {
-                unpaired.append(.init(
-                    date: date, anchor: output.anchor, value: output.value, source: output.source, missingInputs: missing,
-                    origin: output.origin, trackingValue: output.trackingValue,
-                    excludedCategoryInputs: excluded.isEmpty ? nil : excluded
-                ))
+        let plan = Plan(
+            outputs: outputs, selectedSourceIdentifier: selectedSourceIdentifier,
+            window: window, history: history, asOf: asOf, calendar: calendar
+        )
+        var dailyInputs: [AnalysisSeriesID: [Date: AnalysisObservation.Input.Day?]] = [:]
+        let catalog = Dictionary(uniqueKeysWithValues: inputs.map { ($0.variable.id, $0) })
+        self.init(plan: plan, inputs: inputs.map(\.variable.id), calendar: calendar) { id, row in
+            if let contrast = categoryInputs[id], let series = catalog[id] {
+                return Self.categoryInputWindow(
+                    series, contrast: contrast, dates: row.behaviorDates, manualLog: manualLog, timeZone: calendar.timeZone
+                )
             }
-            var cursor = output.behaviorCutoff
-            var behaviorDates: [Date] = []
-            for _ in 0..<window.dayCount {
-                guard let preceding = calendar.precedingDay(before: cursor) else {
-                    recordUnpaired([])
-                    return nil
+            return Self.summarizeInput(id, dates: row.behaviorDates) { date in
+                if let cached = dailyInputs[id]?[date] { return cached }
+                let input = catalog[id].flatMap {
+                    Self.inputDay(date, for: $0, manualLog: manualLog, timeZone: calendar.timeZone)
                 }
-                behaviorDates.append(preceding)
-                cursor = preceding
+                dailyInputs[id, default: [:]][date] = .some(input)
+                return input
             }
-            let dates = behaviorDates.reversed()
+        }
+    }
+
+    @MainActor static func inputDay(
+        _ date: Date, for series: ManualAnalysisSeries, manualLog: ManualLog, timeZone: TimeZone
+    ) -> AnalysisObservation.Input.Day? {
+        let day = ManualLogDay(date, timeZone: timeZone)
+        guard let sample = series.numericValue(in: manualLog, on: day), let value = sample.value else { return nil }
+        return .init(date: date, value: value, origin: sample.origin, trackingValue: sample.trackingValue)
+    }
+
+    @MainActor private static func categoryInputWindow(
+        _ series: ManualAnalysisSeries, contrast: AnalysisCategoryContrast, dates: [Date],
+        manualLog: ManualLog, timeZone: TimeZone
+    ) -> InputWindow {
+        guard dates.count == 1, let date = dates.first else { return .init(value: nil, missingDates: dates) }
+        let day = ManualLogDay(date, timeZone: timeZone)
+        guard let sample = series.numericValue(in: manualLog, on: day, category: .contrast(contrast)),
+              case .category(let category)? = sample.trackingValue else {
+            return .init(value: nil, missingDates: [date])
+        }
+        let id = series.variable.id
+        guard let value = sample.value else {
+            return .init(value: nil, missingDates: [], excludedCategoryInput: .init(
+                series: id, date: date, category: category, origin: sample.origin
+            ))
+        }
+        let entry = AnalysisObservation.Input.Day(
+            date: date, value: value, origin: sample.origin, trackingValue: sample.trackingValue
+        )
+        return .init(value: .init(series: id, date: date, value: value, origin: sample.origin, days: [entry]), missingDates: [])
+    }
+
+    static func summarizeInput(
+        _ id: AnalysisSeriesID, dates: [Date],
+        inputDay: (Date) -> AnalysisObservation.Input.Day?
+    ) -> InputWindow {
+        var missingDates: [Date] = []
+        let days = dates.compactMap { date -> AnalysisObservation.Input.Day? in
+            if let day = inputDay(date) { return day }
+            missingDates.append(date)
+            return nil
+        }
+        guard let first = days.first, missingDates.isEmpty else {
+            return InputWindow(value: nil, missingDates: missingDates)
+        }
+        let total = days.reduce(0) { $0 + $1.value }
+        guard total.isFinite else { return InputWindow(value: nil, missingDates: []) }
+        let input = AnalysisObservation.Input(
+            series: id, date: first.date, value: total,
+            origin: days.first { $0.origin != .observation }?.origin ?? .observation, days: days
+        )
+        return InputWindow(value: input, missingDates: [])
+    }
+
+    init(
+        plan: Plan, inputs: [AnalysisSeriesID], calendar: Calendar,
+        inputWindow: (AnalysisSeriesID, Plan.Row) -> InputWindow
+    ) {
+        var unpaired: [AnalysisInspection.OutputWithoutPair] = []
+        observations = plan.rows.compactMap { row -> AnalysisObservation? in
+            var pairedInputs: [AnalysisObservation.Input] = []
             var missing: [AnalysisInspection.OutputWithoutPair.MissingInput] = []
             var excluded: [AnalysisInspection.OutputWithoutPair.ExcludedCategoryInput] = []
-            var pairedInputs: [AnalysisObservation.Input] = []
-            for input in inputs {
-                let series = input.variable.id
-                let days = dates.compactMap { date -> AnalysisObservation.Input.Day? in
-                    guard let sample = inputDay(date, for: input) else {
-                        missing.append(.init(series: series, date: date))
-                        return nil
-                    }
-                    guard let value = sample.value else {
-                        if case .category(let id)? = sample.trackingValue {
-                            excluded.append(.init(series: series, date: date, category: id, origin: sample.origin))
-                        }
-                        return nil
-                    }
-                    return .init(date: date, value: value, origin: sample.origin, trackingValue: sample.trackingValue)
-                }
-                guard days.count == dates.count else { continue }
-                let total = days.reduce(0) { $0 + $1.value }
-                guard total.isFinite else { continue }
-                pairedInputs.append(.init(
-                    series: series, date: cursor, value: total,
-                    origin: days.first { $0.origin != .observation }?.origin ?? .observation, days: days
-                ))
+            for id in inputs {
+                let window = inputWindow(id, row)
+                if let input = window.value { pairedInputs.append(input) }
+                missing += window.missingDates.map { .init(series: id, date: $0) }
+                if let category = window.excludedCategoryInput { excluded.append(category) }
             }
             guard pairedInputs.count == inputs.count else {
-                recordUnpaired(missing, excluded: excluded)
+                unpaired.append(.init(
+                    date: row.output.date, anchor: row.output.anchor, value: row.output.value,
+                    source: row.output.source, missingInputs: missing, origin: row.output.origin,
+                    trackingValue: row.output.trackingValue, excludedCategoryInputs: excluded.isEmpty ? nil : excluded
+                ))
                 return nil
             }
             return AnalysisObservation(
-                outputDate: date, outputAnchor: output.anchor, outputValue: output.value, inputs: pairedInputs,
-                outputOrigin: output.origin, outputTrackingValue: output.trackingValue
+                outputDate: row.output.date, outputAnchor: row.output.anchor, outputValue: row.output.value, inputs: pairedInputs,
+                outputOrigin: row.output.origin, outputTrackingValue: row.output.trackingValue
             )
         }
-        coverage = AnalysisCoverage(observations: observations, outputDates: outputDates, calendar: calendar)
-        outputSource = outputDates.last.flatMap { dailyOutputs[$0]?.source }
-        inspection = AnalysisInspection(unpairedOutputs: unpaired, selectedOutputSourceIdentifier: selectedSourceIdentifier)
+        coverage = AnalysisCoverage(observations: observations, outputDates: plan.outputDates, calendar: calendar)
+        outputSource = plan.outputSource
+        inspection = AnalysisInspection(unpairedOutputs: unpaired, selectedOutputSourceIdentifier: plan.selectedSourceIdentifier)
     }
 }
 
-private extension Calendar {
-    func precedingDay(before dayStart: Date) -> Date? {
+extension Calendar {
+    fileprivate func precedingDay(before dayStart: Date) -> Date? {
         dateInterval(of: .day, for: dayStart.addingTimeInterval(-1))?.start
     }
 

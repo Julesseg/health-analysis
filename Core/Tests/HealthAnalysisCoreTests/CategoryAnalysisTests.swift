@@ -65,6 +65,38 @@ struct CategoryAnalysisTests {
         #expect(abs(reverseEstimate.difference - (2.5 / 4.5 - 1)) < 0.001)
     }
 
+    @Test func lessFrequentRecordedCategoryCanExplainKnownRestingHeartRateDifference() async throws {
+        let source = HealthMeasurement.Source(name: "Synthetic watch", bundleIdentifier: "fixture.category")
+        let home = TrackingCategory(name: "Home")
+        let office = TrackingCategory(name: "Office")
+        let records = (0..<120).map { index in
+            let atOffice = index.isMultiple(of: 8)
+            let time = date(index + 1).addingTimeInterval(28_800)
+            return HealthMeasurement(
+                id: UUID(), metric: .restingHeartRate,
+                value: 60 + (atOffice ? 5 : 0) + Double(index / 8 % 3 - 1) * 0.5,
+                unit: .beatsPerMinute, startDate: time, endDate: time, source: source
+            )
+        }
+        let app = HealthAnalysisApplication(healthSource: CategoryTestHealthSource(records: records))
+        let setting = try category("Work setting", options: [office, home], defaultingTo: home, in: app)
+        for index in 0..<120 {
+            app.manualLog.editTypedEntry(setting.id, on: day(index), value: .category(index.isMultiple(of: 8) ? office.id : home.id))
+        }
+        let inputID = AnalysisSeriesID.manualTyped(setting.id)
+        let result = try #require(await app.refreshAnalysis(.init(
+            output: .health(metric: .restingHeartRate), inputs: [inputID], timeZone: utc,
+            categories: .init(inputContrasts: [inputID: .init(reference: home.id, comparison: office.id)])
+        ))).get().result
+        let estimate = try #require(result.estimates.first)
+        #expect(estimate.scale == .difference)
+        #expect(abs(estimate.difference - 5) < 0.001)
+        #expect(estimate.interval.contains(5))
+        #expect(result.categoryEvidence?.inputLevels[inputID]?.map(\.recordedDayCount) == [105, 15])
+        #expect(result.outputSource == source)
+        #expect(result.evidence.grade == .low)
+    }
+
     @Test func selectedCategoryOutcomeRetainsAdjustedOddsAndEvidenceAcrossSavedRefresh() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -170,7 +202,7 @@ struct CategoryAnalysisTests {
             app.manualLog.editTypedEntry(output.id, on: day(index + 1), value: .category(value.id))
         }
         let sparseOutput = try app.analyze(configuration, asOf: date(85))
-        #expect(sparseOutput.evidence.reasons == [.sparseCategoryOutput])
+        #expect(sparseOutput.evidence.reasons == [.sparseCategoryOutput(minimumRecordedDays: 8)])
         #expect(sparseOutput.estimates.isEmpty)
 
         for index in 0..<84 {
@@ -299,5 +331,17 @@ private struct CategoryRandom {
     mutating func uniform() -> Double {
         state = state &* 6364136223846793005 &+ 1442695040888963407
         return Double(state >> 11) / 9_007_199_254_740_992
+    }
+}
+
+private struct CategoryTestHealthSource: HealthMeasurementSource {
+    let records: [HealthMeasurement]
+
+    func requestReadAccess() async throws {}
+
+    func readChanges(
+        after anchors: [String: Data], includingPreviouslySaved: Bool
+    ) async throws -> [HealthMeasurementChanges] {
+        [.init(queryID: "restingHeartRate", anchor: Data([1]), added: records)]
     }
 }

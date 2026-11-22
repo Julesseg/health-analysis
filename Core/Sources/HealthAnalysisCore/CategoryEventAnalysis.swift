@@ -29,7 +29,7 @@ enum CategoryEventAnalysis {
         let recordedEvents = recordedOutputs.count { $0.outputValue == 1 }
         let minimumClassDays = max(CategoryAnalysis.minimumRecordedDaysPerLevel, 4 * parameterCount)
         guard min(recordedEvents, recordedOutputs.count - recordedEvents) >= minimumClassDays else {
-            return result(.insufficient, [.sparseCategoryOutput])
+            return result(.insufficient, [.sparseCategoryOutput(minimumRecordedDays: minimumClassDays)])
         }
         let sparseConditions = Set(categoryEvidence.inputLevels.filter { _, levels in
             levels.contains { level in
@@ -75,7 +75,7 @@ enum CategoryEventAnalysis {
         }
         let dayNumbers = observations.compactMap { calendar.ordinality(of: .day, in: .era, for: $0.outputDate) }
         let lagDays = CalendarHAC.defaultLagDays(for: count)
-        guard let fit = BernoulliLogitFit(columns: columns, events: observations.map(\.outputValue)) else {
+        guard let fit = BinaryEventFit(columns: columns, events: observations.map(\.outputValue)) else {
             return result(.insufficient, [.categoryEventModelUnavailable])
         }
 

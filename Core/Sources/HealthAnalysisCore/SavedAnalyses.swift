@@ -35,6 +35,14 @@ public final class SavedAnalyses {
         var questions: [SavedAnalysis] = []
         var pinnedIDs: [SavedAnalysis.ID] = []
         var completions: [SavedAnalysis.ID: CachedCompletion]?
+        var discoveryBaselines: [SavedAnalysis.ID: CachedCompletion]?
+
+        mutating func preserveDiscovery(for id: SavedAnalysis.ID) {
+            guard discoveryBaselines?[id] == nil, let completion = completions?[id],
+                  completion.value?.discovery != nil else { return }
+            if discoveryBaselines == nil { discoveryBaselines = [:] }
+            discoveryBaselines?[id] = completion
+        }
 
         mutating func store(_ completed: CompletedAnalysis, for id: SavedAnalysis.ID) {
             if completions == nil { completions = [:] }
@@ -78,6 +86,14 @@ public final class SavedAnalyses {
         snapshot?.pinnedIDs.contains(id) == true
     }
 
+    public func discoveryBaseline(for id: SavedAnalysis.ID) -> CompletedAnalysis? {
+        guard let question = question(id: id) else { return nil }
+        let completed = snapshot?.discoveryBaselines?[id]?.value ?? state(for: id).completed
+        guard let completed, completed.discovery != nil,
+              completed.result.configuration == question.configuration else { return nil }
+        return completed
+    }
+
     public func state(for id: SavedAnalysis.ID) -> AnalysisRefreshState {
         let completed = snapshot?.completions?[id]?.value
         let isRefreshing = refreshRequests[id] != nil
@@ -105,6 +121,7 @@ public final class SavedAnalyses {
             updated.questions[index] = question
             if configurationChanged {
                 updated.completions?[id] = nil
+                updated.discoveryBaselines?[id] = nil
             }
         } else {
             updated.questions.append(question)
@@ -113,6 +130,7 @@ public final class SavedAnalyses {
         let completionChanged: Bool
         if let completed, completed.result.configuration == configuration,
            currentUpdate.map({ $0 < completed.updatedAt }) ?? true {
+            updated.preserveDiscovery(for: question.id)
             updated.store(completed, for: question.id)
             completionChanged = true
         } else {
@@ -152,6 +170,7 @@ public final class SavedAnalyses {
         switch result {
         case .success(let completed):
             do {
+                updated.preserveDiscovery(for: id)
                 updated.store(completed, for: id)
                 try persist(updated)
                 refreshFailures[id] = nil

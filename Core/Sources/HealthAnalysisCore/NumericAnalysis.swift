@@ -174,6 +174,10 @@ struct NumericAnalysis {
 
     static func hasVariation(_ values: [Double], input: AnalysisModeledInput) -> Bool {
         if input.kind == .tracked(.count) { return CountAnalysis.supportingVariation(values) }
+        if case .tracked(.category)? = input.kind {
+            let minimum = CategoryAnalysis.minimumRecordedDaysPerLevel
+            return values.count { $0 == 0 } >= minimum && values.count { $0 == 1 } >= minimum
+        }
         guard !values.isEmpty else { return false }
         let sorted = values.sorted()
         let upper = sorted[3 * sorted.count / 4]

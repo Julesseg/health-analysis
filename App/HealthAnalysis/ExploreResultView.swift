@@ -341,7 +341,7 @@ private let estimateNumber = FloatingPointFormatStyle<Double>.number.precision(.
 
 private let countPercent = FloatingPointFormatStyle<Double>.Percent.percent.precision(.fractionLength(0...2))
 
-private func estimateLabel(_ estimate: AnalysisEstimate, input: AnalysisModeledInput, isSleepDuration: Bool) -> Text {
+func estimateLabel(_ estimate: AnalysisEstimate, input: AnalysisModeledInput, isSleepDuration: Bool) -> Text {
     let countInput = input.kind == .tracked(.count)
     if estimate.scale == .proportionalCountChange {
         if countInput {
@@ -396,7 +396,18 @@ private func estimateDirection(
         }
     }
     if let contrast {
-        return Text("\(contrast.comparison) compared with \(contrast.reference)")
+        switch estimate.finding {
+        case .higher:
+            if output != nil { return Text("The estimated daily count was higher for \(contrast.comparison).") }
+            if isSleepDuration { return Text("\(contrast.comparison) was associated with longer sleep.") }
+            return Text("\(contrast.comparison) was associated with higher resting heart rate.")
+        case .lower:
+            if output != nil { return Text("The estimated daily count was lower for \(contrast.comparison).") }
+            if isSleepDuration { return Text("\(contrast.comparison) was associated with shorter sleep.") }
+            return Text("\(contrast.comparison) was associated with lower resting heart rate.")
+        case .nearZero, .uncertain:
+            break
+        }
     }
     return Text(estimate.finding.description(isSleepDuration: isSleepDuration, output: output))
 }
@@ -490,7 +501,7 @@ private extension AnalysisEvidence.Reason {
         case .countModelUnavailable: "The count model could not estimate a stable association. Some input values may only occur with zero output counts."
         case .countModelLimitations: "The model assumes a constant proportional change per input increment. Longer dependence, unmeasured variables, and default values can affect the estimate."
         case .sparseCategoryInputs: "Each selected input category needs at least six recorded days among the pairs."
-        case .sparseCategoryOutput: "The selected outcome category and the other outcomes each need more recorded days."
+        case .sparseCategoryOutput(let days): "The selected outcome and all other outcomes combined each need at least \(days) recorded days."
         case .sparseCategoryEventByInput: "Each input category needs at least six pairs with the recorded event and six with other recorded outcomes."
         case .categoryEventModelUnavailable: "The model could not estimate stable odds. Some inputs may nearly or completely predict the outcome."
         case .categoryEventModelLimitations: "The model estimates the odds of the selected outcome versus all other categories. Longer dependence, unmeasured variables, and defaults can affect the estimate."

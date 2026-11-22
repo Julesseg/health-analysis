@@ -4,7 +4,10 @@ import SwiftUI
 struct ExploreView: View {
     let application: HealthAnalysisApplication
     private let editing: SavedAnalysis?
+    private let discovery: CompletedAnalysis?
     @Environment(\.timeZone) private var timeZone
+
+    private var initialConfiguration: AnalysisConfiguration? { editing?.configuration ?? discovery?.result.configuration }
 
     @State private var output: AnalysisSeriesID?
     @State private var inputs: [AnalysisSeriesID]
@@ -16,18 +19,22 @@ struct ExploreView: View {
     @State private var categoryOutputEvent: TrackingCategory.ID?
     @State private var categoryInputSelections: [AnalysisSeriesID: CategoryContrastSelection]
 
-    init(application: HealthAnalysisApplication, editing: SavedAnalysis? = nil) {
+    init(
+        application: HealthAnalysisApplication, editing: SavedAnalysis? = nil, discovery: CompletedAnalysis? = nil
+    ) {
         self.application = application
         self.editing = editing
-        _output = State(initialValue: editing?.configuration.output)
-        _inputs = State(initialValue: editing?.configuration.inputs ?? [])
-        _adjustments = State(initialValue: editing?.configuration.adjustmentInputs ?? [])
-        _behaviorWindow = State(initialValue: editing?.configuration.behaviorWindow ?? .precedingDay)
-        _history = State(initialValue: editing?.configuration.history ?? .fullHistory)
-        _interaction = State(initialValue: editing?.configuration.interaction)
-        _analysisTimeZone = State(initialValue: editing?.configuration.timeZone ?? .current)
-        _categoryOutputEvent = State(initialValue: editing?.configuration.categories?.outputEvent)
-        _categoryInputSelections = State(initialValue: editing?.configuration.categories?.inputContrasts.mapValues {
+        self.discovery = discovery
+        let initial = editing?.configuration ?? discovery?.result.configuration
+        _output = State(initialValue: initial?.output)
+        _inputs = State(initialValue: initial?.inputs ?? [])
+        _adjustments = State(initialValue: initial?.adjustmentInputs ?? [])
+        _behaviorWindow = State(initialValue: initial?.behaviorWindow ?? .precedingDay)
+        _history = State(initialValue: initial?.history ?? .fullHistory)
+        _interaction = State(initialValue: initial?.interaction)
+        _analysisTimeZone = State(initialValue: initial?.timeZone ?? .current)
+        _categoryOutputEvent = State(initialValue: initial?.categories?.outputEvent)
+        _categoryInputSelections = State(initialValue: initial?.categories?.inputContrasts.mapValues {
             CategoryContrastSelection(reference: $0.reference, comparison: $0.comparison)
         } ?? [:])
     }
@@ -62,7 +69,7 @@ struct ExploreView: View {
 
     private var configuration: AnalysisConfiguration? {
         guard let output, !inputs.isEmpty else { return nil }
-        var configuration = editing?.configuration ?? .init(output: output, inputs: inputs)
+        var configuration = initialConfiguration ?? .init(output: output, inputs: inputs)
         configuration.output = output
         configuration.inputs = inputs
         configuration.adjustmentInputs = adjustments
@@ -220,8 +227,10 @@ struct ExploreView: View {
             Section {
                 if let configuration {
                     NavigationLink("Analyze") {
-                        AnalysisResultScreen(application: application, configuration: configuration, editing: editing?.id)
-                            .id(configuration)
+                        AnalysisResultScreen(
+                            application: application, configuration: configuration, editing: editing?.id, discovery: discovery
+                        )
+                        .id(configuration)
                     }
                 } else {
                     Button("Analyze") {}
@@ -229,7 +238,7 @@ struct ExploreView: View {
                 }
             }
 
-            if editing == nil {
+            if editing == nil && discovery == nil {
                 Section {
                     NavigationLink("Suggested questions") {
                         AnalysisPresetsView(application: application, timeZone: timeZone, onSelect: applyPreset)

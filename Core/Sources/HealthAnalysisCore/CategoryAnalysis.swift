@@ -99,7 +99,7 @@ struct CategoryAnalysis {
                 let options = [contrast.reference, contrast.comparison].compactMap { id in
                     input.categories.first { $0.id == id }
                 }
-                inputLevels[input.id] = levels(options, samples: rows.map {
+                inputLevels[input.id] = levels(options, tracksOutputEvent: outputEvent != nil, samples: rows.map {
                     let event: Bool? = outputEvent == nil || $0.outputOrigin != .observation ? nil : $0.outputValue == 1
                     return ($0.inputs[index].trackingValue, $0.inputs[index].origin, event)
                 })
@@ -117,7 +117,8 @@ struct CategoryAnalysis {
     }
 
     private func levels(
-        _ categories: [TrackingCategory], samples: [(ManualTrackingValue?, ManualValueOrigin?, Bool?)]
+        _ categories: [TrackingCategory], tracksOutputEvent: Bool = false,
+        samples: [(ManualTrackingValue?, ManualValueOrigin?, Bool?)]
     ) -> [AnalysisCategoryEvidence.Level] {
         var paired: [TrackingCategory.ID: Int] = [:]
         var recorded: [TrackingCategory.ID: Int] = [:]
@@ -132,9 +133,8 @@ struct CategoryAnalysis {
                 if observedEvent == false { otherDays[id, default: 0] += 1 }
             }
         }
-        let hasEventSamples = !eventDays.isEmpty || !otherDays.isEmpty
         return categories.map {
-            let eventSupport: AnalysisCategoryEvidence.EventSupport? = hasEventSamples
+            let eventSupport: AnalysisCategoryEvidence.EventSupport? = tracksOutputEvent
                 ? .init(eventDayCount: eventDays[$0.id, default: 0], otherDayCount: otherDays[$0.id, default: 0]) : nil
             return .init(
                 category: $0, pairedDayCount: paired[$0.id, default: 0],

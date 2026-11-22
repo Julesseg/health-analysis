@@ -20,12 +20,12 @@ struct AnalysisResultScreen: View {
 
     init(
         application: HealthAnalysisApplication, configuration: AnalysisConfiguration,
-        editing id: SavedAnalysis.ID? = nil
+        editing id: SavedAnalysis.ID? = nil, discovery: CompletedAnalysis? = nil
     ) {
         self.application = application
         draft = configuration
         editingID = id
-        let prior = id.flatMap { application.savedAnalyses.state(for: $0).completed }
+        let prior = id.flatMap { application.savedAnalyses.state(for: $0).completed } ?? discovery
         _draftState = State(initialValue: AnalysisRefreshState(
             completed: prior?.result.configuration == configuration ? prior : nil
         ))
@@ -49,11 +49,19 @@ struct AnalysisResultScreen: View {
                 ContentUnavailableView("Saved analysis unavailable", systemImage: "bookmark")
             } else {
                 if let completed = state.completed {
+                    if discoveryBaseline?.discovery != nil {
+                        Section {
+                            Text("Selected in an exploratory search").font(.headline)
+                        }
+                    }
                     ExploreResultView(
                         application: application,
                         result: completed.result
                     ) {
                         refreshStatus
+                        if let selection = discoveryBaseline?.discovery {
+                            discoveryEvidence(selection, showingOriginal: completed.discovery != nil)
+                        }
                     }
                 } else {
                     refreshStatus
@@ -67,6 +75,30 @@ struct AnalysisResultScreen: View {
         }
         .task {
             if state.completed == nil, state.failure == nil { await refresh() }
+        }
+    }
+
+    private var discoveryBaseline: CompletedAnalysis? {
+        if let savedID { return analyses.discoveryBaseline(for: savedID) }
+        return draftState.completed
+    }
+
+    private func discoveryEvidence(_ selection: DiscoverySelection, showingOriginal: Bool) -> some View {
+        Section("Discovery evidence") {
+            if showingOriginal {
+                Text("Low confidence. The search screened \(selection.familySize) comparisons and checked the result across separate parts of the history.")
+                let format = FloatingPointFormatStyle<Double>.number
+                    .notation(selection.adjustedPValue < 0.001 ? .scientific : .automatic)
+                    .precision(.significantDigits(2...3))
+                LabeledContent("Search-adjusted p-value") {
+                    Text(selection.adjustedPValue, format: format)
+                }
+                Text("The model interval describes the fitted association. The search-adjusted p-value accounts for the screened comparisons.")
+            }
+            LabeledContent("Discovery cutoff") {
+                Text(selection.cutoff, format: .dateTime.month().day().year().hour().minute())
+            }
+            Text("Subsequent-data support is unassessed.")
         }
     }
 
@@ -94,7 +126,7 @@ struct AnalysisResultScreen: View {
                     }
                 }
             }
-            if !state.isRefreshing {
+            if !state.isRefreshing && (savedID != nil || draftState.completed?.discovery == nil) {
                 let title: LocalizedStringKey = state.failure == nil ? "Refresh analysis" : "Retry analysis"
                 Button(title) {
                     Task { await refresh() }
@@ -103,6 +135,13 @@ struct AnalysisResultScreen: View {
             if let question {
                 NavigationLink("Edit analysis") {
                     ExploreView(application: application, editing: question)
+                        .navigationTitle("Edit analysis")
+                        .navigationBarTitleDisplayMode(.inline)
+                }
+            }
+            if question == nil, let baseline = discoveryBaseline, baseline.discovery != nil {
+                NavigationLink("Edit analysis") {
+                    ExploreView(application: application, discovery: baseline)
                         .navigationTitle("Edit analysis")
                         .navigationBarTitleDisplayMode(.inline)
                 }

@@ -14,6 +14,8 @@ struct AnalysisObservedView: View {
         _selectedInput = State(initialValue: initialInput ?? result.modeledInputs.first?.series)
     }
 
+    private var hasCategoryOutput: Bool { result.outputVariable?.categories.isEmpty == false }
+
     var body: some View {
         List {
             Section {
@@ -75,7 +77,7 @@ struct AnalysisObservedView: View {
         Chart(outputs) { row in
             if let category = categoryName(row.trackingValue, among: result.outputVariable?.categories ?? []) {
                 PointMark(x: .value("Output date", row.date), y: .value("Observed output", category))
-            } else if result.categoryEvent == nil {
+            } else if !hasCategoryOutput {
                 PointMark(x: .value("Output date", row.date), y: .value("Observed output", row.value))
             }
         }
@@ -102,13 +104,13 @@ struct AnalysisObservedView: View {
             if let inputCategory, let outputCategory {
                 PointMark(x: .value("Observed input", inputCategory), y: .value("Observed output", outputCategory))
                     .opacity(0.65)
-            } else if let inputCategory, result.categoryEvent == nil {
+            } else if let inputCategory, !hasCategoryOutput {
                 PointMark(x: .value("Observed input", inputCategory), y: .value("Observed output", pair.outputValue))
                     .opacity(0.65)
             } else if input.categories.isEmpty, let outputCategory {
                 PointMark(x: .value("Observed input", pair.input.value), y: .value("Observed output", outputCategory))
                     .opacity(0.65)
-            } else if input.categories.isEmpty, result.categoryEvent == nil {
+            } else if input.categories.isEmpty, !hasCategoryOutput {
                 PointMark(x: .value("Observed input", pair.input.value), y: .value("Observed output", pair.outputValue))
                     .opacity(0.65)
             }

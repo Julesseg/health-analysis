@@ -87,7 +87,7 @@ enum ManualAnalysisSeries {
             switch value {
             case .count(let count) where variable.kind == .count && count >= 0:
                 return Sample(value: Double(count), origin: origin, trackingValue: value)
-            case .category(let id) where !self.variable.categories.isEmpty:
+            case .category(let id) where self.variable.categories.contains(where: { $0.id == id }):
                 guard let category else { return nil }
                 return Sample(value: category.encode(id), origin: origin, trackingValue: value)
             default:

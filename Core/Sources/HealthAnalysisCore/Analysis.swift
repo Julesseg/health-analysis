@@ -255,64 +255,10 @@ extension HealthAnalysisApplication {
             window: configuration.behaviorWindow, history: configuration.history, asOf: asOf, calendar: calendar,
             categoryInputs: category.inputContrasts
         )
-        let modeledInputs = inputs.enumerated().map { index, input in
-            let variable = input.variable
-            return AnalysisModeledInput(
-                series: variable.id, name: variable.name, unit: variable.unit,
-                role: index < configuration.inputs.count ? .input : .adjustment,
-                defaultDayCount: dataset.observations.count { $0.inputs[index].origin != .observation },
-                kind: variable.kind
-            )
-        }
-        let categoryEvidence = category.summarize(dataset, inputs: inputs.map(\.variable), output: output)
-        func assess() -> NumericAnalysis {
-            if let categoryEvidence, category.outputEvent != nil {
-                return CategoryEventAnalysis.assess(
-                    dataset.observations, inputs: modeledInputs, coverage: dataset.coverage,
-                    categoryEvidence: categoryEvidence, calendar: calendar
-                )
-            }
-            if output?.kind == .tracked(.count) {
-                return CountAnalysis.assess(
-                    dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar
-                )
-            }
-            return NumericAnalysis.assess(
-                dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar,
-                behaviorWindow: configuration.behaviorWindow, practicalDifference: practicalDifference,
-                interaction: configuration.interaction
-            )
-        }
-        let assessment: NumericAnalysis
-        if let categoryEvidence {
-            let model: AnalysisModel = if category.outputEvent != nil {
-                .categoryEventLogisticV1
-            } else if output?.kind == .tracked(.count) {
-                .countLogLinearV1
-            } else {
-                .numericLinearV1
-            }
-            assessment = CategoryAnalysis.assessInputContrasts(
-                categoryEvidence, observations: dataset.observations, assessment: assess, model: model
-            )
-        } else {
-            assessment = assess()
-        }
-        return AnalysisResult(
-            configuration: configuration,
-            outputSource: dataset.outputSource,
-            healthHistoryReadAt: outputHistory.healthReadAt,
-            lastHealthReadFailure: outputHistory.healthReadFailure,
-            observations: dataset.observations,
-            coverage: dataset.coverage,
-            model: assessment.model,
-            modeledInputs: modeledInputs,
-            estimates: assessment.estimates,
-            interaction: assessment.interaction,
-            evidence: assessment.evidence,
-            outputVariable: output,
-            inspection: dataset.inspection,
-            categoryEvidence: categoryEvidence
+        return AnalysisResult.assess(
+            configuration: configuration, dataset: dataset, inputs: inputs.map(\.variable), output: output,
+            calendar: calendar, practicalDifference: practicalDifference,
+            lastReadAt: outputHistory.healthReadAt, lastReadFailure: outputHistory.healthReadFailure, category: category
         )
     }
 
@@ -397,4 +343,79 @@ extension HealthAnalysisApplication {
             return []
         }
     }
+}
+
+extension AnalysisResult {
+    static func assess(
+        configuration: AnalysisConfiguration, dataset: TemporalAnalysisDataset, inputs: [AnalysisVariable],
+        output: AnalysisVariable? = nil, calendar: Calendar, practicalDifference: Double,
+        lastReadAt: Date?, lastReadFailure: HealthMeasurementReadFailure? = nil, exploratory: Bool = false,
+        category: CategoryAnalysis? = nil
+    ) -> Self {
+        let modeledInputs = inputs.enumerated().map { index, variable in
+            return AnalysisModeledInput(
+                series: variable.id, name: variable.name, unit: variable.unit,
+                role: index < configuration.inputs.count ? .input : .adjustment,
+                defaultDayCount: dataset.observations.count { $0.inputs[index].origin != .observation },
+                kind: variable.kind
+            )
+        }
+        let categoryEvidence = category?.summarize(dataset, inputs: inputs, output: output)
+        func assess() -> NumericAnalysis {
+            if let categoryEvidence, category?.outputEvent != nil {
+                return CategoryEventAnalysis.assess(
+                    dataset.observations, inputs: modeledInputs, coverage: dataset.coverage,
+                    categoryEvidence: categoryEvidence, calendar: calendar
+                )
+            }
+            if output?.kind == .tracked(.count) {
+                return CountAnalysis.assess(
+                    dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar
+                )
+            }
+            return NumericAnalysis.assess(
+                dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar,
+                behaviorWindow: configuration.behaviorWindow, practicalDifference: practicalDifference,
+                interaction: configuration.interaction
+            )
+        }
+        let assessment: NumericAnalysis
+        if let categoryEvidence {
+            let model: AnalysisModel = if category?.outputEvent != nil {
+                .categoryEventLogisticV1
+            } else if output?.kind == .tracked(.count) {
+                .countLogLinearV1
+            } else {
+                .numericLinearV1
+            }
+            assessment = CategoryAnalysis.assessInputContrasts(
+                categoryEvidence, observations: dataset.observations, assessment: assess, model: model
+            )
+        } else {
+            assessment = assess()
+        }
+        return AnalysisResult(
+            configuration: configuration,
+            outputSource: dataset.outputSource,
+            healthHistoryReadAt: lastReadAt,
+            lastHealthReadFailure: lastReadFailure,
+            observations: dataset.observations,
+            coverage: dataset.coverage,
+            model: assessment.model,
+            modeledInputs: modeledInputs,
+            estimates: assessment.estimates,
+            interaction: assessment.interaction,
+            evidence: exploratory && assessment.evidence.grade != .insufficient
+                ? AnalysisEvidence(
+                    grade: .low, reasons: assessment.evidence.reasons,
+                    defaultDayCount: assessment.evidence.defaultDayCount,
+                    dependenceLagDays: assessment.evidence.dependenceLagDays
+                )
+                : assessment.evidence,
+            outputVariable: output,
+            inspection: dataset.inspection,
+            categoryEvidence: categoryEvidence
+        )
+    }
+
 }

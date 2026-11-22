@@ -1,7 +1,5 @@
-import Foundation
-
 struct WeightedDesignInformation {
-    let lower: [[Double]]
+    private let lower: [[Double]]
 
     init?(rows: [[Double]], weights: [Double]) {
         guard let size = rows.first?.count else { return nil }
@@ -17,7 +15,7 @@ struct WeightedDesignInformation {
                 }
                 if row == column {
                     guard value > total * 1e-12, value.isFinite else { return nil }
-                    lower[row][column] = sqrt(value)
+                    lower[row][column] = value.squareRoot()
                 } else {
                     lower[row][column] = value / lower[column][column]
                 }

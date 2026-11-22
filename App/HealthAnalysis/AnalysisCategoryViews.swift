@@ -57,6 +57,10 @@ struct AnalysisCategoryEvidenceRows: View {
             ForEach(result.modeledInputs) { input in
                 if let levels = evidence.inputLevels[input.series] {
                     Section(input.name) {
+                        if let contrast = result.categoryContrast(for: input.series) {
+                            LabeledContent("Reference category", value: contrast.reference)
+                            LabeledContent("Comparison category", value: contrast.comparison)
+                        }
                         ForEach(levels) { level in
                             categoryLevel(level)
                         }

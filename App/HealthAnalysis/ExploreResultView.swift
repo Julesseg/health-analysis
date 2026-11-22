@@ -153,7 +153,7 @@ struct ExploreResultView<Status: View>: View {
     }
 }
 
-private struct AnalysisModelView: View {
+struct AnalysisModelView: View {
     let result: AnalysisResult
     let log: ManualLog
 
@@ -368,17 +368,21 @@ func estimateLabel(_ estimate: AnalysisEstimate, input: AnalysisModeledInput, is
     return Text("\(estimate.difference, format: estimateNumber) bpm per \(estimate.inputIncrement, format: .number) \(input.unit) increase")
 }
 
-private func intervalLabel(_ estimate: AnalysisEstimate, isSleepDuration: Bool) -> String {
+func intervalLabel(_ estimate: AnalysisEstimate, isSleepDuration: Bool) -> String {
     if estimate.scale == .probabilityDifference {
         return String(localized: "\(estimate.interval.lowerBound * 100, format: estimateNumber) to \(estimate.interval.upperBound * 100, format: estimateNumber) percentage points")
     }
     if estimate.scale == .proportionalCountChange {
         return String(localized: "\(estimate.interval.lowerBound, format: countPercent) to \(estimate.interval.upperBound, format: countPercent)")
     }
+    return numericAssociationIntervalLabel(estimate.interval, isSleepDuration: isSleepDuration)
+}
+
+func numericAssociationIntervalLabel(_ interval: ClosedRange<Double>, isSleepDuration: Bool) -> String {
     if isSleepDuration {
-        return String(localized: "\(estimate.interval.lowerBound * 60, format: estimateNumber) to \(estimate.interval.upperBound * 60, format: estimateNumber) minutes")
+        return String(localized: "\(interval.lowerBound * 60, format: estimateNumber) to \(interval.upperBound * 60, format: estimateNumber) minutes")
     }
-    return String(localized: "\(estimate.interval.lowerBound, format: estimateNumber) to \(estimate.interval.upperBound, format: estimateNumber) bpm")
+    return String(localized: "\(interval.lowerBound, format: estimateNumber) to \(interval.upperBound, format: estimateNumber) bpm")
 }
 
 private extension AnalysisEstimate.Finding {
@@ -424,7 +428,7 @@ private extension AnalysisEstimate.Finding {
     }
 }
 
-private extension AnalysisEvidence.Grade {
+extension AnalysisEvidence.Grade {
     var description: LocalizedStringKey {
         switch self {
         case .insufficient: "Insufficient"

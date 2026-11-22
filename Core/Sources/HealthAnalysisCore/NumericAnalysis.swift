@@ -43,7 +43,7 @@ struct NumericAnalysis {
         _ observations: [AnalysisObservation], inputs: [AnalysisModeledInput],
         coverage: AnalysisCoverage, calendar: Calendar,
         behaviorWindow: AnalysisBehaviorWindow = .precedingDay, practicalDifference: Double = 1,
-        interaction: AnalysisInteraction? = nil
+        interaction: AnalysisInteraction? = nil, interactionReference: AnalysisInteractionEstimate? = nil
     ) -> Self {
         if interaction == nil, inputs.count == 1, inputs.first?.isMilligramQuantity == true {
             let legacy = NumericAssociation.assess(
@@ -97,7 +97,9 @@ struct NumericAnalysis {
                   let moderator = inputs.firstIndex(where: { $0.series == interaction.moderator }) else {
                 return result(.insufficient, [.uncertaintyUnavailable])
             }
-            switch NumericInteractionDesign.prepare(inputs: inputs, focal: focal, moderator: moderator, rows: observations) {
+            switch NumericInteractionDesign.prepare(
+                inputs: inputs, focal: focal, moderator: moderator, rows: observations, reference: interactionReference
+            ) {
             case .supported(let design):
                 interactionDesign = design
                 columns.append(design.productColumn)

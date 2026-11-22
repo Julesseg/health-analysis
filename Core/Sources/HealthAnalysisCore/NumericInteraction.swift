@@ -59,7 +59,7 @@ struct NumericInteractionDesign {
 
     static func prepare(
         inputs: [AnalysisModeledInput], focal focalIndex: Int, moderator moderatorIndex: Int,
-        rows: [AnalysisObservation]
+        rows: [AnalysisObservation], reference: AnalysisInteractionEstimate? = nil
     ) -> Preparation {
         let observedPairs = rows.compactMap { row -> (Double, Double)? in
             let focal = row.inputs[focalIndex]
@@ -68,8 +68,12 @@ struct NumericInteractionDesign {
             return (focal.value, moderator.value)
         }
         let minimumDays = max(5, Int(ceil(Double(observedPairs.count) * 0.025)))
-        guard let focal = ObservedLevels(observedPairs.map(\.0), input: inputs[focalIndex]),
-              let moderator = ObservedLevels(observedPairs.map(\.1), input: inputs[moderatorIndex]) else {
+        let moderatorRange = reference.map { $0.lowerCondition.moderatorValue...$0.higherCondition.moderatorValue }
+        guard let focal = ObservedLevels(
+            observedPairs.map(\.0), input: inputs[focalIndex], reference: reference?.focalValues
+        ), let moderator = ObservedLevels(
+            observedPairs.map(\.1), input: inputs[moderatorIndex], reference: moderatorRange
+        ) else {
             return .insufficient(.init(
                 explicitlyObservedPairDays: observedPairs.count, minimumDaysPerCombination: minimumDays,
                 explicitDaysByCombination: [:]
@@ -145,12 +149,12 @@ private struct ObservedLevels {
     let median: Double
     let upper: Double
 
-    init?(_ values: [Double], input: AnalysisModeledInput) {
+    init?(_ values: [Double], input: AnalysisModeledInput, reference: ClosedRange<Double>?) {
         guard !values.isEmpty else { return nil }
         let sorted = values.sorted()
         let count = sorted.count
-        lower = sorted[count / 4]
-        upper = sorted[3 * count / 4]
+        lower = reference?.lowerBound ?? sorted[count / 4]
+        upper = reference?.upperBound ?? sorted[3 * count / 4]
         median = sorted[(count - 1) / 2] / 2 + sorted[count / 2] / 2
         guard input.hasVariation(from: lower, to: upper) else { return nil }
     }

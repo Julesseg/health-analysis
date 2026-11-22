@@ -49,9 +49,27 @@ struct AnalysisResultScreen: View {
                 ContentUnavailableView("Saved analysis unavailable", systemImage: "bookmark")
             } else {
                 if let completed = state.completed {
-                    if discoveryBaseline?.discovery != nil {
+                    if let baseline = discoveryBaseline, let selection = baseline.discovery {
                         Section {
                             Text("Selected in an exploratory search").font(.headline)
+                            if let later = completed.reassessment {
+                                Text(later.support.label)
+                                    .accessibilityIdentifier("discovery.laterSupport")
+                            } else {
+                                Text("Subsequent-data support is unassessed.")
+                            }
+                            NavigationLink("Discovery evidence") {
+                                DiscoveryEvidenceView(
+                                    baseline: baseline, selection: selection, reassessment: completed.reassessment,
+                                    application: application
+                                )
+                            }
+                            .accessibilityIdentifier("discovery.evidence")
+                        }
+                        if completed.discovery == nil {
+                            Section("Refreshed analysis") {
+                                Text("This fit uses the saved history period, which can include days used in discovery.")
+                            }
                         }
                     }
                     ExploreResultView(
@@ -59,9 +77,6 @@ struct AnalysisResultScreen: View {
                         result: completed.result
                     ) {
                         refreshStatus
-                        if let selection = discoveryBaseline?.discovery {
-                            discoveryEvidence(selection, showingOriginal: completed.discovery != nil)
-                        }
                     }
                 } else {
                     refreshStatus
@@ -80,26 +95,9 @@ struct AnalysisResultScreen: View {
 
     private var discoveryBaseline: CompletedAnalysis? {
         if let savedID { return analyses.discoveryBaseline(for: savedID) }
+        if let editingID, let baseline = analyses.discoveryBaseline(for: editingID),
+           baseline.result.configuration == draft { return baseline }
         return draftState.completed
-    }
-
-    private func discoveryEvidence(_ selection: DiscoverySelection, showingOriginal: Bool) -> some View {
-        Section("Discovery evidence") {
-            if showingOriginal {
-                Text("Low confidence. The search screened \(selection.familySize) comparisons and checked the result across separate parts of the history.")
-                let format = FloatingPointFormatStyle<Double>.number
-                    .notation(selection.adjustedPValue < 0.001 ? .scientific : .automatic)
-                    .precision(.significantDigits(2...3))
-                LabeledContent("Search-adjusted p-value") {
-                    Text(selection.adjustedPValue, format: format)
-                }
-                Text("The model interval describes the fitted association. The search-adjusted p-value accounts for the screened comparisons.")
-            }
-            LabeledContent("Discovery cutoff") {
-                Text(selection.cutoff, format: .dateTime.month().day().year().hour().minute())
-            }
-            Text("Subsequent-data support is unassessed.")
-        }
     }
 
     private var refreshStatus: some View {
@@ -131,6 +129,7 @@ struct AnalysisResultScreen: View {
                 Button(title) {
                     Task { await refresh() }
                 }
+                .accessibilityIdentifier("analysis.refresh")
             }
             if let question {
                 NavigationLink("Edit analysis") {

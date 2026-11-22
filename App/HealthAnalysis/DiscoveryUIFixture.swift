@@ -4,18 +4,23 @@ import HealthAnalysisCore
 
 enum DiscoveryUIFixture {
     @MainActor static func applicationForLaunch() -> HealthAnalysisApplication? {
-        guard ProcessInfo.processInfo.environment["HEALTH_ANALYSIS_DISCOVERY_UI_FIXTURE"] == "1" else { return nil }
+        guard ProcessInfo.processInfo.environment["HEALTH_ANALYSIS_DISCOVERY_UI_FIXTURE"] == "1" || reassesses else {
+            return nil
+        }
         let calendar = Calendar.current
         let timeZone = calendar.timeZone
-        let yesterday = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: .now))!
-        let first = calendar.date(byAdding: .day, value: -395, to: yesterday)!
+        let today = calendar.startOfDay(for: .now)
+        let cutoff = calendar.date(byAdding: .day, value: reassesses ? -80 : -1, to: today)!
+        let first = calendar.date(byAdding: .day, value: -395, to: cutoff)!
+        let totalDays = reassesses ? 474 : 395
         let source = HealthMeasurement.Source(name: "Discovery fixture watch", bundleIdentifier: "fixture.discovery-ui")
-        let days = (0..<395).map { index in
+        let days = (0..<totalDays).map { index in
             let inputDate = calendar.date(byAdding: .day, value: index, to: first)!
             let next = calendar.date(byAdding: .day, value: 1, to: inputDate)!
             let outputDate = calendar.date(byAdding: .hour, value: 9, to: next)!
             let amount = 100 + index * 71 % 251
-            let bpm = 60 + 0.04 * Double(amount) + Double((index + 1) * 13 % 17) / 20
+            let signal = index < 395 ? 60 + 0.04 * Double(amount) : 90 - 0.04 * Double(amount)
+            let bpm = signal + Double((index + 1) * 13 % 17) / 20
             return (
                 date: ManualLogDay(inputDate, timeZone: timeZone), amount: amount,
                 measurement: HealthMeasurement(
@@ -28,12 +33,29 @@ enum DiscoveryUIFixture {
         let caffeine = try! application.manualLog.createQuantity(
             name: "Caffeine", unit: "mg", defaultValue: 0, startsOn: days[0].date
         )
-        for day in days {
+        for (index, day) in days.enumerated() where !reassesses || index < totalDays - 1 {
             application.manualLog.editQuantity(
                 caffeine.id, on: day.date, text: String(day.amount), locale: Locale(identifier: "en_US_POSIX")
             )
         }
         return application
+    }
+
+    @MainActor static func prepareSavedDiscovery(in application: HealthAnalysisApplication) async {
+        guard reassesses, application.savedAnalyses.questions.isEmpty else { return }
+        let calendar = Calendar.current
+        let day = calendar.date(byAdding: .day, value: -80, to: calendar.startOfDay(for: .now))!
+        let cutoff = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: day)!
+        await application.healthMeasurements.refresh()
+        guard let report = await application.discover(asOf: cutoff, timeZone: calendar.timeZone),
+              let finding = report.findings.first(where: { $0.configuration.behaviorWindow == .precedingDay }),
+              let question = try? application.savedAnalyses.save(finding.configuration, completed: finding.completed)
+        else { return }
+        try? application.savedAnalyses.setPinned(true, for: question.id)
+    }
+
+    private static var reassesses: Bool {
+        ProcessInfo.processInfo.environment["HEALTH_ANALYSIS_DISCOVERY_REASSESSMENT_UI_FIXTURE"] == "1"
     }
 
     private struct Source: HealthMeasurementSource {

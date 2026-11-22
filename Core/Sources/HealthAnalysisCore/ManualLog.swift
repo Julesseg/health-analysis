@@ -81,6 +81,7 @@ public final class ManualLog {
         var defaultHistories: [TrackingQuantity.ID: ManualDefaultHistory<Decimal>]?
         var reviews: [ManualLogDay: ReviewedDay]?
         var typed: TypedLogSnapshot?
+        var trackingSuggestions: [UUID: SuggestedTrackingVariable]?
 
         static func load(from url: URL) throws -> Self {
             do {
@@ -105,9 +106,21 @@ public final class ManualLog {
     public var typedVariables: [TypedTrackingVariable] { snapshot?.typed?.variables ?? [] }
     public var isStoreAvailable: Bool { snapshot != nil }
 
+    public var suggestedTrackingVariables: [SuggestedTrackingVariable] {
+        guard isStoreAvailable else { return [] }
+        let existing = quantities.compactMap { suggestion(for: $0.id, named: $0.name) }
+            + typedVariables.compactMap { suggestion(for: $0.id, named: $0.name) }
+        return SuggestedTrackingVariable.allCases.filter { !existing.contains($0) }
+    }
+
+    func suggestion(for id: UUID, named name: String) -> SuggestedTrackingVariable? {
+        snapshot?.trackingSuggestions?[id] ?? SuggestedTrackingVariable.allCases.first { $0.matches(name: name) }
+    }
+
     @discardableResult
     public func createQuantity(
-        name: String, unit: String, defaultValue: Decimal, startsOn: ManualLogDay
+        name: String, unit: String, defaultValue: Decimal, startsOn: ManualLogDay,
+        suggestion: SuggestedTrackingVariable? = nil
     ) throws(CreationError) -> TrackingQuantity {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let unit = unit.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -115,8 +128,14 @@ public final class ManualLog {
             throw .invalidQuantity
         }
         guard var updated = snapshot else { throw .persistenceFailed }
+        if let suggestion, !suggestedTrackingVariables.contains(suggestion) { throw .invalidQuantity }
         let quantity = TrackingQuantity(id: UUID(), name: name, unit: unit, defaultValue: defaultValue, startsOn: startsOn)
         updated.quantities.append(quantity)
+        if let suggestion {
+            var suggestions = updated.trackingSuggestions ?? [:]
+            suggestions[quantity.id] = suggestion
+            updated.trackingSuggestions = suggestions
+        }
 
         do {
             try persist(updated)
@@ -280,17 +299,24 @@ public final class ManualLog {
 
     @discardableResult
     public func createTypedVariable(
-        name: String, kind: TrackingVariableKind, defaultValue: ManualTrackingValue, startsOn: ManualLogDay
+        name: String, kind: TrackingVariableKind, defaultValue: ManualTrackingValue, startsOn: ManualLogDay,
+        suggestion: SuggestedTrackingVariable? = nil
     ) throws(TypedVariableCreationError) -> TypedTrackingVariable {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, kind.acceptsDefault(defaultValue) else { throw .invalidDefinition }
         guard var updated = snapshot else { throw .persistenceFailed }
+        if let suggestion, !suggestedTrackingVariables.contains(suggestion) { throw .invalidDefinition }
         let variable = TypedTrackingVariable(
             id: UUID(), name: name, kind: kind, defaultValue: defaultValue, startsOn: startsOn
         )
         var typed = updated.typed ?? TypedLogSnapshot()
         typed.variables.append(variable)
         updated.typed = typed
+        if let suggestion {
+            var suggestions = updated.trackingSuggestions ?? [:]
+            suggestions[variable.id] = suggestion
+            updated.trackingSuggestions = suggestions
+        }
 
         do {
             try persist(updated)

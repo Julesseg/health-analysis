@@ -24,7 +24,7 @@ struct TypedTrackingSettings: View {
     }
 }
 
-private enum TypedTrackingKind: CaseIterable, Identifiable {
+enum TypedTrackingKind: CaseIterable, Identifiable {
     case count
     case yesNo
     case rating
@@ -76,9 +76,10 @@ private extension TrackingVariableKind {
     }
 }
 
-private struct CreateTypedTrackingVariableView: View {
+struct CreateTypedTrackingVariableView: View {
     let log: ManualLog
     let kind: TypedTrackingKind
+    private let suggestion: SuggestedTrackingVariable?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.locale) private var locale
     @Environment(\.timeZone) private var timeZone
@@ -93,6 +94,13 @@ private struct CreateTypedTrackingVariableView: View {
     @State private var selectedCategoryID: TrackingCategory.ID?
     @State private var defaultTime = ManualClockTime(hour: 12, minute: 0)
     @State private var didFailToSave = false
+
+    init(log: ManualLog, kind: TypedTrackingKind, suggestion: SuggestedTrackingVariable? = nil, name: String = "") {
+        self.log = log
+        self.kind = kind
+        self.suggestion = suggestion
+        _name = State(initialValue: name)
+    }
 
     private struct CategoryDraft: Identifiable {
         let id = UUID()
@@ -228,7 +236,8 @@ private struct CreateTypedTrackingVariableView: View {
                 name: name,
                 kind: definition.kind,
                 defaultValue: definition.defaultValue,
-                startsOn: ManualLogDay(startDate, timeZone: timeZone)
+                startsOn: ManualLogDay(startDate, timeZone: timeZone),
+                suggestion: suggestion
             )
             dismiss()
         } catch {

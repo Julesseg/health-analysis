@@ -221,31 +221,10 @@ extension HealthAnalysisApplication {
     @MainActor public func analyze(
         _ configuration: AnalysisConfiguration, asOf: Date = .now
     ) throws(AnalysisRunFailure) -> AnalysisResult {
-        let series = configuration.inputs + configuration.adjustmentInputs
-        guard !configuration.inputs.isEmpty, Set(series).count == series.count,
-              !series.contains(configuration.output) else { throw .unsupportedConfiguration }
-        if let interaction = configuration.interaction, !interaction.isValid(for: configuration.inputs) {
-            throw .unsupportedConfiguration
-        }
-        guard manualLog.isStoreAvailable else { throw .manualLogUnavailable }
-        let catalog = Dictionary(uniqueKeysWithValues: manualAnalysisSeries.map { ($0.variable.id, $0) })
-        var inputs: [ManualAnalysisSeries] = []
-        for id in series {
-            if case .health = id { throw .unsupportedConfiguration }
-            guard let input = catalog[id] else { throw .inputUnavailable }
-            guard input.variable.supportsInput else { throw .unsupportedConfiguration }
-            inputs.append(input)
-        }
-        let output = catalog[configuration.output]?.variable
+        let series = try validatedAnalysisSeries(for: configuration)
+        let inputs = series.inputs
+        let output = series.output?.variable
         let ratingOutputThreshold = output?.kind.ratingThreshold
-        if ratingOutputThreshold != nil || inputs.contains(where: { $0.variable.kind.ratingThreshold != nil }) {
-            guard configuration.behaviorWindow == .precedingDay else { throw .ratingWindowUnavailable }
-            guard configuration.interaction == nil else { throw .ratingInteractionUnavailable }
-        }
-        if output?.kind == .tracked(.count) || inputs.contains(where: { $0.variable.kind == .tracked(.count) }) {
-            guard configuration.behaviorWindow == .precedingDay else { throw .countWindowUnavailable }
-            guard configuration.interaction == nil else { throw .countInteractionUnavailable }
-        }
 
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = configuration.timeZone
@@ -253,13 +232,11 @@ extension HealthAnalysisApplication {
         let practicalDifference: Double
         switch configuration.output {
         case .health(let metric, let sourceID):
-            guard metric == .restingHeartRate || metric == .sleepAnalysis else { throw .unsupportedConfiguration }
             outputHistory = try healthOutputs(metric: metric, sourceID: sourceID, asOf: asOf, calendar: calendar)
             practicalDifference = metric == .sleepAnalysis ? 0.25 : 1
         case .manualTyped:
-            guard let series = catalog[configuration.output] else { throw .outputUnavailable }
-            guard series.variable.supportsOutput else { throw .unsupportedConfiguration }
-            outputHistory = .stored(series, in: manualLog, asOf: asOf, calendar: calendar)
+            guard let manualOutput = series.output else { throw .outputUnavailable }
+            outputHistory = .stored(manualOutput, in: manualLog, asOf: asOf, calendar: calendar)
             practicalDifference = 0
         case .manualQuantity:
             throw .unsupportedConfiguration
@@ -308,6 +285,47 @@ extension HealthAnalysisApplication {
         )
     }
 
+    @MainActor func validatedAnalysisSeries(
+        for configuration: AnalysisConfiguration
+    ) throws(AnalysisRunFailure) -> (inputs: [ManualAnalysisSeries], output: ManualAnalysisSeries?) {
+        let series = configuration.inputs + configuration.adjustmentInputs
+        guard !configuration.inputs.isEmpty, Set(series).count == series.count,
+              !series.contains(configuration.output) else { throw .unsupportedConfiguration }
+        if let interaction = configuration.interaction, !interaction.isValid(for: configuration.inputs) {
+            throw .unsupportedConfiguration
+        }
+        guard manualLog.isStoreAvailable else { throw .manualLogUnavailable }
+        let catalog = Dictionary(uniqueKeysWithValues: manualAnalysisSeries.map { ($0.variable.id, $0) })
+        var inputs: [ManualAnalysisSeries] = []
+        for id in series {
+            if case .health = id { throw .unsupportedConfiguration }
+            guard let input = catalog[id] else { throw .inputUnavailable }
+            guard input.variable.supportsInput else { throw .unsupportedConfiguration }
+            inputs.append(input)
+        }
+        let output = catalog[configuration.output]?.variable
+        if output?.kind.ratingThreshold != nil || inputs.contains(where: { $0.variable.kind.ratingThreshold != nil }) {
+            guard configuration.behaviorWindow == .precedingDay else { throw .ratingWindowUnavailable }
+            guard configuration.interaction == nil else { throw .ratingInteractionUnavailable }
+        }
+        if output?.kind == .tracked(.count) || inputs.contains(where: { $0.variable.kind == .tracked(.count) }) {
+            guard configuration.behaviorWindow == .precedingDay else { throw .countWindowUnavailable }
+            guard configuration.interaction == nil else { throw .countInteractionUnavailable }
+        }
+
+        switch configuration.output {
+        case .health(let metric, _):
+            guard metric == .restingHeartRate || metric == .sleepAnalysis else { throw .unsupportedConfiguration }
+            return (inputs, nil)
+        case .manualTyped:
+            guard let series = catalog[configuration.output] else { throw .outputUnavailable }
+            guard series.variable.supportsOutput else { throw .unsupportedConfiguration }
+            return (inputs, series)
+        case .manualQuantity:
+            throw .unsupportedConfiguration
+        }
+    }
+
     @MainActor private func healthOutputs(
         metric: HealthMeasurement.Metric, sourceID: String?, asOf: Date, calendar: Calendar
     ) throws(AnalysisRunFailure) -> AnalysisOutputHistory {
@@ -324,17 +342,7 @@ extension HealthAnalysisApplication {
             lastReadFailure = nil
         }
 
-        let outputs: [TemporalAnalysisDataset.Output]
-        if metric == .sleepAnalysis {
-            let episodes = healthMeasurements.deriveSleepEpisodes(
-                from: healthMeasurements.history.filter { $0.metric == .sleepAnalysis && $0.endDate <= asOf }
-            )
-            outputs = TemporalAnalysisDataset.sleepDurationOutputs(episodes, asOf: asOf, calendar: calendar)
-        } else {
-            outputs = TemporalAnalysisDataset.restingHeartRateOutputs(
-                healthMeasurements.history, asOf: asOf, calendar: calendar
-            )
-        }
+        let outputs = healthAnalysisOutputs(for: metric, asOf: asOf, calendar: calendar)
         let outputSourceID = sourceID ?? healthMeasurements.preferredSource(for: metric)?.bundleIdentifier
         let sources = Set(outputs.compactMap { $0.source?.bundleIdentifier })
         guard outputSourceID != nil || sources.count <= 1 else { throw .chooseOutputSource }
@@ -344,5 +352,21 @@ extension HealthAnalysisApplication {
             outputs: selectedOutputs, healthReadAt: lastReadAt, healthReadFailure: lastReadFailure,
             selectedSourceIdentifier: outputSourceID
         )
+    }
+
+    @MainActor func healthAnalysisOutputs(
+        for metric: HealthMeasurement.Metric, asOf: Date, calendar: Calendar
+    ) -> [TemporalAnalysisDataset.Output] {
+        switch metric {
+        case .sleepAnalysis:
+            let episodes = healthMeasurements.deriveSleepEpisodes(
+                from: healthMeasurements.history.filter { $0.metric == metric && $0.endDate <= asOf }
+            )
+            return TemporalAnalysisDataset.sleepDurationOutputs(episodes, asOf: asOf, calendar: calendar)
+        case .restingHeartRate:
+            return TemporalAnalysisDataset.restingHeartRateOutputs(healthMeasurements.history, asOf: asOf, calendar: calendar)
+        default:
+            return []
+        }
     }
 }

@@ -29,14 +29,16 @@ struct ManualTrackingSettingsView: View {
                     Text("Couldn’t open the daily log")
                 }
             }
+            SuggestedTrackingSection(log: log)
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
 
-private struct CreateTrackingQuantityView: View {
+struct CreateTrackingQuantityView: View {
     let log: ManualLog
+    private let suggestion: SuggestedTrackingVariable?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.locale) private var locale
     @Environment(\.timeZone) private var timeZone
@@ -45,6 +47,17 @@ private struct CreateTrackingQuantityView: View {
     @State private var defaultText = ""
     @State private var startDate = Date.now
     @State private var didFailToSave = false
+
+    init(
+        log: ManualLog, suggestion: SuggestedTrackingVariable? = nil,
+        name: String = "", unit: String = "", defaultText: String = ""
+    ) {
+        self.log = log
+        self.suggestion = suggestion
+        _name = State(initialValue: name)
+        _unit = State(initialValue: unit)
+        _defaultText = State(initialValue: defaultText)
+    }
 
     var body: some View {
         let defaultValue = QuantityNumber.parse(defaultText, locale: locale)
@@ -88,7 +101,8 @@ private struct CreateTrackingQuantityView: View {
                 name: name,
                 unit: unit,
                 defaultValue: defaultValue,
-                startsOn: ManualLogDay(startDate, timeZone: timeZone)
+                startsOn: ManualLogDay(startDate, timeZone: timeZone),
+                suggestion: suggestion
             )
             dismiss()
         } catch {

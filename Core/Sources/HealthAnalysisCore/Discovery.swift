@@ -112,7 +112,7 @@ extension HealthAnalysisApplication {
         var ambiguousSource = false
         for metric in metrics {
             let usesPreferredSource = enabled.contains(.health(metric: metric))
-            let outputs = availableHealthOutputs(metric, asOf: cutoff, calendar: calendar).filter { output in
+            let outputs = healthAnalysisOutputs(for: metric, asOf: cutoff, calendar: calendar).filter { output in
                 guard (startOfHistory...historyEnd).contains(output.date),
                       let sourceID = output.source?.bundleIdentifier else { return false }
                 return usesPreferredSource || enabled.contains(.health(metric: metric, sourceBundleIdentifier: sourceID))

@@ -11,17 +11,20 @@ public struct HealthAnalysisApplication: Sendable {
     public let healthMeasurements: HealthMeasurementHistory
     public let manualLog: ManualLog
     public let savedAnalyses: SavedAnalyses
+    public let firstUse: FirstUseSetup
     public let discovery = DiscoveryActivity()
 
     public init(
         healthSource: (any HealthMeasurementSource)? = nil,
         healthHistoryStoreURL: URL? = nil,
         manualLogStoreURL: URL? = nil,
-        savedAnalysesStoreURL: URL? = nil
+        savedAnalysesStoreURL: URL? = nil,
+        firstUseStoreURL: URL? = nil
     ) {
         healthMeasurements = HealthMeasurementHistory(source: healthSource, storeURL: healthHistoryStoreURL)
         manualLog = ManualLog(storeURL: manualLogStoreURL)
         savedAnalyses = SavedAnalyses(storeURL: savedAnalysesStoreURL)
+        firstUse = FirstUseSetup(health: healthMeasurements, storeURL: firstUseStoreURL)
     }
 
     @MainActor public var overview: Overview {

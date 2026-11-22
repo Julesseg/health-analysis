@@ -219,6 +219,41 @@ extension HealthAnalysisApplication {
     @MainActor public func analyze(
         _ configuration: AnalysisConfiguration, asOf: Date = .now
     ) throws(AnalysisRunFailure) -> AnalysisResult {
+        let series = try validatedAnalysisSeries(for: configuration)
+        let inputs = series.inputs
+        let output = series.output?.variable
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = configuration.timeZone
+        let outputHistory: AnalysisOutputHistory
+        let practicalDifference: Double
+        switch configuration.output {
+        case .health(let metric, let sourceID):
+            outputHistory = try healthOutputs(metric: metric, sourceID: sourceID, asOf: asOf, calendar: calendar)
+            practicalDifference = metric == .sleepAnalysis ? 0.25 : 1
+        case .manualTyped:
+            guard let manualOutput = series.output else { throw .outputUnavailable }
+            outputHistory = .stored(manualOutput, in: manualLog, asOf: asOf, calendar: calendar)
+            practicalDifference = 0
+        case .manualQuantity:
+            throw .unsupportedConfiguration
+        }
+
+        let dataset = TemporalAnalysisDataset(
+            outputs: outputHistory.outputs, selectedSourceIdentifier: outputHistory.selectedSourceIdentifier,
+            inputs: inputs, manualLog: manualLog,
+            window: configuration.behaviorWindow, history: configuration.history, asOf: asOf, calendar: calendar
+        )
+        return AnalysisResult.assess(
+            configuration: configuration, dataset: dataset, inputs: inputs.map(\.variable), output: output,
+            calendar: calendar, practicalDifference: practicalDifference,
+            lastReadAt: outputHistory.healthReadAt, lastReadFailure: outputHistory.healthReadFailure
+        )
+    }
+
+    @MainActor func validatedAnalysisSeries(
+        for configuration: AnalysisConfiguration
+    ) throws(AnalysisRunFailure) -> (inputs: [ManualAnalysisSeries], output: ManualAnalysisSeries?) {
         let series = configuration.inputs + configuration.adjustmentInputs
         guard !configuration.inputs.isEmpty, Set(series).count == series.count,
               !series.contains(configuration.output) else { throw .unsupportedConfiguration }
@@ -240,34 +275,17 @@ extension HealthAnalysisApplication {
             guard configuration.interaction == nil else { throw .countInteractionUnavailable }
         }
 
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = configuration.timeZone
-        let outputHistory: AnalysisOutputHistory
-        let practicalDifference: Double
         switch configuration.output {
-        case .health(let metric, let sourceID):
+        case .health(let metric, _):
             guard metric == .restingHeartRate || metric == .sleepAnalysis else { throw .unsupportedConfiguration }
-            outputHistory = try healthOutputs(metric: metric, sourceID: sourceID, asOf: asOf, calendar: calendar)
-            practicalDifference = metric == .sleepAnalysis ? 0.25 : 1
+            return (inputs, nil)
         case .manualTyped:
             guard let series = catalog[configuration.output] else { throw .outputUnavailable }
             guard series.variable.supportsOutput else { throw .unsupportedConfiguration }
-            outputHistory = .stored(series, in: manualLog, asOf: asOf, calendar: calendar)
-            practicalDifference = 0
+            return (inputs, series)
         case .manualQuantity:
             throw .unsupportedConfiguration
         }
-
-        let dataset = TemporalAnalysisDataset(
-            outputs: outputHistory.outputs, selectedSourceIdentifier: outputHistory.selectedSourceIdentifier,
-            inputs: inputs, manualLog: manualLog,
-            window: configuration.behaviorWindow, history: configuration.history, asOf: asOf, calendar: calendar
-        )
-        return AnalysisResult.assess(
-            configuration: configuration, dataset: dataset, inputs: inputs.map(\.variable), output: output,
-            calendar: calendar, practicalDifference: practicalDifference,
-            lastReadAt: outputHistory.healthReadAt, lastReadFailure: outputHistory.healthReadFailure
-        )
     }
 
     @MainActor private func healthOutputs(
@@ -286,7 +304,7 @@ extension HealthAnalysisApplication {
             lastReadFailure = nil
         }
 
-        let outputs = availableHealthOutputs(metric, asOf: asOf, calendar: calendar)
+        let outputs = healthAnalysisOutputs(for: metric, asOf: asOf, calendar: calendar)
         let outputSourceID = sourceID ?? healthMeasurements.preferredSource(for: metric)?.bundleIdentifier
         let sources = Set(outputs.compactMap { $0.source?.bundleIdentifier })
         guard outputSourceID != nil || sources.count <= 1 else { throw .chooseOutputSource }
@@ -298,18 +316,19 @@ extension HealthAnalysisApplication {
         )
     }
 
-    @MainActor func availableHealthOutputs(
-        _ metric: HealthMeasurement.Metric, asOf: Date, calendar: Calendar
+    @MainActor func healthAnalysisOutputs(
+        for metric: HealthMeasurement.Metric, asOf: Date, calendar: Calendar
     ) -> [TemporalAnalysisDataset.Output] {
-        if metric == .sleepAnalysis {
+        switch metric {
+        case .sleepAnalysis:
             let episodes = healthMeasurements.deriveSleepEpisodes(
-                from: healthMeasurements.history.filter { $0.metric == .sleepAnalysis && $0.endDate <= asOf }
+                from: healthMeasurements.history.filter { $0.metric == metric && $0.endDate <= asOf }
             )
             return TemporalAnalysisDataset.sleepDurationOutputs(episodes, asOf: asOf, calendar: calendar)
-        } else {
-            return TemporalAnalysisDataset.restingHeartRateOutputs(
-                healthMeasurements.history, asOf: asOf, calendar: calendar
-            )
+        case .restingHeartRate:
+            return TemporalAnalysisDataset.restingHeartRateOutputs(healthMeasurements.history, asOf: asOf, calendar: calendar)
+        default:
+            return []
         }
     }
 }

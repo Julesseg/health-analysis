@@ -5,6 +5,7 @@ struct ExploreView: View {
     let application: HealthAnalysisApplication
     private let editing: SavedAnalysis?
     private let discovery: CompletedAnalysis?
+    @Environment(\.timeZone) private var timeZone
 
     private var initialConfiguration: AnalysisConfiguration? { editing?.configuration ?? discovery?.result.configuration }
 
@@ -83,8 +84,8 @@ struct ExploreView: View {
                             choice.analysisChoiceLabel.tag(choice.id as AnalysisSeriesID?)
                         }
                     }
-                    if let savedOutput = initialConfiguration?.output, !outputs.contains(where: { $0.id == savedOutput }) {
-                        application.analysisSeriesTitle(savedOutput).tag(savedOutput as AnalysisSeriesID?)
+                    if let output, !outputs.contains(where: { $0.id == output }) {
+                        application.analysisSeriesTitle(output).tag(output as AnalysisSeriesID?)
                     }
                 }
                 .accessibilityIdentifier("explore.output")
@@ -166,9 +167,24 @@ struct ExploreView: View {
             }
 
             if editing == nil && discovery == nil {
+                Section {
+                    NavigationLink("Suggested questions") {
+                        AnalysisPresetsView(application: application, timeZone: timeZone, onSelect: applyPreset)
+                    }
+                }
                 SavedAnalysisListSection(application: application)
             }
         }
+    }
+
+    private func applyPreset(_ preset: AnalysisConfiguration) {
+        output = preset.output
+        inputs = preset.inputs
+        adjustments = preset.adjustmentInputs
+        interaction = preset.interaction
+        behaviorWindow = preset.behaviorWindow
+        history = preset.history
+        analysisTimeZone = preset.timeZone
     }
 
     private var interactionSummary: Text {

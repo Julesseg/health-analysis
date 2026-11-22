@@ -3,7 +3,14 @@ import SwiftUI
 
 struct ContentView: View {
     let application: HealthAnalysisApplication
+    @State private var selectedTab: Destination = .insights
     @State private var presentedSheet: PresentedSheet?
+
+    private enum Destination {
+        case insights
+        case explore
+        case data
+    }
 
     private enum PresentedSheet: String, Identifiable {
         case log
@@ -15,14 +22,16 @@ struct ContentView: View {
     private var overview: HealthAnalysisApplication.Overview { application.overview }
 
     var body: some View {
-        TabView {
-            Tab("Insights", systemImage: "lightbulb") {
-                destination("Insights") { InsightsView(application: application) }
+        TabView(selection: $selectedTab) {
+            Tab("Insights", systemImage: "lightbulb", value: Destination.insights) {
+                destination("Insights") {
+                    InsightsView(application: application) { selectedTab = .explore }
+                }
             }
-            Tab("Explore", systemImage: "magnifyingglass") {
+            Tab("Explore", systemImage: "magnifyingglass", value: Destination.explore) {
                 destination("Explore") { ExploreView(application: application) }
             }
-            Tab("Data", systemImage: "list.bullet") {
+            Tab("Data", systemImage: "list.bullet", value: Destination.data) {
                 destination("Data") { data }
             }
         }

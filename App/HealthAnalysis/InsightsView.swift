@@ -3,6 +3,7 @@ import SwiftUI
 
 struct InsightsView: View {
     let application: HealthAnalysisApplication
+    let openExplore: () -> Void
     @AppStorage("disabledDiscoverySeries") private var storedDisabledSeries = Data()
     @Environment(\.timeZone) private var timeZone
     @State private var searchAgain = 0
@@ -36,6 +37,13 @@ struct InsightsView: View {
     var body: some View {
         let request = request
         List {
+            if application.firstUse.step != .complete {
+                Section {
+                    NavigationLink("Get started") {
+                        FirstUseView(application: application, onFinish: openExplore)
+                    }
+                }
+            }
             SavedAnalysisListSection(application: application, followingOnly: true)
             Section {
                 discoveryRows

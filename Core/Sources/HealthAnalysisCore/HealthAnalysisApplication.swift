@@ -8,15 +8,17 @@ public struct HealthAnalysisApplication: Sendable {
         public let hasDiscoveries: Bool
     }
 
+    public let healthMeasurements: HealthMeasurementHistory
     public let manualLog: ManualLog
 
-    public init(manualLogStoreURL: URL? = nil) {
+    public init(healthSource: (any HealthMeasurementSource)? = nil, manualLogStoreURL: URL? = nil) {
+        healthMeasurements = HealthMeasurementHistory(source: healthSource)
         manualLog = ManualLog(storeURL: manualLogStoreURL)
     }
 
     @MainActor public var overview: Overview {
         Overview(
-            hasReadableMeasurements: false,
+            hasReadableMeasurements: !healthMeasurements.history.isEmpty,
             hasTrackingVariables: !manualLog.quantities.isEmpty,
             hasFollowedAnalyses: false,
             hasDiscoveries: false

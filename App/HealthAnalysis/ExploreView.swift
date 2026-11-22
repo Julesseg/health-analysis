@@ -5,12 +5,16 @@ struct ExploreView: View {
     let application: HealthAnalysisApplication
 
     @State private var output: AnalysisSeriesID?
-    @State private var inputID: UUID?
+    @State private var inputIDs: Set<UUID> = []
+    @State private var adjustmentIDs: Set<UUID> = []
     @State private var analysisTimeZone = TimeZone.current
 
-    private var caffeine: TrackingQuantity? {
-        application.analysisCaffeineQuantities.first { $0.id == inputID }
+    private var quantities: [TrackingQuantity] { application.analysisNumericQuantities }
+    private var inputs: [TrackingQuantity] { quantities.filter { inputIDs.contains($0.id) } }
+    private var adjustmentChoices: [TrackingQuantity] {
+        application.analysisAdjustmentSuggestions(excluding: inputs.map(\.id))
     }
+    private var adjustments: [TrackingQuantity] { adjustmentChoices.filter { adjustmentIDs.contains($0.id) } }
 
     var body: some View {
         Form {
@@ -30,38 +34,57 @@ struct ExploreView: View {
                 }
                 .accessibilityIdentifier("explore.output")
 
-                Picker("Inputs", selection: $inputID) {
-                    Text("Choose caffeine quantity").tag(nil as UUID?)
-                    ForEach(application.analysisCaffeineQuantities) { quantity in
-                        Text("\(quantity.name) (\(quantity.unit))").tag(quantity.id as UUID?)
-                    }
+                NavigationLink {
+                    ExploreQuantitySelection(
+                        title: "Inputs", quantities: quantities,
+                        selection: Binding(
+                            get: { inputIDs },
+                            set: { selected in
+                                inputIDs = selected
+                                adjustmentIDs.subtract(selected)
+                            }
+                        )
+                    )
+                } label: {
+                    LabeledContent("Inputs", value: selectionSummary(inputs))
                 }
-                .disabled(application.analysisCaffeineQuantities.isEmpty)
+                .disabled(quantities.isEmpty)
+                .accessibilityLabel("Inputs")
+                .accessibilityValue(selectionSummary(inputs))
                 .accessibilityIdentifier("explore.inputs")
 
-                LabeledContent("Account for") { Text("Unavailable") }
-                    .accessibilityIdentifier("explore.adjustments")
+                NavigationLink {
+                    ExploreQuantitySelection(
+                        title: "Account for", quantities: adjustmentChoices,
+                        selection: $adjustmentIDs, showsSuggestions: true
+                    )
+                } label: {
+                    LabeledContent("Account for", value: selectionSummary(adjustments))
+                }
+                .disabled(adjustmentChoices.isEmpty)
+                .accessibilityLabel("Account for")
+                .accessibilityValue(selectionSummary(adjustments))
+                .accessibilityIdentifier("explore.adjustments")
                 LabeledContent("Behavior window") { Text("Complete preceding day") }
                     .accessibilityIdentifier("explore.behaviorWindow")
                 LabeledContent("History") { Text("Full usable history") }
                     .accessibilityIdentifier("explore.history")
             } footer: {
-                if application.analysisCaffeineQuantities.isEmpty {
-                    Text("Add a daily caffeine quantity in milligrams (mg) in Settings.")
-                } else {
-                    Text("Choose the daily quantity you use to log caffeine in milligrams (mg).")
+                if quantities.isEmpty {
+                    Text("Add a daily quantity in Settings to choose an input.")
                 }
             }
 
             Section {
-                if let output, let caffeine {
+                if let output, !inputs.isEmpty {
                     NavigationLink("Analyze") {
                         ExploreResultView(
                             application: application,
                             configuration: AnalysisConfiguration(
-                                output: output, inputs: [.manualQuantity(caffeine.id)], timeZone: analysisTimeZone
-                            ),
-                            inputName: caffeine.name
+                                output: output, inputs: inputs.map { .manualQuantity($0.id) },
+                                adjustmentInputs: adjustments.map { .manualQuantity($0.id) },
+                                timeZone: analysisTimeZone
+                            )
                         )
                     }
                 } else {
@@ -70,5 +93,47 @@ struct ExploreView: View {
                 }
             }
         }
+    }
+
+    private func selectionSummary(_ selected: [TrackingQuantity]) -> String {
+        switch selected.count {
+        case 0: String(localized: "None")
+        case 1: selected[0].name
+        default: String(localized: "\(selected.count) selected")
+        }
+    }
+}
+
+private struct ExploreQuantitySelection: View {
+    let title: LocalizedStringKey
+    let quantities: [TrackingQuantity]
+    @Binding var selection: Set<UUID>
+    var showsSuggestions = false
+
+    var body: some View {
+        Form {
+            Section {
+                ForEach(quantities) { quantity in
+                    Toggle(
+                        "\(quantity.name) (\(quantity.unit))",
+                        isOn: Binding(
+                            get: { selection.contains(quantity.id) },
+                            set: { selected in
+                                if selected { selection.insert(quantity.id) }
+                                else { selection.remove(quantity.id) }
+                            }
+                        )
+                    )
+                }
+            } header: {
+                if showsSuggestions { Text("Suggested adjustments") }
+            } footer: {
+                if showsSuggestions {
+                    Text("These are other logged quantities. Choose the ones you want to account for in this analysis.")
+                }
+            }
+        }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

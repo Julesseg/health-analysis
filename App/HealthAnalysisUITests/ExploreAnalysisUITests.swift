@@ -34,6 +34,7 @@ final class ExploreAnalysisUITests: XCTestCase {
 
         let analyze = app.buttons["Analyze"]
         for _ in 0..<3 where !analyze.isHittable { app.swipeUp() }
+        XCTAssertTrue(analyze.isEnabled)
         analyze.tap()
         XCTAssertTrue(app.staticTexts["Higher values were associated with higher resting heart rate."]
             .waitForExistence(timeout: 5))
@@ -106,7 +107,13 @@ final class ExploreAnalysisUITests: XCTestCase {
 extension XCUIElement {
     @MainActor
     func tapExploreSwitch() {
+        let expectedValue = (value as? String) == "1" ? "0" : "1"
         let control = switches.firstMatch
-        (control.exists ? control : self).tap()
+        let target = control.exists ? control : self
+        let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: target)
+        XCTAssertEqual(XCTWaiter.wait(for: [hittable], timeout: 5), .completed)
+        target.tap()
+        let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", expectedValue), object: self)
+        XCTAssertEqual(XCTWaiter.wait(for: [changed], timeout: 5), .completed, "Switch \(label) should change to \(expectedValue)")
     }
 }

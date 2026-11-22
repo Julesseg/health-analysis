@@ -78,8 +78,11 @@ struct FirstUseTests {
 
         #expect(!app.healthMeasurements.hrvSeries(for: .sdnn).isEmpty)
         let presets = app.analysisPresets(timeZone: .gmt, asOf: day(4))
-        #expect(Set(presets.map(\.output)) == [.health(metric: .sleepAnalysis), .health(metric: .restingHeartRate)])
-        #expect(presets.count == 6)
+        let expectedOutputs: Set<AnalysisSeriesID> = [
+            .health(metric: .sleepAnalysis), .health(metric: .restingHeartRate), .sleepTiming(.onset), .sleepTiming(.wake)
+        ]
+        #expect(Set(presets.map(\.output)) == expectedOutputs)
+        #expect(presets.count == 12)
         #expect(Set(presets.flatMap(\.inputs)) == [.manualQuantity(caffeine.id), .manualTyped(alcohol.id), .manualTyped(stress.id)])
         let drinksAndSleep = try #require(presets.first {
             $0.output == .health(metric: .sleepAnalysis) && $0.inputs == [.manualTyped(alcohol.id)]

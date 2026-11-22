@@ -26,6 +26,9 @@ struct HealthAnalysisApp: App {
         if let fixture = CategoryAnalysisUIFixture.applicationForLaunch() {
             return Configuration(application: fixture)
         }
+        if let fixture = ClockAnalysisUIFixture.applicationForLaunch() {
+            return fixture
+        }
         if let fixture = CountAnalysisUIFixture.applicationForLaunch() {
             return Configuration(application: fixture)
         }

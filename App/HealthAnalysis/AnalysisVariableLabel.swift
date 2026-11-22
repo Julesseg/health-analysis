@@ -14,6 +14,7 @@ extension AnalysisModeledInput {
 
     func displayedValue(_ value: Double, trackingValue: ManualTrackingValue?) -> Text {
         if !categories.isEmpty { return categoryValueLabel(trackingValue, categories: categories) }
+        if isClock { return analysisClockText(value) }
         if case .yesNo(let isYes)? = trackingValue { return yesNoLabel(isYes) }
         if case .rating(let level)? = trackingValue { return Text(level, format: .number) }
         return Text("\(value, format: .number) \(unit)")
@@ -27,6 +28,7 @@ private extension AnalysisVariable.Kind {
         case .tracked(.yesNo): Text("\(name) (yes/no)")
         case .tracked(.count): Text("\(name) (count)")
         case .tracked(.category): Text("\(name) (category)")
+        case .tracked(.timeOfDay): Text("\(name) (time of day)")
         case .tracked(.rating(let levels)):
             Text("\(name) (rating \(levels.lowerBound, format: .number) to \(levels.upperBound, format: .number))")
         case .tracked: Text(verbatim: name)

@@ -9,6 +9,7 @@ struct TemporalAnalysisDataset: Sendable {
         var source: HealthMeasurement.Source? = nil
         var origin: ManualValueOrigin? = nil
         var trackingValue: ManualTrackingValue? = nil
+        var sleepTimeZoneEvidence: SleepEpisode.TimeZoneEvidence? = nil
     }
 
     static func restingHeartRateOutputs(
@@ -28,17 +29,39 @@ struct TemporalAnalysisDataset: Sendable {
         }
     }
 
-    static func sleepDurationOutputs(_ episodes: [SleepEpisode], asOf: Date, calendar: Calendar) -> [Output] {
+    static func sleepOutputs(
+        _ episodes: [SleepEpisode], asOf: Date, calendar: Calendar, timing: SleepTiming? = nil
+    ) -> [Output] {
         episodes.filter { $0.wakeTime <= asOf && $0.duration.isFinite && $0.duration > 0 }.sorted {
             (-$0.duration, $0.startDate, $0.wakeTime) < (-$1.duration, $1.startDate, $1.wakeTime)
         }.compactMap { episode in
             guard let wakeLabel = calendar.date(from: episode.wakeDay),
                   calendar.dateComponents([.year, .month, .day], from: wakeLabel) == episode.wakeDay else { return nil }
             let date = calendar.startOfDay(for: wakeLabel)
+            let onsetDayInAnalysisZone = calendar.startOfDay(for: episode.startDate)
+            guard let timing else {
+                return Output(
+                    date: date, anchor: episode.wakeTime, behaviorCutoff: min(date, onsetDayInAnalysisZone),
+                    value: episode.duration / 3600, source: episode.source
+                )
+            }
+
+            let onsetZone = TimeZone(identifier: episode.onsetTimeZoneEvidence.identifier) ?? episode.timeZone
+            let evidence = timing == .onset ? episode.onsetTimeZoneEvidence : episode.timeZoneEvidence
+            let anchor = timing == .onset ? episode.startDate : episode.wakeTime
+            let eventZone = timing == .onset ? onsetZone : episode.timeZone
+            let clock = calendar.dateComponents(in: eventZone, from: anchor)
+
+            var onsetCalendar = calendar
+            onsetCalendar.timeZone = onsetZone
+            let onsetDay = onsetCalendar.dateComponents([.year, .month, .day], from: episode.startDate)
+            guard let localOnsetLabel = calendar.date(from: onsetDay),
+                  calendar.dateComponents([.year, .month, .day], from: localOnsetLabel) == onsetDay,
+                  let hour = clock.hour, let minute = clock.minute else { return nil }
             return Output(
-                date: date, anchor: episode.wakeTime,
-                behaviorCutoff: min(date, calendar.startOfDay(for: episode.startDate)),
-                value: episode.duration / 3600, source: episode.source
+                date: date, anchor: anchor,
+                behaviorCutoff: min(date, onsetDayInAnalysisZone, calendar.startOfDay(for: localOnsetLabel)),
+                value: Double(hour * 60 + minute), source: episode.source, sleepTimeZoneEvidence: evidence
             )
         }
     }
@@ -197,13 +220,15 @@ struct TemporalAnalysisDataset: Sendable {
                 unpaired.append(.init(
                     date: row.output.date, anchor: row.output.anchor, value: row.output.value,
                     source: row.output.source, missingInputs: missing, origin: row.output.origin,
-                    trackingValue: row.output.trackingValue, excludedCategoryInputs: excluded.isEmpty ? nil : excluded
+                    trackingValue: row.output.trackingValue, excludedCategoryInputs: excluded.isEmpty ? nil : excluded,
+                    sleepTimeZoneEvidence: row.output.sleepTimeZoneEvidence
                 ))
                 return nil
             }
             return AnalysisObservation(
                 outputDate: row.output.date, outputAnchor: row.output.anchor, outputValue: row.output.value, inputs: pairedInputs,
-                outputOrigin: row.output.origin, outputTrackingValue: row.output.trackingValue
+                outputOrigin: row.output.origin, outputTrackingValue: row.output.trackingValue,
+                sleepTimeZoneEvidence: row.output.sleepTimeZoneEvidence
             )
         }
         coverage = AnalysisCoverage(observations: observations, outputDates: plan.outputDates, calendar: calendar)

@@ -35,8 +35,8 @@ struct CountAnalysisTests {
         let choice = try #require(catalog.first { $0.id == configuration.output })
         #expect(choice.kind == .tracked(.count))
         #expect(choice.supportsInput && choice.supportsOutput)
-        let unsupported = try #require(catalog.first { $0.id == .manualTyped(category.id) })
-        #expect(!unsupported.supportsInput && !unsupported.supportsOutput)
+        let categoryChoice = try #require(catalog.first { $0.id == .manualTyped(category.id) })
+        #expect(categoryChoice.supportsInput && categoryChoice.supportsOutput)
 
         let result = try reopened.analyze(configuration, asOf: date(5))
         #expect(result.coverage.usableDates == [date(2), date(3), date(4)])

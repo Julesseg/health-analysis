@@ -15,6 +15,7 @@ enum SleepDerivation {
         var end: Date
         var duration: TimeInterval
         var zone: SleepEpisode.TimeZoneEvidence?
+        let onsetZone: SleepEpisode.TimeZoneEvidence?
     }
 
     static func episodes(from records: [HealthMeasurement], fallback: TimeZone) -> [SleepEpisode] {
@@ -72,7 +73,7 @@ enum SleepDerivation {
                     episodes[last].duration += duration
                     episodes[last].zone = zone ?? episodes[last].zone
                 } else {
-                    episodes.append(Episode(start: previous, end: boundary.date, duration: duration, zone: zone))
+                    episodes.append(Episode(start: previous, end: boundary.date, duration: duration, zone: zone, onsetZone: zone))
                 }
             }
 
@@ -86,7 +87,8 @@ enum SleepDerivation {
         return episodes.map {
             SleepEpisode(
                 source: source, startDate: $0.start, wakeTime: $0.end, duration: $0.duration,
-                timeZoneEvidence: $0.zone ?? .importTimeZone(identifier: fallback.identifier)
+                timeZoneEvidence: $0.zone ?? .importTimeZone(identifier: fallback.identifier),
+                onsetTimeZoneEvidence: $0.onsetZone ?? .importTimeZone(identifier: fallback.identifier)
             )
         }
     }

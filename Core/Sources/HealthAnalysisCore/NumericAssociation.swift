@@ -18,6 +18,7 @@ public struct AnalysisEstimate: Codable, Sendable {
         case proportionalCountChange
         case proportionalCategoryOddsChange
         case probabilityDifference
+        case clockMinutesDifference
         case ratingThresholdProbabilityDifference
     }
 
@@ -86,6 +87,13 @@ public struct AnalysisEvidence: Codable, Sendable {
         case sparseObservedRatingInputs(Set<AnalysisSeriesID>)
         case ratingThresholdLimitations
         case adjustedModelLimitations
+        case clockIntervalUnavailable(Set<AnalysisSeriesID>)
+        case limitedRecordedClockVariation(Set<AnalysisSeriesID>)
+        case clockIncrementUnavailable(Set<AnalysisSeriesID>)
+
+        case clockModelLimitations
+        case approximateClockEntries
+        case sleepTimeZoneFallback
         case collinearInputs(Set<AnalysisSeriesID>)
         case defaultOnlyInputs(Set<AnalysisSeriesID>)
         case lowVariationInputs(Set<AnalysisSeriesID>)

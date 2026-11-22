@@ -23,7 +23,7 @@ public struct HealthAnalysisApplication: Sendable {
     @MainActor public var overview: Overview {
         Overview(
             hasReadableMeasurements: healthMeasurements.hasReadableRecords,
-            hasTrackingVariables: !manualLog.quantities.isEmpty,
+            hasTrackingVariables: !manualLog.quantities.isEmpty || !manualLog.typedVariables.isEmpty,
             hasFollowedAnalyses: false,
             hasDiscoveries: false
         )

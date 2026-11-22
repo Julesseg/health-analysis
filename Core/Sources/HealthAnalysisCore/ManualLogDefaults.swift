@@ -11,6 +11,7 @@ public enum ManualDefaultScope: Sendable {
 extension ManualLog {
     public enum DefaultError: Error {
         case unknownQuantity
+        case unknownTypedVariable
         case invalidValue
         case olderHistoryRequiresOptIn
         case dateMustPrecedeHistory

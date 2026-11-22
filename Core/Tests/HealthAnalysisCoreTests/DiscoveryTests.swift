@@ -68,6 +68,136 @@ struct DiscoveryTests {
         #expect(refreshed.state(for: question.id).completed == nil)
     }
 
+    @Test func reassessesOnlyCompleteLaterWindowsAndRetainsBothResultsOnReopen() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appending(path: "questions.json")
+        let fixture = DiscoveryHistory()
+        var noise = DiscoveryNoise(seed: 765)
+        let behavior = noise.series(count: 506, dependence: 0.65)
+        let error = noise.series(count: 507, dependence: 0.8)
+        let (application, _) = try await fixture.application(
+            days: 506, inputNames: ["Caffeine"], storeURL: url,
+            excluding: { $0 == 431 || $0 == 432 || ($0 <= 395 && $0 % 17 < 2) },
+            values: { [Int((220 + 35 * behavior[$0]).rounded())] },
+            output: { day, values in
+                let total = values[max(0, day - 7)..<day].reduce(0) { $0 + $1[0] - 220 }
+                return 95 + 0.018 * Double(total) + error[day]
+            }
+        )
+        let report = try #require(await application.discover(asOf: fixture.cutoff, timeZone: fixture.timeZone))
+        let finding = try #require(report.findings.first { $0.configuration.behaviorWindow == .precedingWeek })
+        let question = try application.savedAnalyses.save(finding.configuration, completed: finding.completed)
+
+        await application.refreshSavedAnalysis(question.id, asOf: fixture.date(403))
+        let early = try #require(application.savedAnalyses.state(for: question.id).completed?.reassessment)
+        #expect(early.support == .noLaterObservations)
+        #expect(early.result.coverage.outputDayCount == 0)
+
+        let asOf = fixture.date(506).addingTimeInterval(12 * 3_600)
+        await application.refreshSavedAnalysis(question.id, asOf: asOf)
+        let reopened = HealthAnalysisApplication(savedAnalysesStoreURL: url).savedAnalyses
+        let baseline = try #require(reopened.discoveryBaseline(for: question.id))
+        let latest = try #require(reopened.state(for: question.id).completed)
+        let later = try #require(latest.reassessment)
+        #expect(baseline.updatedAt == fixture.cutoff)
+        #expect(baseline.discovery?.cutoff == fixture.cutoff)
+        #expect(baseline.result.coverage.lastDate == fixture.date(395))
+        #expect(later.support == .sameDirection)
+        #expect(later.result.configuration == finding.configuration)
+        #expect(later.result.outputSource == fixture.source)
+        #expect(later.result.coverage.firstDate == fixture.date(403))
+        #expect(later.result.coverage.lastDate == fixture.date(506))
+        #expect(later.result.coverage.gaps.map(\.dayCount) == [2])
+        #expect(later.result.observations.first?.inputs.first?.days.first?.date == fixture.date(396))
+        #expect(later.result.estimates.first.map { abs($0.difference - 1.8) < 0.25 } == true)
+        #expect(later.result.evidence.reasons.contains(.overlappingBehaviorWindows))
+        #expect(latest.result.coverage.firstDate == fixture.date(142))
+    }
+
+    @Test(arguments: [0.0, -0.04])
+    func updatesDisappearingOrReversingSupportAfterReconciliation(slope: Double) async throws {
+        let fixture = DiscoveryHistory()
+        let source = DiscoveryChangeSource()
+        let (application, inputs) = try await fixture.application(
+            days: 395, inputNames: ["Caffeine"],
+            makeSource: { records in
+                await source.set(added: records)
+                return source
+            },
+            values: { [100 + $0 * 71 % 251] },
+            output: { day, values in 60 + 0.04 * Double(values[day - 1][0]) + Double(day * 13 % 17) / 20 }
+        )
+        let report = try #require(await application.discover(asOf: fixture.cutoff, timeZone: fixture.timeZone))
+        let finding = try #require(report.findings.first { $0.configuration.behaviorWindow == .precedingDay })
+        let question = try application.savedAnalyses.save(finding.configuration, completed: finding.completed)
+        let deleted = try #require(application.healthMeasurements.history.first {
+            $0.startDate == fixture.date(395).addingTimeInterval(9 * 3_600)
+        })
+        let changed = try #require(application.healthMeasurements.history.first {
+            $0.startDate == fixture.date(394).addingTimeInterval(9 * 3_600)
+        })
+        await source.set(added: [fixture.measurement(394, bpm: 110, id: changed.id)], deleting: [deleted.id])
+        await application.refreshSavedAnalysis(question.id, asOf: fixture.cutoff)
+        let corrected = try #require(application.savedAnalyses.state(for: question.id).completed)
+        #expect(corrected.result.coverage.lastDate == fixture.date(394))
+        #expect(corrected.result.observations.last?.outputValue == 110)
+        #expect(corrected.reassessment?.support == .noLaterObservations)
+        let baseline = try #require(application.savedAnalyses.discoveryBaseline(for: question.id))
+        #expect(baseline.result.coverage.lastDate == fixture.date(395))
+        #expect(baseline.result.observations.first { $0.outputDate == fixture.date(394) }?.outputValue == changed.value)
+
+        let caffeine = try #require(application.manualLog.quantities.first)
+        #expect(inputs == [.manualQuantity(caffeine.id)])
+        for day in 395..<489 {
+            application.manualLog.editQuantity(
+                caffeine.id, on: ManualLogDay(fixture.date(day), timeZone: fixture.timeZone),
+                text: String(100 + day * 71 % 251), locale: fixture.locale
+            )
+        }
+        let laterRecords = (396...490).filter { $0 != 440 }.map { day in
+            fixture.measurement(day, bpm: 90 + slope * Double(100 + (day - 1) * 71 % 251) + Double(day * 13 % 17) / 20)
+        }
+        let alternate = HealthMeasurement.Source(name: "Alternate", bundleIdentifier: "fixture.alternate")
+        let alternateOutput = fixture.date(491)
+        await source.set(added: laterRecords + [
+            HealthMeasurement(
+                id: UUID(), metric: .restingHeartRate, value: 120, unit: .beatsPerMinute,
+                startDate: alternateOutput, endDate: alternateOutput, source: alternate
+            )
+        ])
+        await application.healthMeasurements.refresh()
+        try application.healthMeasurements.setPreferredSource(alternate.bundleIdentifier, for: .restingHeartRate)
+        await source.set()
+        await application.refreshSavedAnalysis(question.id, asOf: fixture.date(491))
+        let refreshed = try #require(application.savedAnalyses.state(for: question.id).completed)
+        let later = try #require(refreshed.reassessment)
+        let estimate = try #require(later.result.estimates.first)
+        #expect(later.support == (slope == 0 ? .nearZero : .oppositeDirection))
+        #expect(abs(estimate.difference - 100 * slope) < 0.1)
+        #expect(later.result.outputSource == fixture.source)
+        #expect(later.result.coverage.firstDate == fixture.date(397))
+        #expect(later.result.coverage.lastDate == fixture.date(489))
+        #expect(later.result.coverage.gaps.first?.firstDate == fixture.date(440))
+        #expect(later.result.coverage.outputDatesWithoutCompleteInput == [fixture.date(490)])
+        #expect(later.latestEligibleOutputDate == fixture.date(490))
+        #expect(later.result.evidence.defaultDayCount == 0)
+
+        await source.fail()
+        await application.refreshSavedAnalysis(question.id, asOf: fixture.date(491))
+        let failed = application.savedAnalyses.state(for: question.id)
+        #expect(failed.failure == .analysis(.healthHistoryUnavailable(.read)))
+        #expect(failed.completed?.updatedAt == refreshed.updatedAt)
+        #expect(failed.completed?.reassessment?.support == later.support)
+
+        await source.set(deleting: laterRecords.map(\.id))
+        await application.refreshSavedAnalysis(question.id, asOf: fixture.date(491))
+        let afterDeletion = try #require(application.savedAnalyses.state(for: question.id).completed?.reassessment)
+        #expect(afterDeletion.support == .noLaterObservations)
+        #expect(afterDeletion.latestEligibleOutputDate == nil)
+        #expect(application.savedAnalyses.discoveryBaseline(for: question.id)?.discovery?.cutoff == fixture.cutoff)
+    }
+
     @Test(arguments: [0.0, 0.86])
     func nullSearchWithCalendarGapsAndDependentCandidates(dependence: Double) async throws {
         let fixture = DiscoveryHistory()
@@ -166,12 +296,22 @@ struct DiscoveryTests {
         let first = noise.series(count: 395, dependence: 0)
         let second = noise.series(count: 395, dependence: 0)
         let error = noise.series(count: 396, dependence: 0.55)
+        let laterFirst = noise.series(count: 345, dependence: 0)
+        let laterSecond = noise.series(count: 345, dependence: 0)
+        let laterError = noise.series(count: 345, dependence: 0.55)
         let (application, inputs) = try await fixture.application(
-            days: 395, inputNames: ["Caffeine", "Training"],
-            values: { day in [first[day], second[day]].map { Int((200 + 30 * $0).rounded()) } },
+            days: 740, inputNames: ["Caffeine", "Training"],
+            values: { day in
+                if day < 395 { return [first[day], second[day]].map { Int((200 + 30 * $0).rounded()) } }
+                let spread = day < 515 ? 17.0 : 52.0
+                return [laterFirst[day - 395], laterSecond[day - 395]].map {
+                    Int((200 + spread * $0).rounded())
+                }
+            },
             output: { day, values in
                 let pair = values[day - 1]
-                return 100 + 0.003 * Double((pair[0] - 200) * (pair[1] - 200)) + error[day] / 3
+                let residual = day <= 395 ? error[day] : laterError[day - 396]
+                return 100 + 0.003 * Double((pair[0] - 200) * (pair[1] - 200)) + residual / 3
             }
         )
         let report = try #require(await application.discover(asOf: fixture.cutoff, timeZone: fixture.timeZone))
@@ -185,6 +325,27 @@ struct DiscoveryTests {
         #expect(abs(comparison.difference - 0.003 * focalRange * moderatorRange) < 0.25)
         #expect(finding.completed.discovery?.contrast == .interaction(interaction))
         #expect(report.candidates.filter { $0.contrast == .interaction(interaction) }.count == 3)
+
+        let question = try application.savedAnalyses.save(finding.configuration, completed: finding.completed)
+        await application.refreshSavedAnalysis(question.id, asOf: fixture.date(515))
+        let narrow = try #require(application.savedAnalyses.state(for: question.id).completed?.reassessment)
+        #expect(narrow.support == .insufficient)
+        #expect(narrow.result.coverage.usableDates.count == 118)
+        #expect(narrow.result.evidence.reasons.contains {
+            if case .poorlyRepresentedInteraction = $0 { return true }
+            return false
+        })
+
+        await application.refreshSavedAnalysis(question.id, asOf: fixture.date(740).addingTimeInterval(12 * 3_600))
+        let completion = try #require(application.savedAnalyses.state(for: question.id).completed)
+        let later = try #require(completion.reassessment)
+        let comparisonLater = try #require(later.result.interaction)
+        #expect(completion.result.interaction?.focalValues != comparison.focalValues)
+        #expect(later.support == .sameDirection)
+        #expect(comparisonLater.focalValues == comparison.focalValues)
+        #expect(comparisonLater.lowerCondition.moderatorValue == comparison.lowerCondition.moderatorValue)
+        #expect(comparisonLater.higherCondition.moderatorValue == comparison.higherCondition.moderatorValue)
+        #expect(abs(comparisonLater.difference - 0.003 * focalRange * moderatorRange) < 0.25)
     }
 
     @Test func publishesOnlyTheActiveScopeAndExplainsUnavailableEvidence() async throws {
@@ -336,12 +497,13 @@ private struct DiscoveryHistory {
     func application(
         days: Int, inputNames: [String], storeURL: URL? = nil, recordsInputsFrom: Int = 0,
         additionalRecords: [HealthMeasurement] = [], excluding: (Int) -> Bool = { _ in false },
+        makeSource: ([HealthMeasurement]) async -> any HealthMeasurementSource = { DiscoverySource(records: $0) },
         values: (Int) -> [Int], output: (Int, [[Int]]) -> Double
     ) async throws -> (HealthAnalysisApplication, [AnalysisSeriesID]) {
         let inputs = (0..<days).map(values)
         let records = (1...days).filter { !excluding($0) }.map { day in measurement(day, bpm: output(day, inputs)) }
         let application = HealthAnalysisApplication(
-            healthSource: DiscoverySource(records: records + additionalRecords), savedAnalysesStoreURL: storeURL
+            healthSource: await makeSource(records + additionalRecords), savedAnalysesStoreURL: storeURL
         )
         let quantities = try inputNames.map { name in
             try application.manualLog.createQuantity(
@@ -359,10 +521,10 @@ private struct DiscoveryHistory {
         return (application, quantities.map { .manualQuantity($0.id) })
     }
 
-    func measurement(_ day: Int, bpm: Double) -> HealthMeasurement {
+    func measurement(_ day: Int, bpm: Double, id: UUID = UUID()) -> HealthMeasurement {
         let anchor = date(day).addingTimeInterval(9 * 3_600)
         return HealthMeasurement(
-            id: UUID(), metric: .restingHeartRate, value: bpm, unit: .beatsPerMinute,
+            id: id, metric: .restingHeartRate, value: bpm, unit: .beatsPerMinute,
             startDate: anchor, endDate: anchor, source: source
         )
     }
@@ -375,6 +537,27 @@ private struct DiscoverySource: HealthMeasurementSource {
         after anchors: [String: Data], includingPreviouslySaved: Bool
     ) async throws -> [HealthMeasurementChanges] {
         [.init(queryID: "restingHeartRate", anchor: Data([1]), added: records)]
+    }
+}
+
+private actor DiscoveryChangeSource: HealthMeasurementSource {
+    private var changes: Result<HealthMeasurementChanges, HealthMeasurementReadFailure> =
+        .success(.init(queryID: "restingHeartRate", anchor: Data([1]), added: []))
+
+    func set(added: [HealthMeasurement] = [], deleting: [UUID] = []) {
+        changes = .success(.init(queryID: "restingHeartRate", anchor: Data([1]), added: added, deleted: deleting))
+    }
+
+    func fail() {
+        changes = .failure(.read)
+    }
+
+    func requestReadAccess() async throws {}
+
+    func readChanges(
+        after anchors: [String: Data], includingPreviouslySaved: Bool
+    ) async throws -> [HealthMeasurementChanges] {
+        [try changes.get()]
     }
 }
 

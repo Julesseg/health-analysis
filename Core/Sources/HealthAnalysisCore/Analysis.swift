@@ -242,6 +242,13 @@ extension HealthAnalysisApplication {
     @MainActor public func analyze(
         _ configuration: AnalysisConfiguration, asOf: Date = .now
     ) throws(AnalysisRunFailure) -> AnalysisResult {
+        try analyze(configuration, asOf: asOf, after: nil)
+    }
+
+    @MainActor func analyze(
+        _ configuration: AnalysisConfiguration, asOf: Date, after cutoff: Date?,
+        interactionReference: AnalysisInteractionEstimate? = nil
+    ) throws(AnalysisRunFailure) -> AnalysisResult {
         let series = try validatedAnalysisSeries(for: configuration)
         let inputs = series.inputs
         let category = series.category
@@ -279,12 +286,13 @@ extension HealthAnalysisApplication {
             outputs: outputHistory.outputs, selectedSourceIdentifier: outputHistory.selectedSourceIdentifier,
             inputs: inputs, manualLog: manualLog,
             window: configuration.behaviorWindow, history: configuration.history, asOf: asOf, calendar: calendar,
-            categoryInputs: category.inputContrasts
+            categoryInputs: category.inputContrasts, after: cutoff
         )
         return AnalysisResult.assess(
             configuration: configuration, dataset: dataset, inputs: inputs.map(\.variable), output: output,
             calendar: calendar, practicalDifference: practicalDifference,
-            lastReadAt: outputHistory.healthReadAt, lastReadFailure: outputHistory.healthReadFailure, category: category
+            lastReadAt: outputHistory.healthReadAt, lastReadFailure: outputHistory.healthReadFailure,
+            category: category, interactionReference: interactionReference
         )
     }
 
@@ -397,7 +405,7 @@ extension AnalysisResult {
         configuration: AnalysisConfiguration, dataset: TemporalAnalysisDataset, inputs: [AnalysisVariable],
         output: AnalysisVariable? = nil, calendar: Calendar, practicalDifference: Double,
         lastReadAt: Date?, lastReadFailure: HealthMeasurementReadFailure? = nil, exploratory: Bool = false,
-        category: CategoryAnalysis? = nil
+        category: CategoryAnalysis? = nil, interactionReference: AnalysisInteractionEstimate? = nil
     ) -> Self {
         let modeledInputs = inputs.enumerated().map { index, variable in
             return AnalysisModeledInput(
@@ -438,7 +446,8 @@ extension AnalysisResult {
                 return NumericAnalysis.assess(
                     rows, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar,
                     behaviorWindow: configuration.behaviorWindow, practicalDifference: practicalDifference,
-                    interaction: configuration.interaction, ratingOutputThreshold: ratingOutputThreshold, outputIsClock: outputIsClock
+                    interaction: configuration.interaction, ratingOutputThreshold: ratingOutputThreshold,
+                    outputIsClock: outputIsClock, interactionReference: interactionReference
                 )
             }
         }

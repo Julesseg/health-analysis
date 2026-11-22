@@ -4,11 +4,16 @@ public struct CompletedAnalysis: Codable, Sendable {
     public let result: AnalysisResult
     public let updatedAt: Date
     public let discovery: DiscoverySelection?
+    public let reassessment: DiscoveryReassessment?
 
-    init(result: AnalysisResult, updatedAt: Date, discovery: DiscoverySelection? = nil) {
+    init(
+        result: AnalysisResult, updatedAt: Date, discovery: DiscoverySelection? = nil,
+        reassessment: DiscoveryReassessment? = nil
+    ) {
         self.result = result
         self.updatedAt = updatedAt
         self.discovery = discovery
+        self.reassessment = reassessment
     }
 }
 
@@ -38,13 +43,16 @@ extension HealthAnalysisApplication {
     public func refreshAnalysis(
         _ configuration: AnalysisConfiguration
     ) async -> Result<CompletedAnalysis, AnalysisRunFailure>? {
+        await refreshAnalysis(configuration, asOf: nil, discoveryBaseline: nil)
+    }
+
+    @MainActor
+    private func refreshAnalysis(
+        _ configuration: AnalysisConfiguration, asOf: Date?, discoveryBaseline: CompletedAnalysis?
+    ) async -> Result<CompletedAnalysis, AnalysisRunFailure>? {
         guard !Task.isCancelled else { return nil }
         if case .manualTyped = configuration.output {
-            do {
-                return .success(CompletedAnalysis(result: try analyze(configuration), updatedAt: .now))
-            } catch {
-                return .failure(error)
-            }
+            return completeAnalysis(usingReconciledHistory: configuration, asOf: asOf ?? .now)
         }
         guard let read = await healthMeasurements.refreshForAnalysis(), !Task.isCancelled else { return nil }
 
@@ -56,23 +64,47 @@ extension HealthAnalysisApplication {
         case .loading:
             return .failure(.healthHistoryLoading)
         case .loaded:
-            do {
-                let result = try analyze(configuration)
-                if let failure = result.lastHealthReadFailure {
-                    return .failure(.healthHistoryUnavailable(failure))
-                }
-                return .success(CompletedAnalysis(result: result, updatedAt: .now))
-            } catch {
-                return .failure(error)
-            }
+            return completeAnalysis(
+                usingReconciledHistory: configuration, asOf: asOf ?? .now, discoveryBaseline: discoveryBaseline
+            )
         }
     }
 
     @MainActor
-    public func refreshSavedAnalysis(_ id: SavedAnalysis.ID) async {
+    func completeAnalysis(
+        usingReconciledHistory configuration: AnalysisConfiguration, asOf: Date,
+        discoveryBaseline: CompletedAnalysis? = nil
+    ) -> Result<CompletedAnalysis, AnalysisRunFailure> {
+        do {
+            let result = try analyze(configuration, asOf: asOf)
+            if let failure = result.lastHealthReadFailure {
+                return .failure(.healthHistoryUnavailable(failure))
+            }
+            let reassessment: DiscoveryReassessment?
+            if let baseline = discoveryBaseline, let selection = baseline.discovery,
+               baseline.result.configuration == configuration {
+                let later = try analyze(
+                    configuration, asOf: asOf, after: selection.cutoff,
+                    interactionReference: baseline.result.interaction
+                )
+                reassessment = later.model == baseline.result.model
+                    ? DiscoveryReassessment(result: later, original: baseline.result, contrast: selection.contrast)
+                    : nil
+            } else {
+                reassessment = nil
+            }
+            return .success(CompletedAnalysis(result: result, updatedAt: .now, reassessment: reassessment))
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    @MainActor
+    public func refreshSavedAnalysis(_ id: SavedAnalysis.ID, asOf: Date? = nil) async {
         guard let question = savedAnalyses.question(id: id) else { return }
         let requestID = savedAnalyses.beginRefresh(for: id)
-        let result = await refreshAnalysis(question.configuration)
+        let baseline = savedAnalyses.discoveryBaseline(for: id)
+        let result = await refreshAnalysis(question.configuration, asOf: asOf, discoveryBaseline: baseline)
         savedAnalyses.finishRefresh(for: id, requestID: requestID, result: result)
     }
 }

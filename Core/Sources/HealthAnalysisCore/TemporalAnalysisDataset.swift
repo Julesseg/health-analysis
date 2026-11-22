@@ -85,7 +85,7 @@ struct TemporalAnalysisDataset {
 
         init(
             outputs: [Output], selectedSourceIdentifier: String? = nil, window: AnalysisBehaviorWindow, history: AnalysisPeriod,
-            asOf: Date, calendar: Calendar
+            asOf: Date, calendar: Calendar, after cutoff: Date? = nil
         ) {
             var dailyOutputs: [Date: Output] = [:]
             let historyEnd = calendar.startOfDay(for: asOf)
@@ -96,23 +96,24 @@ struct TemporalAnalysisDataset {
                 if let historyStart, !(historyStart...historyEnd).contains(output.date) { continue }
                 if dailyOutputs[output.date] == nil { dailyOutputs[output.date] = output }
             }
-            let outputDates = dailyOutputs.keys.sorted()
-            self.outputDates = outputDates
             self.selectedSourceIdentifier = selectedSourceIdentifier
-            outputSource = outputDates.last.flatMap { dailyOutputs[$0]?.source }
-            rows = outputDates.compactMap { date in
-                guard let output = dailyOutputs[date] else { return nil }
+            let cutoffDay = cutoff.map { calendar.startOfDay(for: $0) }
+            rows = dailyOutputs.values.sorted { $0.date < $1.date }.compactMap { output in
+                if let cutoff, let cutoffDay, output.anchor <= cutoff || output.date <= cutoffDay { return nil }
                 var cursor = output.behaviorCutoff
                 var dates: [Date] = []
                 for _ in 0..<window.dayCount {
                     guard let preceding = calendar.precedingDay(before: cursor) else {
-                        return Row(output: output, behaviorDates: [])
+                        return cutoff == nil ? Row(output: output, behaviorDates: []) : nil
                     }
                     dates.append(preceding)
                     cursor = preceding
                 }
+                if let cutoff, cursor <= cutoff { return nil }
                 return Row(output: output, behaviorDates: dates.reversed())
             }
+            outputDates = rows.map(\.output.date)
+            outputSource = rows.last?.output.source
         }
     }
 
@@ -124,11 +125,11 @@ struct TemporalAnalysisDataset {
     @MainActor init(
         outputs: [Output], selectedSourceIdentifier: String? = nil, inputs: [ManualAnalysisSeries], manualLog: ManualLog,
         window: AnalysisBehaviorWindow, history: AnalysisPeriod, asOf: Date, calendar: Calendar,
-        categoryInputs: [AnalysisSeriesID: AnalysisCategoryContrast] = [:]
+        categoryInputs: [AnalysisSeriesID: AnalysisCategoryContrast] = [:], after cutoff: Date? = nil
     ) {
         let plan = Plan(
             outputs: outputs, selectedSourceIdentifier: selectedSourceIdentifier,
-            window: window, history: history, asOf: asOf, calendar: calendar
+            window: window, history: history, asOf: asOf, calendar: calendar, after: cutoff
         )
         var dailyInputs: [AnalysisSeriesID: [Date: AnalysisObservation.Input.Day?]] = [:]
         let catalog = Dictionary(uniqueKeysWithValues: inputs.map { ($0.variable.id, $0) })
@@ -143,8 +144,9 @@ struct TemporalAnalysisDataset {
                 let input = catalog[id].flatMap {
                     Self.inputDay(date, for: $0, manualLog: manualLog, timeZone: calendar.timeZone)
                 }
-                dailyInputs[id, default: [:]][date] = .some(input)
-                return input
+                let eligible = cutoff == nil || input?.origin == .observation ? input : nil
+                dailyInputs[id, default: [:]][date] = .some(eligible)
+                return eligible
             }
         }
     }

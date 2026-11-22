@@ -58,6 +58,9 @@ struct HealthAnalysisApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(application: application)
+                #if DEBUG
+                .task { await DiscoveryUIFixture.prepareSavedDiscovery(in: application) }
+                #endif
         }
     }
 }

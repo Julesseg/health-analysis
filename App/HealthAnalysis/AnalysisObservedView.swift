@@ -39,7 +39,7 @@ struct AnalysisObservedView: View {
                     if result.modeledInputs.count > 1 {
                         Picker("Input", selection: $selectedInput) {
                             ForEach(result.modeledInputs) { choice in
-                                Text("\(choice.name) (\(choice.unit))").tag(Optional(choice.series))
+                                choice.choiceLabel.tag(Optional(choice.series))
                             }
                         }
                         .pickerStyle(.navigationLink)
@@ -67,6 +67,18 @@ struct AnalysisObservedView: View {
         .environment(\.timeZone, result.configuration.timeZone)
     }
 
+    private var isYesNoOutput: Bool { result.outputVariable?.kind == .tracked(.yesNo) }
+
+    private var yesNoAxis: some AxisContent {
+        AxisMarks(values: [0.0, 1.0]) { value in
+            AxisGridLine()
+            AxisTick()
+            if let number = value.as(Double.self) {
+                AxisValueLabel { yesNoLabel(number == 1) }
+            }
+        }
+    }
+
     private func timeline(_ outputs: [AnalysisOutputEvidence]) -> some View {
         Chart(outputs) { row in
             PointMark(
@@ -74,7 +86,10 @@ struct AnalysisObservedView: View {
                 y: .value("Observed output", row.value)
             )
         }
-        .chartYScale(domain: .automatic(includesZero: false))
+        .chartYScale(domain: .automatic(includesZero: isYesNoOutput))
+        .chartYAxis {
+            if isYesNoOutput { yesNoAxis } else { AxisMarks() }
+        }
         .chartXAxis {
             AxisMarks(values: .automatic(desiredCount: 3)) {
                 AxisGridLine()
@@ -98,9 +113,15 @@ struct AnalysisObservedView: View {
             )
             .opacity(0.65)
         }
-        .chartXScale(domain: .automatic(includesZero: false))
-        .chartYScale(domain: .automatic(includesZero: false))
-        .chartXAxisLabel { Text("\(input.name) (\(input.unit))") }
+        .chartXScale(domain: .automatic(includesZero: input.kind == .tracked(.yesNo)))
+        .chartXAxis {
+            if input.kind == .tracked(.yesNo) { yesNoAxis } else { AxisMarks() }
+        }
+        .chartYScale(domain: .automatic(includesZero: isYesNoOutput))
+        .chartYAxis {
+            if isYesNoOutput { yesNoAxis } else { AxisMarks() }
+        }
+        .chartXAxisLabel { input.choiceLabel }
         .chartYAxisLabel { result.analysisOutputAxis }
         .frame(height: chartHeight)
         .accessibilityElement(children: .ignore)
@@ -143,7 +164,9 @@ struct AnalysisInputEvidenceView: View {
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(pair.outputDate, format: result.analysisDateFormat)
-                                Text("\(pair.input.value, format: .number) \(input.unit) and \(result.analysisOutputValue(pair.outputValue))")
+                                let inputValue = input.analysisValue(pair.input.value, trackingValue: pair.input.trackingValue)
+                                let outputValue = result.analysisOutputValue(pair.outputValue, trackingValue: pair.outputTrackingValue)
+                                Text("\(inputValue) and \(outputValue)")
                                     .foregroundStyle(.secondary)
                             }
                             .accessibilityElement(children: .combine)
@@ -167,7 +190,7 @@ struct AnalysisInputEvidenceView: View {
         List {
             Section("Output measurement") {
                 LabeledContent {
-                    result.analysisOutputValue(pair.outputValue)
+                    result.analysisOutputValue(pair.outputValue, trackingValue: pair.outputTrackingValue)
                 } label: {
                     result.analysisOutputTitle
                 }
@@ -178,7 +201,7 @@ struct AnalysisInputEvidenceView: View {
                 AnalysisOutputProvenanceRows(result: result, origin: pair.outputOrigin)
             }
             Section("Input window") {
-                LabeledContent(input.name) { Text("\(pair.input.value, format: .number) \(input.unit)") }
+                LabeledContent(input.name) { input.analysisValue(pair.input.value, trackingValue: pair.input.trackingValue) }
             }
             ForEach(pair.entries, id: \.date) { entry in
                 entryDetails(entry)
@@ -190,7 +213,7 @@ struct AnalysisInputEvidenceView: View {
 
     private func entryDetails(_ entry: AnalysisObservation.Input.Day) -> some View {
         Section {
-            LabeledContent(input.name) { Text("\(entry.value, format: .number) \(input.unit)") }
+            LabeledContent(input.name) { input.analysisValue(entry.value, trackingValue: entry.trackingValue) }
             switch entry.origin {
             case .observation:
                 LabeledContent("Provenance") { Text("Explicit observation") }

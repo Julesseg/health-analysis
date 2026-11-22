@@ -5,7 +5,7 @@ struct PoissonMeanFit {
     private let scales: [Double]
     private let coefficients: [Double]
     private let residuals: [Double]
-    private let information: CountInformation
+    private let information: WeightedDesignInformation
     private let hasResidualVariation: Bool
     private static let convergenceTolerance = 1e-7
 
@@ -27,7 +27,7 @@ struct PoissonMeanFit {
         var coefficients = [log(mean)] + columns.map { _ in 0.0 }
         for _ in 0..<60 {
             guard let fit = Iteration(rows: rows, counts: counts, coefficients: coefficients),
-                  let information = CountInformation(rows: rows, means: fit.means) else { return nil }
+                  let information = WeightedDesignInformation(rows: rows, weights: fit.means) else { return nil }
             let score = coefficients.indices.map { column in
                 rows.indices.reduce(0.0) { $0 + rows[$1][column] * fit.residuals[$1] }
             }
@@ -96,50 +96,6 @@ struct PoissonMeanFit {
             residuals = zip(counts, means).map(-)
             loss = means.reduce(0, +) - innerProduct(counts, predictors)
         }
-    }
-}
-
-private struct CountInformation {
-    let lower: [[Double]]
-
-    init?(rows: [[Double]], means: [Double]) {
-        guard let size = rows.first?.count else { return nil }
-        let total = means.reduce(0, +)
-        var lower = Array(repeating: Array(repeating: 0.0, count: size), count: size)
-        for row in 0..<size {
-            for column in 0...row {
-                var value = rows.indices.reduce(0.0) { sum, index in
-                    sum + means[index] * rows[index][row] * rows[index][column]
-                }
-                for prior in 0..<column {
-                    value -= lower[row][prior] * lower[column][prior]
-                }
-                if row == column {
-                    guard value > total * 1e-12, value.isFinite else { return nil }
-                    lower[row][column] = sqrt(value)
-                } else {
-                    lower[row][column] = value / lower[column][column]
-                }
-            }
-        }
-        self.lower = lower
-    }
-
-    func solve(_ target: [Double]) -> [Double] {
-        var solution = target
-        for row in lower.indices {
-            for column in 0..<row {
-                solution[row] -= lower[row][column] * solution[column]
-            }
-            solution[row] /= lower[row][row]
-        }
-        for row in lower.indices.reversed() {
-            for column in (row + 1)..<lower.count {
-                solution[row] -= lower[column][row] * solution[column]
-            }
-            solution[row] /= lower[row][row]
-        }
-        return solution
     }
 }
 

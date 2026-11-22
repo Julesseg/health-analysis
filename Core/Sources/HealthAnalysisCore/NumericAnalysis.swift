@@ -4,6 +4,7 @@ public enum AnalysisModel: String, Codable, Hashable, Sendable {
     case caffeineLinearV1
     case numericLinearV1
     case countLogLinearV1
+    case binaryLogisticV1
     case numericInteractionV1
 }
 
@@ -82,25 +83,12 @@ struct NumericAnalysis {
         let lagDays = CalendarHAC.defaultLagDays(for: count)
         var columns = inputs.indices.map { index in observations.map { $0.inputs[index].value } }
         let outputs = observations.map(\.outputValue)
-        var defaultOnly: Set<AnalysisSeriesID> = []
-        var lowVariation: Set<AnalysisSeriesID> = []
-        for (index, input) in inputs.enumerated() {
-            let observed = observations.compactMap { row in
-                let value = row.inputs[index]
-                return value.origin == .observation ? value.value : nil
-            }
-            let hasObservedDay = observations.contains { $0.inputs[index].hasObservedDay }
-            if !hasObservedDay {
-                defaultOnly.insert(input.series)
-            } else if observed.isEmpty || !hasVariation(columns[index], input: input)
-                        || !hasVariation(observed, input: input) {
-                lowVariation.insert(input.series)
-            }
-        }
-        var limitations: [AnalysisEvidence.Reason] = []
-        if !defaultOnly.isEmpty { limitations.append(.defaultOnlyInputs(defaultOnly)) }
-        if !lowVariation.isEmpty { limitations.append(.lowVariationInputs(lowVariation)) }
+        var limitations = inputLimitations(observations, inputs: inputs, columns: columns)
         guard limitations.isEmpty else { return result(.insufficient, limitations) }
+
+        if let reason = BinaryAnalysis.sparseCombinations(observations, inputs: inputs) {
+            return result(.insufficient, [reason])
+        }
 
         var columnInputs = inputs.map { Set([$0.series]) }
         var interactionDesign: NumericInteractionDesign?
@@ -171,7 +159,32 @@ struct NumericAnalysis {
         return result(.low, limitations, estimates: estimates, interactionEstimate: comparison?.estimate, lagDays: maximumLag)
     }
 
+    static func inputLimitations(
+        _ observations: [AnalysisObservation], inputs: [AnalysisModeledInput], columns: [[Double]]
+    ) -> [AnalysisEvidence.Reason] {
+        var defaultOnly: Set<AnalysisSeriesID> = []
+        var lowVariation: Set<AnalysisSeriesID> = []
+        for (index, input) in inputs.enumerated() {
+            let observed = observations.compactMap { row in
+                let value = row.inputs[index]
+                return value.origin == .observation ? value.value : nil
+            }
+            let hasObservedDay = observations.contains { $0.inputs[index].hasObservedDay }
+            if !hasObservedDay {
+                defaultOnly.insert(input.series)
+            } else if observed.isEmpty || !hasVariation(columns[index], input: input)
+                        || !hasVariation(observed, input: input) {
+                lowVariation.insert(input.series)
+            }
+        }
+        var reasons: [AnalysisEvidence.Reason] = []
+        if !defaultOnly.isEmpty { reasons.append(.defaultOnlyInputs(defaultOnly)) }
+        if !lowVariation.isEmpty { reasons.append(.lowVariationInputs(lowVariation)) }
+        return reasons
+    }
+
     static func hasVariation(_ values: [Double], input: AnalysisModeledInput) -> Bool {
+        if input.kind == .tracked(.yesNo) { return BinaryEvent.hasSupport(values) }
         if input.kind == .tracked(.count) { return CountAnalysis.supportingVariation(values) }
         guard !values.isEmpty else { return false }
         let sorted = values.sorted()

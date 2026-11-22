@@ -66,16 +66,16 @@ struct ExploreResultView<Status: View>: View {
                     Text(estimateTitle)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    Text(estimate.finding.description(isSleepDuration: isSleepDuration, output: result.outputVariable))
+                    Text(estimate.finding.description(isSleepDuration: isSleepDuration, output: result.outputVariable, input: input))
                         .font(.headline)
-                    EstimateDifference(estimate: estimate, input: input, isSleepDuration: isSleepDuration)
+                    estimateLabel(estimate, input: input, isSleepDuration: isSleepDuration)
                         .monospacedDigit()
-                        .accessibilityIdentifier(estimate.scale == .proportionalCountChange ? "explore.countEffect" : "explore.effect")
+                        .accessibilityIdentifier(estimate.scale.accessibilityIdentifier)
                     if let reference {
                         reference.foregroundStyle(.secondary)
                     }
-                    let intervalTitle: LocalizedStringKey = estimate.scale == .proportionalCountChange
-                        ? "Approximate 95% uncertainty interval" : "Dependence-adjusted interval"
+                    let intervalTitle: LocalizedStringKey = estimate.scale == .difference
+                        ? "Dependence-adjusted interval" : "Approximate 95% uncertainty interval"
                     LabeledContent(intervalTitle) {
                         Text(intervalLabel(estimate, isSleepDuration: isSleepDuration))
                     }
@@ -168,6 +168,9 @@ private struct AnalysisModelView: View {
                 if let days = result.evidence.dependenceLagDays {
                     Text("The interval allows for dependence across up to \(days) calendar days.")
                 }
+                if hasEstimates && result.model == .binaryLogisticV1 {
+                    Text("Probability differences are averaged across paired days. Numeric inputs use days where the full increase fits within the recorded range.")
+                }
                 if hasEstimates && result.modeledInputs.count > 1 {
                     Text("Each estimate accounts for the other modeled inputs and has its own uncertainty interval.")
                 }
@@ -187,7 +190,7 @@ private struct AnalysisModelView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    .accessibilityLabel(Text("\(input.name) (\(input.unit)), \(Text(role))"))
+                    .accessibilityLabel(Text("\(input.choiceLabel), \(Text(role))"))
                 }
                 if let pair = result.interactionInputs {
                     LabeledContent("Interaction") {
@@ -221,22 +224,12 @@ private struct AnalysisReasonRows: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(reason.description(isSleepDuration: result.configuration.output.isSleepDuration))
+            Text(reason.description(isSleepDuration: result.configuration.output.isSleepDuration, isYesNoOutput: result.outputVariable?.kind == .tracked(.yesNo)))
             ForEach(result.modeledInputs.filter { reason.affectedInputs.contains($0.series) }) { input in
-                Text("\(input.name) (\(input.unit))")
+                input.choiceLabel
             }
         }
         .foregroundStyle(.secondary)
-    }
-}
-
-private struct EstimateDifference: View {
-    let estimate: AnalysisEstimate
-    let input: AnalysisModeledInput
-    let isSleepDuration: Bool
-
-    var body: some View {
-        estimateLabel(estimate, input: input, isSleepDuration: isSleepDuration)
     }
 }
 
@@ -250,10 +243,14 @@ private struct EstimateChart: View {
     let output: AnalysisVariable?
     @ScaledMetric private var chartHeight = 95.0
 
-    private var scale: Double { isSleepDuration ? 60 : 1 }
+    private var scale: Double {
+        if estimate.scale == .probabilityDifference { return 100 }
+        return isSleepDuration ? 60 : 1
+    }
     private var lower: Double { estimate.interval.lowerBound * scale }
     private var upper: Double { estimate.interval.upperBound * scale }
     private var axisLabel: LocalizedStringKey {
+        if estimate.scale == .probabilityDifference { return "Difference in Yes probability (percentage points)" }
         if estimate.scale == .proportionalCountChange { return "Change in expected daily count" }
         return isSleepDuration ? "Difference in sleep duration (minutes)" : "Difference in resting heart rate (bpm)"
     }
@@ -314,9 +311,9 @@ private struct EstimateChart: View {
     }
 
     private var estimateAccessibilityValue: Text {
-        let direction = Text(estimate.finding.description(isSleepDuration: isSleepDuration, output: output))
+        let direction = Text(estimate.finding.description(isSleepDuration: isSleepDuration, output: output, input: input))
         let interval = intervalLabel(estimate, isSleepDuration: isSleepDuration)
-        if estimate.scale == .proportionalCountChange || input.kind == .tracked(.count) {
+        if estimate.scale != .difference || input.kind == .tracked(.count) || input.kind == .tracked(.yesNo) {
             let effect = estimateLabel(estimate, input: input, isSleepDuration: isSleepDuration)
             return Text("\(direction) \(effect). Dependence-adjusted interval \(interval).")
         }
@@ -333,17 +330,37 @@ private let countPercent = FloatingPointFormatStyle<Double>.Percent.percent.prec
 
 func estimateLabel(_ estimate: AnalysisEstimate, input: AnalysisModeledInput, isSleepDuration: Bool) -> Text {
     let countInput = input.kind == .tracked(.count)
+    let yesNoInput = input.kind == .tracked(.yesNo)
+    if estimate.scale == .probabilityDifference {
+        let points = estimate.difference * 100
+        if yesNoInput {
+            return Text("\(points, format: estimateNumber) percentage points in the probability of Yes (Yes versus No)")
+        }
+        if countInput {
+            return Text("\(points, format: estimateNumber) percentage points in the probability of Yes per additional event")
+        }
+        return Text("\(points, format: estimateNumber) percentage points in the probability of Yes per \(estimate.inputIncrement, format: .number) \(input.unit) increase")
+    }
     if estimate.scale == .proportionalCountChange {
+        if yesNoInput {
+            return Text("\(estimate.difference, format: countPercent) change in expected daily count for Yes versus No")
+        }
         if countInput {
             return Text("\(estimate.difference, format: countPercent) change in expected daily count per additional event")
         }
         return Text("\(estimate.difference, format: countPercent) change in expected daily count per \(estimate.inputIncrement, format: .number) \(input.unit) increase")
     }
     if isSleepDuration {
+        if yesNoInput {
+            return Text("\(estimate.difference * 60, format: estimateNumber) minutes for Yes versus No")
+        }
         if countInput {
             return Text("\(estimate.difference * 60, format: estimateNumber) minutes per additional event")
         }
         return Text("\(estimate.difference * 60, format: estimateNumber) minutes per \(estimate.inputIncrement, format: .number) \(input.unit) increase")
+    }
+    if yesNoInput {
+        return Text("\(estimate.difference, format: estimateNumber) bpm for Yes versus No")
     }
     if countInput {
         return Text("\(estimate.difference, format: estimateNumber) bpm per additional event")
@@ -352,6 +369,9 @@ func estimateLabel(_ estimate: AnalysisEstimate, input: AnalysisModeledInput, is
 }
 
 private func intervalLabel(_ estimate: AnalysisEstimate, isSleepDuration: Bool) -> String {
+    if estimate.scale == .probabilityDifference {
+        return String(localized: "\(estimate.interval.lowerBound * 100, format: estimateNumber) to \(estimate.interval.upperBound * 100, format: estimateNumber) percentage points")
+    }
     if estimate.scale == .proportionalCountChange {
         return String(localized: "\(estimate.interval.lowerBound, format: countPercent) to \(estimate.interval.upperBound, format: countPercent)")
     }
@@ -362,8 +382,31 @@ private func intervalLabel(_ estimate: AnalysisEstimate, isSleepDuration: Bool) 
 }
 
 private extension AnalysisEstimate.Finding {
-    func description(isSleepDuration: Bool, output: AnalysisVariable?) -> LocalizedStringKey {
-        if let output {
+    func description(isSleepDuration: Bool, output: AnalysisVariable?, input: AnalysisModeledInput) -> LocalizedStringKey {
+        if let output, output.kind == .tracked(.yesNo) {
+            switch self {
+            case .higher: return "The model estimates a higher probability of Yes for \(output.name) in this comparison."
+            case .lower: return "The model estimates a lower probability of Yes for \(output.name) in this comparison."
+            case .nearZero, .uncertain: break
+            }
+        }
+        if input.kind == .tracked(.yesNo) {
+            switch self {
+            case .higher, .lower:
+                if output?.kind == .tracked(.count) {
+                    return self == .higher ? "Yes was associated with a higher daily count than No."
+                        : "Yes was associated with a lower daily count than No."
+                }
+                if isSleepDuration {
+                    return self == .higher ? "Yes was associated with longer sleep than No."
+                        : "Yes was associated with shorter sleep than No."
+                }
+                return self == .higher ? "Yes was associated with higher resting heart rate than No."
+                    : "Yes was associated with lower resting heart rate than No."
+            case .nearZero, .uncertain: break
+            }
+        }
+        if let output, output.kind == .tracked(.count) {
             switch self {
             case .higher: return "Higher values were associated with a higher daily count for \(output.name)."
             case .lower: return "Higher values were associated with a lower daily count for \(output.name)."
@@ -391,12 +434,12 @@ private extension AnalysisEvidence.Grade {
     }
 }
 
-private extension AnalysisModeledInput {
-    var choiceLabel: Text {
-        if kind == .tracked(.count) {
-            Text("\(name) (count)")
-        } else {
-            Text("\(name) (\(unit))")
+private extension AnalysisEstimate.Scale {
+    var accessibilityIdentifier: String {
+        switch self {
+        case .difference: "explore.effect"
+        case .proportionalCountChange: "explore.countEffect"
+        case .probabilityDifference: "explore.binaryEffect"
         }
     }
 }
@@ -406,6 +449,7 @@ private extension AnalysisModel {
         switch self {
         case .caffeineLinearV1: "Single-input linear association"
         case .numericLinearV1: "Numeric linear regression"
+        case .binaryLogisticV1: "Logistic regression for daily yes/no outcomes"
         case .countLogLinearV1: "Poisson regression for daily counts"
         case .numericInteractionV1: "Numeric linear regression with an interaction"
         }
@@ -413,7 +457,7 @@ private extension AnalysisModel {
 }
 
 private extension AnalysisEvidence.Reason {
-    func description(isSleepDuration: Bool) -> LocalizedStringKey {
+    func description(isSleepDuration: Bool, isYesNoOutput: Bool) -> LocalizedStringKey {
         switch self {
         case .inadequateCoverage: "This comparison needs at least 42 paired days."
         case .inadequateJointCoverage(let days): "This model needs at least \(days) paired days."
@@ -431,11 +475,18 @@ private extension AnalysisEvidence.Reason {
                 : "The uncertainty interval spans more than 2 bpm for the reported increment."
         case .indeterminateInterval: "An interval includes no change and also allows an increase or decrease."
         case .adequateCoverageAndPrecision: "The analysis has at least 90 paired days, good overlap, limited default use, and a narrow interval."
-        case .defaultOnlyOutput: "Every paired output count comes from a default."
-        case .lowVariationOutput: "Recorded output counts do not vary on paired days."
+        case .defaultOnlyOutput:
+            isYesNoOutput ? "Every paired yes/no output comes from a default." : "Every paired output count comes from a default."
+        case .lowVariationOutput:
+            isYesNoOutput ? "Recorded output days all have the same yes/no value." : "Recorded output counts do not vary on paired days."
         case .sparseObservedCountOutput: "Too few recorded output counts show repeated variation and nonzero counts."
         case .countModelUnavailable: "The count model could not estimate a stable association. Some input values may only occur with zero output counts."
         case .countModelLimitations: "The model assumes a constant proportional change per input increment. Longer dependence, unmeasured variables, and default values can affect the estimate."
+        case .sparseObservedBinaryOutput: "There are too few recorded Yes or No output days for this model."
+        case .sparseBinaryCombinations: "Some combinations of Yes and No have fewer than six days when every value was recorded."
+        case .binaryContrastUnavailable: "Too few paired days support the reported increase within this input’s observed range."
+        case .binaryModelUnavailable: "The yes/no model could not estimate a stable association. Some input values may occur with only one output answer."
+        case .binaryModelLimitations: "Longer dependence, unmeasured variables, and default values can affect the estimated probability difference."
         case .adjustedModelLimitations: "Evidence is limited to this history and the variables included in the model."
         case .collinearInputs: "These inputs vary together too closely to estimate their separate associations."
         case .defaultOnlyInputs: "These inputs only have defaults on paired days."
@@ -446,7 +497,8 @@ private extension AnalysisEvidence.Reason {
 
     var affectedInputs: Set<AnalysisSeriesID> {
         switch self {
-        case .collinearInputs(let inputs), .defaultOnlyInputs(let inputs), .lowVariationInputs(let inputs): inputs
+        case .collinearInputs(let inputs), .defaultOnlyInputs(let inputs), .lowVariationInputs(let inputs),
+             .sparseBinaryCombinations(let inputs), .binaryContrastUnavailable(let inputs): inputs
         default: []
         }
     }

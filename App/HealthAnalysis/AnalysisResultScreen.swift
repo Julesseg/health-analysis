@@ -220,6 +220,8 @@ private extension AnalysisRefreshFailure {
             case .unsupportedConfiguration: "This analysis configuration is unavailable."
             case .inputUnavailable: "A selected input is unavailable."
             case .outputUnavailable: "The selected output is unavailable."
+            case .binaryWindowUnavailable: "Yes/no analyses use the complete preceding day."
+            case .binaryInteractionUnavailable: "Interactions with yes/no variables are unavailable."
             case .countWindowUnavailable: "Count analyses use the complete preceding day."
             case .countInteractionUnavailable: "Interactions with counts are unavailable."
             case .manualLogUnavailable: "Couldn’t open the daily log."

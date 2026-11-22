@@ -117,10 +117,14 @@ struct HealthAccessAndSourcesView: View {
     let history: HealthMeasurementHistory
 
     var body: some View {
-        let metricsWithSources = HealthMetricPresentation.supported.filter { !history.sources(for: $0.metric).isEmpty }
+        let hrvTypes = HRVSeries.StoredType.allCases.map {
+            HealthMetricPresentation(metric: $0.metric, title: $0.storageLabel)
+        }
+        let metricsWithSources = (HealthMetricPresentation.supported + hrvTypes)
+            .filter { !history.sources(for: $0.metric).isEmpty }
         List {
             Section {
-                Text("Health Analysis reads your resting heart rate, sleep, workouts, and workout distance to show your history over time.")
+                Text("Health Analysis reads your resting heart rate, heart rate variability, sleep, workouts, and workout distance to show your history over time.")
                 Button("Request read access") {
                     Task { await history.requestAccessAndRefresh() }
                 }

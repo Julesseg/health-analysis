@@ -9,7 +9,7 @@ struct HealthKitMeasurementSource: HealthMeasurementSource {
         restingHeartRate,
         .sleep,
         HealthKitWorkoutStream.query,
-    ]
+    ] + HealthKitHRVStream.queries
 
     private static let restingHeartRate: HealthKitMeasurementQuery = {
         let type = HKQuantityType(.restingHeartRate)

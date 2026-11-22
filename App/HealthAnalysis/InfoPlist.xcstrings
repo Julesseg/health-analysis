@@ -6,7 +6,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Health Analysis reads resting heart rate to show your measurements over time."
+            "value": "Health Analysis reads Apple Health to show your measurements over time."
           }
         }
       }

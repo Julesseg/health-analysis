@@ -13,6 +13,7 @@ public struct HealthMeasurement: Codable, Equatable, Identifiable, Sendable {
 
     public enum Unit: String, Codable, Sendable {
         case beatsPerMinute
+        case sleepStage
     }
 
     public struct Source: Codable, Equatable, Sendable {
@@ -25,6 +26,18 @@ public struct HealthMeasurement: Codable, Equatable, Identifiable, Sendable {
         }
     }
 
+    public struct SourceRevision: Codable, Equatable, Sendable {
+        public let version: String?
+        public let productType: String?
+        public let operatingSystemVersion: String
+
+        public init(version: String?, productType: String?, operatingSystemVersion: String) {
+            self.version = version
+            self.productType = productType
+            self.operatingSystemVersion = operatingSystemVersion
+        }
+    }
+
     public let id: UUID
     public let metric: Metric
     public let value: Double
@@ -32,6 +45,8 @@ public struct HealthMeasurement: Codable, Equatable, Identifiable, Sendable {
     public let startDate: Date
     public let endDate: Date
     public let source: Source
+    public let timeZoneIdentifier: String?
+    public let sourceRevision: SourceRevision?
 
     public init(
         id: UUID,
@@ -42,6 +57,23 @@ public struct HealthMeasurement: Codable, Equatable, Identifiable, Sendable {
         endDate: Date,
         source: Source
     ) {
+        self.init(
+            id: id, metric: metric, value: value, unit: unit,
+            startDate: startDate, endDate: endDate, source: source, timeZoneIdentifier: nil
+        )
+    }
+
+    public init(
+        id: UUID,
+        metric: Metric,
+        value: Double,
+        unit: Unit,
+        startDate: Date,
+        endDate: Date,
+        source: Source,
+        timeZoneIdentifier: String?,
+        sourceRevision: SourceRevision? = nil
+    ) {
         self.id = id
         self.metric = metric
         self.value = value
@@ -49,6 +81,8 @@ public struct HealthMeasurement: Codable, Equatable, Identifiable, Sendable {
         self.startDate = startDate
         self.endDate = endDate
         self.source = source
+        self.timeZoneIdentifier = timeZoneIdentifier
+        self.sourceRevision = sourceRevision
     }
 }
 

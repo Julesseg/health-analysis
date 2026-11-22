@@ -3,9 +3,10 @@ import SwiftUI
 
 struct HealthMeasurementHistoryView: View {
     let history: HealthMeasurementHistory
+    let presentation: HealthMetricPresentation
     @Environment(\.calendar) private var calendar
     @State private var preferenceSaveFailed = false
-    private let metric = HealthMeasurement.Metric.restingHeartRate
+    private var metric: HealthMeasurement.Metric { presentation.metric }
 
     private var selectedSource: Binding<String?> {
         Binding {
@@ -24,7 +25,7 @@ struct HealthMeasurementHistoryView: View {
         let sources = history.sources(for: metric)
         List {
             Section {
-                HealthReadStatus(history: history)
+                HealthReadStatus(history: history, showsEmptyHistory: false)
                 if let lastChecked = history.lastSuccessfulReadAt {
                     LabeledContent("Last successful check") {
                         Text(lastChecked, format: .dateTime.year().month(.abbreviated).day().hour().minute())
@@ -54,7 +55,7 @@ struct HealthMeasurementHistoryView: View {
             }
             if let coverage = history.coverage(for: metric, calendar: calendar) {
                 Section("Coverage") {
-                    LabeledContent("Imported records") {
+                    LabeledContent(presentation.recordCountTitle) {
                         Text(coverage.recordCount, format: .number)
                     }
                     LabeledContent("Days with measurements") {
@@ -63,40 +64,60 @@ struct HealthMeasurementHistoryView: View {
                     LabeledContent("Days without measurements in this range") {
                         Text(coverage.daysWithoutMeasurements, format: .number)
                     }
-                    LabeledContent("First measurement") {
-                        Text(coverage.firstMeasurement, format: .dateTime.year().month(.abbreviated).day())
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(Text("Days without measurements in this range"))
+                    .accessibilityValue(Text(coverage.daysWithoutMeasurements, format: .number))
+                    .accessibilityIdentifier("health.coverage.daysWithoutMeasurements")
+                    LabeledContent(presentation.firstDateTitle) {
+                        Text(coverage.firstMeasurement, format: dateFormat(in: coverage.firstMeasurementTimeZone))
                     }
-                    LabeledContent("Latest measurement") {
-                        Text(coverage.latestMeasurement, format: .dateTime.year().month(.abbreviated).day())
+                    LabeledContent(presentation.latestDateTitle) {
+                        Text(coverage.latestMeasurement, format: dateFormat(in: coverage.latestMeasurementTimeZone))
                     }
                 }
                 Section("History") {
-                    ForEach(history.measurements(for: metric)) { measurement in
-                        HealthMeasurementRow(measurement: measurement)
+                    if metric == .sleepAnalysis {
+                        SleepHistoryRows(episodes: history.sleepEpisodes)
+                    } else {
+                        ForEach(history.measurements(for: metric)) { measurement in
+                            HealthMeasurementRow(measurement: measurement)
+                        }
                     }
                 }
-            } else if history.preferredSource(for: metric) != nil {
+            } else {
                 Section("History") {
-                    Text("No imported measurements for this source.")
+                    if metric == .sleepAnalysis {
+                        SleepHistoryUnavailable(
+                            hasRecords: !history.measurements(for: metric).isEmpty,
+                            hasSelectedSource: history.preferredSource(for: metric) != nil
+                        )
+                    } else if history.preferredSource(for: metric) != nil {
+                        Text("No imported measurements for this source.")
+                    } else {
+                        Text("No readable measurements")
+                    }
                 }
             }
         }
-        .navigationTitle("Resting heart rate")
+        .navigationTitle(presentation.title)
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func dateFormat(in timeZone: TimeZone?) -> Date.FormatStyle {
+        var format = Date.FormatStyle.dateTime.year().month(.abbreviated).day()
+        if let timeZone { format.timeZone = timeZone }
+        return format
     }
 }
 
 struct HealthAccessAndSourcesView: View {
     let history: HealthMeasurementHistory
 
-    private var sources: [HealthMeasurement.Source] {
-        history.sources(for: .restingHeartRate)
-    }
-
     var body: some View {
+        let metricsWithSources = HealthMetricPresentation.supported.filter { !history.sources(for: $0.metric).isEmpty }
         List {
             Section {
-                Text("Health Analysis reads resting heart rate to show your measurements over time.")
+                Text("Health Analysis reads Apple Health to show your measurements over time.")
                 Button("Request read access") {
                     Task { await history.requestAccessAndRefresh() }
                 }
@@ -104,21 +125,26 @@ struct HealthAccessAndSourcesView: View {
                 HealthReadStatus(history: history, showsInitialState: false)
             }
             Section("Imported sources") {
-                if sources.isEmpty {
+                if metricsWithSources.isEmpty {
                     Text("No imported sources")
                 }
-                ForEach(sources, id: \.bundleIdentifier) { source in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(source.name)
-                        Text(source.bundleIdentifier)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                ForEach(metricsWithSources) { metric in
+                    Text(metric.title)
+                        .font(.headline)
+                        .accessibilityAddTraits(.isHeader)
+                    ForEach(history.sources(for: metric.metric), id: \.bundleIdentifier) { source in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(source.name)
+                            Text(source.bundleIdentifier)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
             Section("Review in Apple Health") {
                 Text("To review access, tap your profile in Apple Health, then Apps under Privacy.")
-                Text("To review contributing sources, open Resting Heart Rate in Apple Health and tap Data Sources & Access.")
+                Text("To review contributing sources, open a measurement in Apple Health and tap Data Sources & Access.")
             }
         }
         .navigationTitle("Health access and sources")

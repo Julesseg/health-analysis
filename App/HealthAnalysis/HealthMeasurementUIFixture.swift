@@ -6,6 +6,7 @@ enum HealthMeasurementUIFixture: String {
     case loading
     case empty
     case protectedAfterImport
+    case sleepHistory
 
     static func configurationForLaunch() -> (source: any HealthMeasurementSource, storeURL: URL)? {
         let environment = ProcessInfo.processInfo.environment
@@ -16,7 +17,10 @@ enum HealthMeasurementUIFixture: String {
             .appending(path: "HealthMeasurementUITests", directoryHint: .isDirectory)
             .appending(path: id.uuidString, directoryHint: .isDirectory)
             .appending(path: "measurements.json", directoryHint: .notDirectory)
-        return (Source(fixture: fixture), url)
+        let source: any HealthMeasurementSource = fixture == .sleepHistory
+            ? SleepHistoryUIFixture()
+            : Source(fixture: fixture)
+        return (source, url)
     }
 
     private struct Source: HealthMeasurementSource {
@@ -35,7 +39,7 @@ enum HealthMeasurementUIFixture: String {
             case .loading:
                 try await Task.sleep(for: .seconds(30))
                 return []
-            case .empty:
+            case .empty, .sleepHistory:
                 return []
             case .protectedAfterImport:
                 guard anchor == nil else { throw HealthMeasurementReadFailure.protectedData }

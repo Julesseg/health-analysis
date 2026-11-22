@@ -65,7 +65,7 @@ struct LinearAssociationFit {
     }
 }
 
-private struct OrthogonalDesign {
+struct OrthogonalDesign {
     let basis: [[Double]]
     private let triangular: [[Double]]
     private let scales: [Double]

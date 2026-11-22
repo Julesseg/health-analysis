@@ -207,6 +207,10 @@ public final class ManualLog {
         reviewField(for: quantity, on: day).map { ($0.value, $0.origin) }
     }
 
+    func analysisValue(for variable: TypedTrackingVariable, on day: ManualLogDay) -> (ManualTrackingValue, ManualValueOrigin)? {
+        reviewField(for: variable, on: day).map { ($0.value, $0.origin) }
+    }
+
     public func review(on day: ManualLogDay) -> DayReview? {
         snapshot?.reviews?[day]?.status(
             for: reviewFields(on: day), typed: typedReviewFields(on: day), hasUnresolvedEdits: hasUnresolvedEdits(on: day)

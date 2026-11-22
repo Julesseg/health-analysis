@@ -60,6 +60,10 @@ struct FirstUseTests {
         let caffeine = try app.manualLog.createQuantity(
             name: "Caffeine", unit: "mg", defaultValue: 0, startsOn: logDay(1)
         )
+        let alcohol = try app.manualLog.createTypedVariable(
+            name: "Alcohol drinks", kind: .count, defaultValue: .count(0), startsOn: logDay(1)
+        )
+        app.manualLog.editTypedEntry(alcohol.id, on: logDay(2), value: .count(2))
         try app.manualLog.createTypedVariable(
             name: "Stress", kind: .rating(1...5), defaultValue: .rating(3), startsOn: logDay(1)
         )
@@ -75,13 +79,27 @@ struct FirstUseTests {
         #expect(!app.healthMeasurements.hrvSeries(for: .sdnn).isEmpty)
         let presets = app.analysisPresets(timeZone: .gmt, asOf: day(4))
         #expect(Set(presets.map(\.output)) == [.health(metric: .sleepAnalysis), .health(metric: .restingHeartRate)])
-        #expect(presets.allSatisfy { $0.inputs == [.manualQuantity(caffeine.id)] })
+        #expect(presets.count == 4)
+        #expect(Set(presets.flatMap(\.inputs)) == [.manualQuantity(caffeine.id), .manualTyped(alcohol.id)])
+        let drinksAndSleep = try #require(presets.first {
+            $0.output == .health(metric: .sleepAnalysis) && $0.inputs == [.manualTyped(alcohol.id)]
+        })
+        #expect(drinksAndSleep.behaviorWindow == .precedingDay)
+        let countResult = try app.analyze(drinksAndSleep, asOf: day(4))
+        #expect(countResult.observations.first?.inputs.first?.value == 2)
+        var longerCountQuestion = drinksAndSleep
+        longerCountQuestion.behaviorWindow = .precedingWeek
+        #expect(throws: AnalysisRunFailure.countWindowUnavailable) {
+            try app.analyze(longerCountQuestion, asOf: day(4))
+        }
         #expect(throws: AnalysisRunFailure.unsupportedConfiguration) {
             try app.analyze(.init(
                 output: .health(metric: HRVSeries.StoredType.sdnn.metric), inputs: [.manualQuantity(caffeine.id)]
             ), asOf: day(4))
         }
-        var sleep = try #require(presets.first { $0.output == .health(metric: .sleepAnalysis) })
+        var sleep = try #require(presets.first {
+            $0.output == .health(metric: .sleepAnalysis) && $0.inputs == [.manualQuantity(caffeine.id)]
+        })
         #expect(sleep.behaviorWindow == .precedingDay)
         #expect(sleep.history == .fullHistory)
         sleep.history = .last90Days

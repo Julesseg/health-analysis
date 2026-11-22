@@ -8,6 +8,9 @@ struct HealthAnalysisApp: App {
         if let fixture = FirstUseUIFixture.applicationForLaunch() {
             return fixture
         }
+        if let fixture = CountAnalysisUIFixture.applicationForLaunch() {
+            return fixture
+        }
         if let fixture = ExploreAnalysisUIFixture.applicationForLaunch() {
             return fixture
         }

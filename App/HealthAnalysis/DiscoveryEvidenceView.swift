@@ -10,10 +10,8 @@ struct DiscoveryEvidenceView: View {
     var body: some View {
         List {
             Section("Original discovery") {
-                LabeledContent("Discovery cutoff") {
-                    Text(selection.cutoff, format: baseline.result.analysisDateFormat.hour().minute())
-                }
-                .accessibilityIdentifier("discovery.cutoff")
+                dateRow("Discovery cutoff", selection.cutoff, format: baseline.result.analysisDateFormat.hour().minute(),
+                        identifier: "discovery.cutoff")
                 evidenceDates(baseline.result, latestIdentifier: "discovery.original.latestPairedOutput")
                 contrastRows(baseline.result)
                 confidence(baseline.result)
@@ -31,10 +29,8 @@ struct DiscoveryEvidenceView: View {
                     let result = reassessment.result
                     Text(reassessment.support.label).font(.headline)
                     if let latest = reassessment.latestEligibleOutputDate {
-                        LabeledContent("Latest eligible output") {
-                            Text(latest, format: result.analysisDateFormat)
-                                .accessibilityIdentifier("discovery.latestEligibleOutput")
-                        }
+                        dateRow("Latest eligible output", latest, format: result.analysisDateFormat,
+                                identifier: "discovery.latestEligibleOutput")
                     }
                     evidenceDates(result, latestIdentifier: "discovery.later.latestPairedOutput")
                     contrastRows(result)
@@ -60,12 +56,20 @@ struct DiscoveryEvidenceView: View {
             LabeledContent("First paired output") {
                 Text(first, format: result.analysisDateFormat)
             }
-            LabeledContent("Latest paired output") {
-                Text(last, format: result.analysisDateFormat)
-                    .accessibilityIdentifier(latestIdentifier)
-            }
+            dateRow("Latest paired output", last, format: result.analysisDateFormat, identifier: latestIdentifier)
         }
         LabeledContent("Paired days", value: result.coverage.usableDates.count.formatted())
+    }
+
+    private func dateRow(
+        _ label: LocalizedStringKey, _ date: Date, format: Date.FormatStyle, identifier: String
+    ) -> some View {
+        let value = Text(date, format: format)
+        return LabeledContent(label) { value }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(label))
+            .accessibilityValue(value)
+            .accessibilityIdentifier(identifier)
     }
 
     @ViewBuilder

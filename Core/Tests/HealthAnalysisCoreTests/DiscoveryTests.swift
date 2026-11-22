@@ -134,12 +134,18 @@ struct DiscoveryTests {
         let deleted = try #require(application.healthMeasurements.history.first {
             $0.startDate == fixture.date(395).addingTimeInterval(9 * 3_600)
         })
-        await source.set(added: [fixture.measurement(394, bpm: 110)], deleting: [deleted.id])
+        let changed = try #require(application.healthMeasurements.history.first {
+            $0.startDate == fixture.date(394).addingTimeInterval(9 * 3_600)
+        })
+        await source.set(added: [fixture.measurement(394, bpm: 110, id: changed.id)], deleting: [deleted.id])
         await application.refreshSavedAnalysis(question.id, asOf: fixture.cutoff)
         let corrected = try #require(application.savedAnalyses.state(for: question.id).completed)
         #expect(corrected.result.coverage.lastDate == fixture.date(394))
+        #expect(corrected.result.observations.last?.outputValue == 110)
         #expect(corrected.reassessment?.support == .noLaterObservations)
-        #expect(application.savedAnalyses.discoveryBaseline(for: question.id)?.result.coverage.lastDate == fixture.date(395))
+        let baseline = try #require(application.savedAnalyses.discoveryBaseline(for: question.id))
+        #expect(baseline.result.coverage.lastDate == fixture.date(395))
+        #expect(baseline.result.observations.first { $0.outputDate == fixture.date(394) }?.outputValue == changed.value)
 
         let caffeine = try #require(application.manualLog.quantities.first)
         #expect(inputs == [.manualQuantity(caffeine.id)])
@@ -515,10 +521,10 @@ private struct DiscoveryHistory {
         return (application, quantities.map { .manualQuantity($0.id) })
     }
 
-    func measurement(_ day: Int, bpm: Double) -> HealthMeasurement {
+    func measurement(_ day: Int, bpm: Double, id: UUID = UUID()) -> HealthMeasurement {
         let anchor = date(day).addingTimeInterval(9 * 3_600)
         return HealthMeasurement(
-            id: UUID(), metric: .restingHeartRate, value: bpm, unit: .beatsPerMinute,
+            id: id, metric: .restingHeartRate, value: bpm, unit: .beatsPerMinute,
             startDate: anchor, endDate: anchor, source: source
         )
     }

@@ -115,23 +115,60 @@ struct AdjustedAnalysisTests {
         #expect(dependentWidth / independentWidth > 1.35)
     }
 
-    private func simulate(slope: Double, seed: UInt64, persistence: Double) async throws -> AnalysisResult {
+    @Test(arguments: [AnalysisBehaviorWindow.precedingWeek, .precedingMonth])
+    func adjustedOverlappingWindowsCoverKnownCoefficients(window: AnalysisBehaviorWindow) async throws {
+        let trials = 144
+        var hits = [0, 0]
+        var widths = [0.0, 0.0]
+        for trial in 0..<trials {
+            let slope = trial.isMultiple(of: 2) ? 0.0 : -1.5
+            let result = try await simulate(
+                slope: slope, seed: UInt64(26_000 + trial), persistence: 0.86, window: window
+            )
+            #expect(result.evidence.grade == .low)
+            #expect(result.evidence.reasons.contains(.overlappingBehaviorWindows))
+            for (index, estimateIndex) in [0, 2].enumerated() {
+                let estimate = try #require(result.estimates.dropFirst(estimateIndex).first)
+                let truth = index == 0 ? slope : 1.8
+                if estimate.interval.contains(truth) { hits[index] += 1 }
+                widths[index] += estimate.interval.upperBound - estimate.interval.lowerBound
+            }
+        }
+        for index in hits.indices {
+            #expect((0.90...0.995).contains(Double(hits[index]) / Double(trials)))
+            #expect(widths[index] / Double(trials) < 2)
+        }
+    }
+
+    private func simulate(
+        slope: Double, seed: UInt64, persistence: Double, window: AnalysisBehaviorWindow = .precedingDay
+    ) async throws -> AnalysisResult {
         var random = GaussianSequence(seed: seed)
         var state = (0..<4).map { _ in random.next() }
         let scale = sqrt(1 - persistence * persistence)
-        let history = (0..<252).map { index in
+        let length = window == .precedingMonth ? 360 : 252
+        var amountHistory: [[Double]] = []
+        let history = (0..<length).map { index in
             for term in state.indices {
                 state[term] = persistence * state[term] + scale * random.next()
             }
             let caffeine = 200 + 32 * (0.65 * state[0] + sqrt(1 - 0.65 * 0.65) * state[1])
             let duration = 8 + 1.1 * state[2]
             let adjustment = 200 + 40 * state[0]
-            let bpm = 70 + slope * (caffeine - 200) / 100 + 0.8 * (duration - 8)
-                + 1.8 * (adjustment - 200) / 100 + 1.5 * state[3]
-            return Day(amounts: [caffeine, duration, adjustment], bpm: index % 17 >= 14 ? nil : bpm)
+            let amounts = [caffeine, duration, adjustment]
+            amountHistory.append(amounts)
+            let days = amountHistory.suffix(window.dayCount)
+            let caffeineTotal = days.reduce(0) { $0 + ($1[0] - 200) }
+            let durationTotal = days.reduce(0) { $0 + ($1[1] - 8) }
+            let adjustmentTotal = days.reduce(0) { $0 + ($1[2] - 200) }
+            let bpm = 70 + slope * caffeineTotal / 100 + 0.8 * durationTotal
+                + 1.8 * adjustmentTotal / 100 + 1.5 * state[3]
+            return Day(amounts: amounts, bpm: index % 17 >= 14 ? nil : bpm)
         }
         let (app, ids) = try await prepare(history: history, units: ["mg", "h", "mg"])
-        return try app.analyze(configuration(inputs: Array(ids.prefix(2)), adjustments: [ids[2]]))
+        var question = configuration(inputs: Array(ids.prefix(2)), adjustments: [ids[2]])
+        question.behaviorWindow = window
+        return try app.analyze(question)
     }
 
     private struct Day {

@@ -67,11 +67,12 @@ extension HealthAnalysisApplication {
             }
         case .health(let metric, let sourceID):
             if let presentation = HealthMetricPresentation.supported.first(where: { $0.metric == metric }) {
+                let title: LocalizedStringKey = series.isSleepDuration ? "Sleep duration" : presentation.title
                 if let sourceID {
                     let source = healthMeasurements.sources(for: metric).first { $0.bundleIdentifier == sourceID }
-                    return Text("\(Text(presentation.title)) (\(source?.name ?? sourceID))")
+                    return Text("\(Text(title)) (\(source?.name ?? sourceID))")
                 } else {
-                    return Text(presentation.title)
+                    return Text(title)
                 }
             } else {
                 return Text("Health measurement")

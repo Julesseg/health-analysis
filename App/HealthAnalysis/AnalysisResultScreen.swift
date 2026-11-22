@@ -85,9 +85,11 @@ struct AnalysisResultScreen: View {
                 Text(failure.message)
                     .foregroundStyle(.secondary)
                 if failure.showsHealthHistoryLink {
+                    let output = question?.configuration.output ?? draft?.output
                     NavigationLink("Inspect Health measurements") {
                         HealthMeasurementHistoryView(
-                            history: application.healthMeasurements, presentation: .restingHeartRate
+                            history: application.healthMeasurements,
+                            presentation: output?.isSleepDuration == true ? .sleep : .restingHeartRate
                         )
                     }
                 }
@@ -179,8 +181,9 @@ private extension AnalysisRefreshFailure {
             case .unsupportedConfiguration: "This analysis configuration is unavailable."
             case .inputUnavailable: "A selected input is unavailable."
             case .outputUnavailable: "The selected output is unavailable."
+            case .countWindowUnavailable: "Count analyses use the complete preceding day."
             case .manualLogUnavailable: "Couldn’t open the daily log."
-            case .chooseOutputSource: "Choose a preferred resting heart rate source in Health measurements."
+            case .chooseOutputSource: "Choose a preferred source for this output in Health measurements."
             case .healthHistoryUnavailable(let failure): failure.message
             case .healthHistoryLoading: "Health measurements are still being checked. Try again when the check finishes."
             }

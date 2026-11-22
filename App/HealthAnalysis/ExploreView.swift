@@ -8,6 +8,8 @@ struct ExploreView: View {
     @State private var output: AnalysisSeriesID?
     @State private var inputs: [AnalysisSeriesID]
     @State private var adjustments: [AnalysisSeriesID]
+    @State private var behaviorWindow: AnalysisBehaviorWindow
+    @State private var history: AnalysisPeriod
     @State private var analysisTimeZone: TimeZone
 
     init(application: HealthAnalysisApplication, editing: SavedAnalysis? = nil) {
@@ -16,6 +18,8 @@ struct ExploreView: View {
         _output = State(initialValue: editing?.configuration.output)
         _inputs = State(initialValue: editing?.configuration.inputs ?? [])
         _adjustments = State(initialValue: editing?.configuration.adjustmentInputs ?? [])
+        _behaviorWindow = State(initialValue: editing?.configuration.behaviorWindow ?? .precedingDay)
+        _history = State(initialValue: editing?.configuration.history ?? .fullHistory)
         _analysisTimeZone = State(initialValue: editing?.configuration.timeZone ?? .current)
     }
 
@@ -40,6 +44,8 @@ struct ExploreView: View {
         configuration.output = output
         configuration.inputs = inputs
         configuration.adjustmentInputs = adjustments
+        configuration.behaviorWindow = behaviorWindow
+        configuration.history = history
         configuration.timeZone = analysisTimeZone
         return configuration
     }
@@ -108,15 +114,15 @@ struct ExploreView: View {
                 .accessibilityLabel("Account for")
                 .accessibilityValue(selectionSummary(adjustments))
                 .accessibilityIdentifier("explore.adjustments")
-                LabeledContent("Behavior window") { Text("Complete preceding day") }
-                    .accessibilityIdentifier("explore.behaviorWindow")
-                LabeledContent("History") { Text("Full usable history") }
-                    .accessibilityIdentifier("explore.history")
+                ExploreTemporalControls(
+                    behaviorWindow: $behaviorWindow, history: $history, allowsLongerWindows: !usesCounts
+                )
             } footer: {
                 if inputChoices.isEmpty {
                     Text("Add a daily quantity or count in Settings to choose another variable.")
                 }
                 if usesCounts {
+                    Text("Count analyses use the complete preceding day.")
                     Text("Interactions with counts are unavailable.")
                 }
             }
@@ -136,6 +142,9 @@ struct ExploreView: View {
             if editing == nil {
                 SavedAnalysisListSection(application: application)
             }
+        }
+        .onChange(of: usesCounts) { _, includesCounts in
+            if includesCounts { behaviorWindow = .precedingDay }
         }
     }
 

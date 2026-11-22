@@ -77,10 +77,11 @@ struct CountAnalysisTests {
             app.manualLog.editTypedEntry(output.id, on: day(index + 1), value: .count(expected + index / 4 % 3 - 1))
         }
         let reopened = HealthAnalysisApplication(manualLogStoreURL: logURL)
-        let result = try reopened.analyze(.init(
+        var configuration = AnalysisConfiguration(
             output: .manualTyped(output.id), inputs: [.manualTyped(input.id)],
             adjustmentInputs: [.manualTyped(adjustment.id)], timeZone: utc
-        ), asOf: date(121))
+        )
+        let result = try reopened.analyze(configuration, asOf: date(121))
 
         #expect(result.model == .countLogLinearV1)
         #expect(result.observations.count == 120)
@@ -97,6 +98,16 @@ struct CountAnalysisTests {
         }
         #expect(result.evidence.grade == .low)
         #expect(result.evidence.dependenceLagDays == 10)
+
+        configuration.history = .last90Days
+        let shortened = try reopened.analyze(configuration, asOf: date(121))
+        #expect(shortened.coverage.firstDate == date(32))
+        #expect(shortened.coverage.lastDate == date(120))
+        #expect(shortened.estimates.count == 2)
+        configuration.behaviorWindow = .precedingWeek
+        #expect(throws: AnalysisRunFailure.countWindowUnavailable) {
+            try reopened.analyze(configuration, asOf: date(121))
+        }
     }
 
     @Test func defaultsConstantCountsAndSeparatedGroupsWithholdAnEstimate() throws {

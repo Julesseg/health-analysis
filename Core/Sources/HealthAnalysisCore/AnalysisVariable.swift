@@ -22,7 +22,7 @@ public struct AnalysisVariable: Codable, Equatable, Identifiable, Sendable {
         switch id {
         case .manualQuantity: false
         case .manualTyped: kind == .tracked(.count)
-        case .health(let metric, _): metric == .restingHeartRate
+        case .health(let metric, _): metric == .restingHeartRate || metric == .sleepAnalysis
         }
     }
 
@@ -37,8 +37,10 @@ public struct AnalysisVariable: Codable, Equatable, Identifiable, Sendable {
 
 extension HealthAnalysisApplication {
     @MainActor public var analysisVariables: [AnalysisVariable] {
-        [.init(id: .health(metric: .restingHeartRate), name: "Resting heart rate", kind: .quantity(unit: "bpm"))]
-            + manualAnalysisSeries.map(\.variable)
+        [
+            .init(id: .health(metric: .restingHeartRate), name: "Resting heart rate", kind: .quantity(unit: "bpm")),
+            .init(id: .health(metric: .sleepAnalysis), name: "Sleep duration", kind: .quantity(unit: "h"))
+        ] + manualAnalysisSeries.map(\.variable)
     }
 
     @MainActor var manualAnalysisSeries: [ManualAnalysisSeries] {

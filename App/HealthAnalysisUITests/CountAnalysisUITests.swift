@@ -26,6 +26,7 @@ final class CountAnalysisUITests: XCTestCase {
 
         let analyze = app.buttons["Analyze"]
         for _ in 0..<3 where !analyze.isHittable { app.swipeUp() }
+        XCTAssertTrue(analyze.isEnabled)
         analyze.tap()
         let effect = app.staticTexts["explore.countEffect"]
         XCTAssertTrue(effect.waitForExistence(timeout: 5))
@@ -37,6 +38,11 @@ final class CountAnalysisUITests: XCTestCase {
         XCTAssertTrue(coverage.isHittable)
         coverage.tap()
         XCTAssertTrue(app.navigationBars["Usable dates and gaps"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Headaches"].exists)
+        let pair = app.buttons.matching(identifier: "explore.pairedCounts").firstMatch
+        for _ in 0..<4 where !pair.isHittable { app.swipeUp() }
+        XCTAssertTrue(pair.isHittable)
+        pair.tap()
+        XCTAssertTrue(app.navigationBars["Paired counts"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Recorded count"].firstMatch.exists)
     }
 }

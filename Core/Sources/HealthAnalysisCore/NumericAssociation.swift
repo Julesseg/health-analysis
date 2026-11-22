@@ -16,6 +16,7 @@ public struct AnalysisEstimate: Codable, Sendable {
     public enum Scale: String, Codable, Sendable {
         case difference
         case proportionalCountChange
+        case proportionalCategoryOddsChange
         case probabilityDifference
         case ratingThresholdProbabilityDifference
     }
@@ -70,6 +71,12 @@ public struct AnalysisEvidence: Codable, Sendable {
         case sparseObservedCountOutput
         case countModelUnavailable
         case countModelLimitations
+        case sparseCategoryInputs(Set<AnalysisSeriesID>)
+        case sparseCategoryOutput(minimumRecordedDays: Int)
+        case sparseCategoryEventByInput(Set<AnalysisSeriesID>)
+        case categoryEventModelUnavailable
+        case categoryEventModelLimitations
+        case categoryModelLimitations
         case sparseObservedBinaryOutput
         case sparseBinaryCombinations(Set<AnalysisSeriesID>)
         case binaryContrastUnavailable(Set<AnalysisSeriesID>)

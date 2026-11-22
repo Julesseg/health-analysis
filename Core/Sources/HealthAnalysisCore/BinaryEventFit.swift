@@ -97,13 +97,32 @@ struct BinaryEventFit {
             }
         }
         difference /= count
-        let influence = information.solve(gradient.map { $0 / count })
-        let scores = zip(rows, residuals).map { innerProduct($0, influence) * $1 }
-        let halfWidth = CalendarHAC.halfWidth(
-            scores: scores, dayNumbers: dayNumbers, lagDays: lagDays, parameterCount: coefficients.count
+        let halfWidth = scoreHalfWidth(
+            gradient: gradient.map { $0 / count }, dayNumbers: dayNumbers, lagDays: lagDays
         )
         guard halfWidth > 0, (abs(difference) + halfWidth).isFinite else { return nil }
         return (difference, max(-1, difference - halfWidth)...min(1, difference + halfWidth))
+    }
+
+    func logOddsContrast(
+        _ contrast: [Double], dayNumbers: [Int], lagDays: Int
+    ) -> (estimate: Double, halfWidth: Double)? {
+        guard contrast.count == scales.count, dayNumbers.count == rows.count,
+              (0..<rows.count).contains(lagDays),
+              zip(dayNumbers, dayNumbers.dropFirst()).allSatisfy(<) else { return nil }
+        let weights = [0.0] + zip(contrast, scales).map(/)
+        let estimate = innerProduct(weights, coefficients)
+        let halfWidth = scoreHalfWidth(gradient: weights, dayNumbers: dayNumbers, lagDays: lagDays)
+        guard halfWidth > 0, (abs(estimate) + halfWidth).isFinite else { return nil }
+        return (estimate, halfWidth)
+    }
+
+    private func scoreHalfWidth(gradient: [Double], dayNumbers: [Int], lagDays: Int) -> Double {
+        let influence = information.solve(gradient)
+        let scores = zip(rows, residuals).map { innerProduct($0, influence) * $1 }
+        return CalendarHAC.halfWidth(
+            scores: scores, dayNumbers: dayNumbers, lagDays: lagDays, parameterCount: coefficients.count
+        )
     }
 
     private static func probability(_ predictor: Double) -> Double {

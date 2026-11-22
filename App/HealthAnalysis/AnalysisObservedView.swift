@@ -30,7 +30,11 @@ struct AnalysisObservedView: View {
                 Text("Observed timeline")
             } footer: {
                 if result.outputEvidence.contains(where: { $0.isObserved && !$0.paired }) {
-                    Text("Includes output measurements with incomplete input windows.")
+                    if result.categoryEvidence == nil {
+                        Text("Includes output measurements with incomplete input windows.")
+                    } else {
+                        Text("Includes output values without a usable pair.")
+                    }
                 }
             }
 
@@ -68,12 +72,11 @@ struct AnalysisObservedView: View {
     }
 
     private func timeline(_ outputs: [AnalysisOutputEvidence]) -> some View {
-        let axis = ObservedAnalysisAxis(outputs.map(\.trackingValue))
+        let axis = ObservedAnalysisAxis(outputs.map(\.trackingValue), categories: result.outputVariable?.categories ?? [])
         return Chart(outputs) { row in
-            PointMark(
-                x: .value("Output date", row.date),
-                y: .value("Observed output", axis.coordinate(row.value, trackingValue: row.trackingValue))
-            )
+            if let y = axis.coordinate(row.value, trackingValue: row.trackingValue) {
+                PointMark(x: .value("Output date", row.date), y: .value("Observed output", y))
+            }
         }
         .chartYAxis { axis.marks }
         .chartYScale(domain: .automatic(includesZero: axis.includesZero))
@@ -93,14 +96,14 @@ struct AnalysisObservedView: View {
     }
 
     private func scatterplot(_ points: [AnalysisInputEvidence.Pair], input: AnalysisModeledInput) -> some View {
-        let x = ObservedAnalysisAxis(points.map(\.input.trackingValue))
-        let y = ObservedAnalysisAxis(points.map(\.outputTrackingValue))
+        let x = ObservedAnalysisAxis(points.map(\.input.trackingValue), categories: input.categories)
+        let y = ObservedAnalysisAxis(points.map(\.outputTrackingValue), categories: result.outputVariable?.categories ?? [])
         return Chart(points) { pair in
-            PointMark(
-                x: .value("Observed input", x.coordinate(pair.input.value, trackingValue: pair.input.trackingValue)),
-                y: .value("Observed output", y.coordinate(pair.outputValue, trackingValue: pair.outputTrackingValue))
-            )
-            .opacity(0.65)
+            if let inputValue = x.coordinate(pair.input.value, trackingValue: pair.input.trackingValue),
+               let outputValue = y.coordinate(pair.outputValue, trackingValue: pair.outputTrackingValue) {
+                PointMark(x: .value("Observed input", inputValue), y: .value("Observed output", outputValue))
+                    .opacity(0.65)
+            }
         }
         .chartXScale(domain: .automatic(includesZero: x.includesZero))
         .chartYScale(domain: .automatic(includesZero: y.includesZero))
@@ -230,18 +233,26 @@ private struct ObservedAnalysisAxis {
     let includesZero: Bool
     private let levels: [Int]
     private let positions: [Int: Int]
+    private let categories: [TrackingCategory]
+    private let categoryPositions: [TrackingCategory.ID: Int]
 
-    init(_ values: [ManualTrackingValue?]) {
+    init(_ values: [ManualTrackingValue?], categories: [TrackingCategory]) {
         includesZero = values.contains {
             if case .yesNo? = $0 { return true }
             return false
         }
         levels = Set(values.compactMap(Self.level)).sorted()
         positions = Dictionary(uniqueKeysWithValues: levels.enumerated().map { ($1, $0) })
+        let observedIDs = Set(values.compactMap(Self.categoryID))
+        self.categories = categories.filter { observedIDs.contains($0.id) }
+        categoryPositions = Dictionary(uniqueKeysWithValues: self.categories.enumerated().map { ($1.id, $0) })
     }
 
-    func coordinate(_ value: Double, trackingValue: ManualTrackingValue?) -> Double {
-        Self.level(trackingValue).flatMap { positions[$0] }.map(Double.init) ?? value
+    func coordinate(_ value: Double, trackingValue: ManualTrackingValue?) -> Double? {
+        if let id = Self.categoryID(trackingValue) {
+            return categoryPositions[id].map(Double.init)
+        }
+        return Self.level(trackingValue).flatMap { positions[$0] }.map(Double.init) ?? value
     }
 
     @AxisContentBuilder var marks: some AxisContent {
@@ -251,6 +262,14 @@ private struct ObservedAnalysisAxis {
                 AxisTick()
                 if let value = mark.as(Double.self) {
                     AxisValueLabel { yesNoLabel(value == 1) }
+                }
+            }
+        } else if !categories.isEmpty {
+            AxisMarks(values: categories.indices.map(Double.init)) { mark in
+                AxisGridLine()
+                AxisTick()
+                if let position = mark.as(Double.self), let index = Int(exactly: position), categories.indices.contains(index) {
+                    AxisValueLabel { Text(verbatim: categories[index].name) }
                 }
             }
         } else if levels.isEmpty {
@@ -270,6 +289,11 @@ private struct ObservedAnalysisAxis {
 
     private static func level(_ value: ManualTrackingValue?) -> Int? {
         if case .rating(let level)? = value { return level }
+        return nil
+    }
+
+    private static func categoryID(_ value: ManualTrackingValue?) -> TrackingCategory.ID? {
+        if case .category(let id)? = value { return id }
         return nil
     }
 }

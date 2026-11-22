@@ -42,6 +42,7 @@ public struct AnalysisConfiguration: Codable, Hashable, Sendable {
     public var behaviorWindow: AnalysisBehaviorWindow
     public var history: AnalysisPeriod
     public var timeZone: TimeZone
+    public var categories: AnalysisCategoryConfiguration?
 
     public init(
         output: AnalysisSeriesID,
@@ -50,7 +51,8 @@ public struct AnalysisConfiguration: Codable, Hashable, Sendable {
         interaction: AnalysisInteraction? = nil,
         behaviorWindow: AnalysisBehaviorWindow = .precedingDay,
         history: AnalysisPeriod = .fullHistory,
-        timeZone: TimeZone = .current
+        timeZone: TimeZone = .current,
+        categories: AnalysisCategoryConfiguration? = nil
     ) {
         self.output = output
         self.inputs = inputs
@@ -59,6 +61,7 @@ public struct AnalysisConfiguration: Codable, Hashable, Sendable {
         self.behaviorWindow = behaviorWindow
         self.history = history
         self.timeZone = timeZone
+        self.categories = categories
     }
 }
 
@@ -188,12 +191,17 @@ public struct AnalysisResult: Codable, Sendable {
     public let evidence: AnalysisEvidence
     public internal(set) var outputVariable: AnalysisVariable? = nil
     public internal(set) var inspection: AnalysisInspection? = nil
+    public internal(set) var categoryEvidence: AnalysisCategoryEvidence? = nil
 }
 
 public enum AnalysisRunFailure: Error, Equatable {
     case unsupportedConfiguration
     case inputUnavailable
     case outputUnavailable
+    case categorySelectionUnavailable
+    case categoryModelCombinationUnavailable
+    case categoryWindowUnavailable
+    case categoryInteractionUnavailable
     case binaryWindowUnavailable
     case binaryInteractionUnavailable
     case countWindowUnavailable
@@ -233,6 +241,7 @@ extension HealthAnalysisApplication {
         let series = try validatedAnalysisSeries(for: configuration)
         let inputs = series.inputs
         let output = series.output?.variable
+        let category = series.category
 
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = configuration.timeZone
@@ -244,7 +253,9 @@ extension HealthAnalysisApplication {
             practicalDifference = metric == .sleepAnalysis ? 0.25 : 1
         case .manualTyped:
             guard let manualOutput = series.output else { throw .outputUnavailable }
-            outputHistory = .stored(manualOutput, in: manualLog, asOf: asOf, calendar: calendar)
+            outputHistory = .stored(
+                manualOutput, in: manualLog, asOf: asOf, calendar: calendar, categoryEvent: category.outputEvent
+            )
             practicalDifference = 0
         case .manualQuantity:
             throw .unsupportedConfiguration
@@ -254,19 +265,19 @@ extension HealthAnalysisApplication {
             outputs: outputHistory.outputs, selectedSourceIdentifier: outputHistory.selectedSourceIdentifier,
             inputs: inputs, manualLog: manualLog,
             window: configuration.behaviorWindow, history: configuration.history, asOf: asOf, calendar: calendar,
-            after: cutoff
+            categoryInputs: category.inputContrasts, after: cutoff
         )
         return AnalysisResult.assess(
             configuration: configuration, dataset: dataset, inputs: inputs.map(\.variable), output: output,
             calendar: calendar, practicalDifference: practicalDifference,
             lastReadAt: outputHistory.healthReadAt, lastReadFailure: outputHistory.healthReadFailure,
-            interactionReference: interactionReference
+            category: category, interactionReference: interactionReference
         )
     }
 
     @MainActor func validatedAnalysisSeries(
         for configuration: AnalysisConfiguration
-    ) throws(AnalysisRunFailure) -> (inputs: [ManualAnalysisSeries], output: ManualAnalysisSeries?) {
+    ) throws(AnalysisRunFailure) -> (inputs: [ManualAnalysisSeries], output: ManualAnalysisSeries?, category: CategoryAnalysis) {
         let series = configuration.inputs + configuration.adjustmentInputs
         guard !configuration.inputs.isEmpty, Set(series).count == series.count,
               !series.contains(configuration.output) else { throw .unsupportedConfiguration }
@@ -283,6 +294,7 @@ extension HealthAnalysisApplication {
             inputs.append(input)
         }
         let output = catalog[configuration.output]?.variable
+        let category = try CategoryAnalysis(configuration: configuration, inputs: inputs.map(\.variable), output: output)
         if output?.kind == .tracked(.yesNo) || inputs.contains(where: { $0.variable.kind == .tracked(.yesNo) }) {
             guard configuration.behaviorWindow == .precedingDay else { throw .binaryWindowUnavailable }
             guard configuration.interaction == nil else { throw .binaryInteractionUnavailable }
@@ -299,11 +311,11 @@ extension HealthAnalysisApplication {
         switch configuration.output {
         case .health(let metric, _):
             guard metric == .restingHeartRate || metric == .sleepAnalysis else { throw .unsupportedConfiguration }
-            return (inputs, nil)
+            return (inputs, nil, category)
         case .manualTyped:
             guard let series = catalog[configuration.output] else { throw .outputUnavailable }
             guard series.variable.supportsOutput else { throw .unsupportedConfiguration }
-            return (inputs, series)
+            return (inputs, series, category)
         case .manualQuantity:
             throw .unsupportedConfiguration
         }
@@ -359,7 +371,7 @@ extension AnalysisResult {
         configuration: AnalysisConfiguration, dataset: TemporalAnalysisDataset, inputs: [AnalysisVariable],
         output: AnalysisVariable? = nil, calendar: Calendar, practicalDifference: Double,
         lastReadAt: Date?, lastReadFailure: HealthMeasurementReadFailure? = nil, exploratory: Bool = false,
-        interactionReference: AnalysisInteractionEstimate? = nil
+        category: CategoryAnalysis? = nil, interactionReference: AnalysisInteractionEstimate? = nil
     ) -> Self {
         let modeledInputs = inputs.enumerated().map { index, variable in
             return AnalysisModeledInput(
@@ -369,22 +381,45 @@ extension AnalysisResult {
                 kind: variable.kind
             )
         }
-        let assessment: NumericAnalysis
-        if output?.kind == .tracked(.count) {
-            assessment = CountAnalysis.assess(
-                dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar
-            )
-        } else if output?.kind == .tracked(.yesNo) {
-            assessment = BinaryAnalysis.assess(
-                dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar
-            )
-        } else {
-            assessment = NumericAnalysis.assess(
+        let categoryEvidence = category?.summarize(dataset, inputs: inputs, output: output)
+        func assess() -> NumericAnalysis {
+            if let categoryEvidence, category?.outputEvent != nil {
+                return CategoryEventAnalysis.assess(
+                    dataset.observations, inputs: modeledInputs, coverage: dataset.coverage,
+                    categoryEvidence: categoryEvidence, calendar: calendar
+                )
+            }
+            if output?.kind == .tracked(.count) {
+                return CountAnalysis.assess(
+                    dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar
+                )
+            }
+            if output?.kind == .tracked(.yesNo) {
+                return BinaryAnalysis.assess(
+                    dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar
+                )
+            }
+            return NumericAnalysis.assess(
                 dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar,
                 behaviorWindow: configuration.behaviorWindow, practicalDifference: practicalDifference,
                 interaction: configuration.interaction, ratingOutputThreshold: output?.kind.ratingThreshold,
                 interactionReference: interactionReference
             )
+        }
+        let assessment: NumericAnalysis
+        if let categoryEvidence {
+            let model: AnalysisModel = if category?.outputEvent != nil {
+                .categoryEventLogisticV1
+            } else if output?.kind == .tracked(.count) {
+                .countLogLinearV1
+            } else {
+                .numericLinearV1
+            }
+            assessment = CategoryAnalysis.assessInputContrasts(
+                categoryEvidence, observations: dataset.observations, assessment: assess, model: model
+            )
+        } else {
+            assessment = assess()
         }
         return AnalysisResult(
             configuration: configuration,
@@ -405,7 +440,8 @@ extension AnalysisResult {
                 )
                 : assessment.evidence,
             outputVariable: output,
-            inspection: dataset.inspection
+            inspection: dataset.inspection,
+            categoryEvidence: categoryEvidence
         )
     }
 

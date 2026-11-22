@@ -229,6 +229,21 @@ struct CountAnalysisTests {
         #expect(abs(bias[1] / Double(trials)) < 0.05)
     }
 
+    @Test func countAdjustmentCannotSilentlyReuseAQuantityInteractionModel() throws {
+        let app = HealthAnalysisApplication()
+        let focal = try app.manualLog.createQuantity(name: "Caffeine", unit: "mg", defaultValue: 0, startsOn: day(0))
+        let moderator = try app.manualLog.createQuantity(name: "Exercise", unit: "min", defaultValue: 0, startsOn: day(0))
+        let count = try count("Coffees", in: app)
+        let configuration = AnalysisConfiguration(
+            output: .health(metric: .restingHeartRate), inputs: [.manualQuantity(focal.id), .manualQuantity(moderator.id)],
+            adjustmentInputs: [.manualTyped(count.id)],
+            interaction: .init(focal: .manualQuantity(focal.id), moderator: .manualQuantity(moderator.id)), timeZone: utc
+        )
+        #expect(throws: AnalysisRunFailure.countInteractionUnavailable) {
+            try app.analyze(configuration, asOf: date(1))
+        }
+    }
+
     private let utc = TimeZone(secondsFromGMT: 0)!
 
     private func date(_ offset: Int) -> Date {

@@ -13,7 +13,7 @@ enum CountAnalysis {
             _ grade: AnalysisEvidence.Grade, _ reasons: [AnalysisEvidence.Reason],
             estimates: [AnalysisEstimate] = [], lagDays: Int? = nil
         ) -> NumericAnalysis {
-            NumericAnalysis(model: .countLogLinearV1, estimates: estimates, evidence: AnalysisEvidence(
+            NumericAnalysis(model: .countLogLinearV1, estimates: estimates, interaction: nil, evidence: AnalysisEvidence(
                 grade: grade, reasons: reasons, defaultDayCount: defaultDays, dependenceLagDays: lagDays
             ))
         }
@@ -83,7 +83,7 @@ enum CountAnalysis {
             estimates.append(AnalysisEstimate(
                 input: input.series, inputIncrement: input.inputIncrement, difference: expm1(log.estimate),
                 interval: interval, finding: NumericAnalysis.finding(interval, nearZero: nil),
-                storedScale: .proportionalCountChange
+                scale: .proportionalCountChange
             ))
         }
         limitations.append(.countModelLimitations)

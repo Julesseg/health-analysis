@@ -14,13 +14,17 @@ struct ExploreTemporalControls: View {
     var allowsLongerWindows = true
 
     var body: some View {
-        Picker("Behavior window", selection: $behaviorWindow) {
-            ForEach(allowsLongerWindows ? AnalysisBehaviorWindow.allCases : [.precedingDay], id: \.self) { window in
-                Text(window.title).tag(window)
+        if allowsLongerWindows {
+            Picker("Behavior window", selection: $behaviorWindow) {
+                ForEach(AnalysisBehaviorWindow.allCases, id: \.self) { window in
+                    Text(window.title).tag(window)
+                }
             }
+            .accessibilityIdentifier("explore.behaviorWindow")
+        } else {
+            LabeledContent("Behavior window") { Text(AnalysisBehaviorWindow.precedingDay.title) }
+                .accessibilityIdentifier("explore.behaviorWindow")
         }
-        .disabled(!allowsLongerWindows)
-        .accessibilityIdentifier("explore.behaviorWindow")
         Picker("History", selection: $history) {
             ForEach(AnalysisPeriod.allCases, id: \.self) { period in
                 Text(period.title).tag(period)

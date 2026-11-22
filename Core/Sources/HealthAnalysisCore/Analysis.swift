@@ -38,6 +38,7 @@ public struct AnalysisConfiguration: Codable, Hashable, Sendable {
     public var output: AnalysisSeriesID
     public var inputs: [AnalysisSeriesID]
     public var adjustmentInputs: [AnalysisSeriesID]
+    public var interaction: AnalysisInteraction?
     public var behaviorWindow: AnalysisBehaviorWindow
     public var history: AnalysisPeriod
     public var timeZone: TimeZone
@@ -46,6 +47,7 @@ public struct AnalysisConfiguration: Codable, Hashable, Sendable {
         output: AnalysisSeriesID,
         inputs: [AnalysisSeriesID],
         adjustmentInputs: [AnalysisSeriesID] = [],
+        interaction: AnalysisInteraction? = nil,
         behaviorWindow: AnalysisBehaviorWindow = .precedingDay,
         history: AnalysisPeriod = .fullHistory,
         timeZone: TimeZone = .current
@@ -53,6 +55,7 @@ public struct AnalysisConfiguration: Codable, Hashable, Sendable {
         self.output = output
         self.inputs = inputs
         self.adjustmentInputs = adjustmentInputs
+        self.interaction = interaction
         self.behaviorWindow = behaviorWindow
         self.history = history
         self.timeZone = timeZone
@@ -157,6 +160,7 @@ public struct AnalysisResult: Codable, Sendable {
     public let model: AnalysisModel
     public let modeledInputs: [AnalysisModeledInput]
     public let estimates: [AnalysisEstimate]
+    public let interaction: AnalysisInteractionEstimate?
     public let evidence: AnalysisEvidence
     public internal(set) var outputVariable: AnalysisVariable? = nil
 }
@@ -166,6 +170,7 @@ public enum AnalysisRunFailure: Error, Equatable {
     case inputUnavailable
     case outputUnavailable
     case countWindowUnavailable
+    case countInteractionUnavailable
     case manualLogUnavailable
     case chooseOutputSource
     case healthHistoryUnavailable(HealthMeasurementReadFailure)
@@ -192,6 +197,9 @@ extension HealthAnalysisApplication {
         let series = configuration.inputs + configuration.adjustmentInputs
         guard !configuration.inputs.isEmpty, Set(series).count == series.count,
               !series.contains(configuration.output) else { throw .unsupportedConfiguration }
+        if let interaction = configuration.interaction, !interaction.isValid(for: configuration.inputs) {
+            throw .unsupportedConfiguration
+        }
         guard manualLog.isStoreAvailable else { throw .manualLogUnavailable }
         let catalog = Dictionary(uniqueKeysWithValues: manualAnalysisSeries.map { ($0.variable.id, $0) })
         var inputs: [ManualAnalysisSeries] = []
@@ -202,9 +210,9 @@ extension HealthAnalysisApplication {
             inputs.append(input)
         }
         let output = catalog[configuration.output]?.variable
-        if (output?.kind == .tracked(.count) || inputs.contains { $0.variable.kind == .tracked(.count) }),
-           configuration.behaviorWindow != .precedingDay {
-            throw .countWindowUnavailable
+        if output?.kind == .tracked(.count) || inputs.contains(where: { $0.variable.kind == .tracked(.count) }) {
+            guard configuration.behaviorWindow == .precedingDay else { throw .countWindowUnavailable }
+            guard configuration.interaction == nil else { throw .countInteractionUnavailable }
         }
 
         var calendar = Calendar(identifier: .gregorian)
@@ -246,7 +254,8 @@ extension HealthAnalysisApplication {
         } else {
             assessment = NumericAnalysis.assess(
                 dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar,
-                behaviorWindow: configuration.behaviorWindow, practicalDifference: practicalDifference
+                behaviorWindow: configuration.behaviorWindow, practicalDifference: practicalDifference,
+                interaction: configuration.interaction
             )
         }
         return AnalysisResult(
@@ -259,6 +268,7 @@ extension HealthAnalysisApplication {
             model: assessment.model,
             modeledInputs: modeledInputs,
             estimates: assessment.estimates,
+            interaction: assessment.interaction,
             evidence: assessment.evidence,
             outputVariable: output
         )

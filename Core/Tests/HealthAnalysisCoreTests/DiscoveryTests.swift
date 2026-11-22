@@ -262,7 +262,7 @@ struct DiscoveryTests {
             )
         ]
         let (application, inputs) = try await fixture.application(
-            days: 395, inputNames: ["Caffeine"], additionalRecords: records, excluding: { $0 == 395 },
+            days: 395, inputNames: ["Caffeine"], recordsInputsFrom: 33, additionalRecords: records, excluding: { $0 == 395 },
             values: { [100 + $0 * 71 % 251] },
             output: { day, values in 60 + 0.04 * Double(values[day - 1][0]) + Double(day * 13 % 17) / 20 }
         )
@@ -275,6 +275,9 @@ struct DiscoveryTests {
         #expect(finding.configuration.output == fixture.output)
         #expect(finding.completed.result.coverage.lastDate == fixture.date(394))
         #expect(finding.completed.result.observations.allSatisfy { $0.outputValue < 100 })
+        #expect(finding.completed.result.inspection?.selectedOutputSourceIdentifier == fixture.source.bundleIdentifier)
+        #expect(finding.completed.result.inspection?.unpairedOutputs.first?.missingInputs.first?.date == fixture.date(30))
+        #expect(finding.completed.result.outputEvidence.filter { !$0.paired }.count == 3)
         try application.healthMeasurements.setPreferredSource(alternate.bundleIdentifier, for: .restingHeartRate)
         let pinnedSource = try #require(await application.discover(
             asOf: fixture.cutoff, timeZone: fixture.timeZone, enabledSeries: [inputs[0], fixture.output]
@@ -320,7 +323,8 @@ private struct DiscoveryHistory {
 
     @MainActor
     func application(
-        days: Int, inputNames: [String], storeURL: URL? = nil, additionalRecords: [HealthMeasurement] = [], excluding: (Int) -> Bool = { _ in false },
+        days: Int, inputNames: [String], storeURL: URL? = nil, recordsInputsFrom: Int = 0,
+        additionalRecords: [HealthMeasurement] = [], excluding: (Int) -> Bool = { _ in false },
         values: (Int) -> [Int], output: (Int, [[Int]]) -> Double
     ) async throws -> (HealthAnalysisApplication, [AnalysisSeriesID]) {
         let inputs = (0..<days).map(values)
@@ -331,10 +335,10 @@ private struct DiscoveryHistory {
         let quantities = try inputNames.map { name in
             try application.manualLog.createQuantity(
                 name: name, unit: name == "Caffeine" ? "mg" : "units",
-                defaultValue: 0, startsOn: ManualLogDay(first, timeZone: timeZone)
+                defaultValue: 0, startsOn: ManualLogDay(date(recordsInputsFrom), timeZone: timeZone)
             )
         }
-        for (index, row) in inputs.enumerated() {
+        for (index, row) in inputs.enumerated() where index >= recordsInputsFrom {
             let day = ManualLogDay(date(index), timeZone: timeZone)
             for (value, quantity) in zip(row, quantities) {
                 application.manualLog.editQuantity(quantity.id, on: day, text: String(value), locale: locale)

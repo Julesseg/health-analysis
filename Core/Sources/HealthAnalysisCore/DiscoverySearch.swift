@@ -130,12 +130,12 @@ struct DiscoverySearch: Sendable {
         return questions
     }
 
-    private func inputWindows(in plan: TemporalAnalysisDataset.Plan) -> [AnalysisSeriesID: [Date: AnalysisObservation.Input]] {
+    private func inputWindows(in plan: TemporalAnalysisDataset.Plan) -> [AnalysisSeriesID: [Date: TemporalAnalysisDataset.InputWindow]] {
         Dictionary(uniqueKeysWithValues: inputs.map { input in
             let days = dailyInputs[input.id] ?? [:]
-            let windows = plan.rows.compactMap { row in
-                TemporalAnalysisDataset.summarizeInput(input.id, dates: row.behaviorDates) { days[$0] }
-                    .map { (row.output.date, $0) }
+            let windows = plan.rows.map { row in
+                let window = TemporalAnalysisDataset.summarizeInput(input.id, dates: row.behaviorDates) { days[$0] }
+                return (row.output.date, window)
             }
             return (input.id, Dictionary(uniqueKeysWithValues: windows))
         })
@@ -143,10 +143,10 @@ struct DiscoverySearch: Sendable {
 
     private func assess(
         _ question: Question, in output: OutputPlan,
-        windows: [AnalysisSeriesID: [Date: AnalysisObservation.Input]]
+        windows: [AnalysisSeriesID: [Date: TemporalAnalysisDataset.InputWindow]]
     ) -> Assessment {
         let dataset = TemporalAnalysisDataset(plan: output.plan, inputs: question.inputs.map(\.id), calendar: calendar) {
-            id, row in windows[id]?[row.output.date]
+            id, row in windows[id]?[row.output.date] ?? .init(value: nil, missingDates: [])
         }
         let result = AnalysisResult.assess(
             configuration: question.configuration, dataset: dataset, inputs: question.inputs, calendar: calendar,

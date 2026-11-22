@@ -134,7 +134,10 @@ extension HealthAnalysisApplication {
             for window in AnalysisBehaviorWindow.allCases {
                 plans.append(DiscoverySearch.OutputPlan(
                     output: .health(metric: metric, sourceBundleIdentifier: sourceID), metric: metric, window: window,
-                    plan: .init(outputs: selectedOutputs, window: window, history: .last365Days, asOf: cutoff, calendar: calendar)
+                    plan: .init(
+                        outputs: selectedOutputs, selectedSourceIdentifier: sourceID,
+                        window: window, history: .last365Days, asOf: cutoff, calendar: calendar
+                    )
                 ))
             }
         }

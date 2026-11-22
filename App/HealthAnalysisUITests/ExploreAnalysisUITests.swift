@@ -43,11 +43,43 @@ final class ExploreAnalysisUITests: XCTestCase {
         let chart = app.descendants(matching: .any)["explore.estimateChart"].firstMatch
         for _ in 0..<3 where !chart.isHittable { app.swipeUp() }
         XCTAssertTrue(chart.isHittable)
+        XCTAssertEqual(chart.label, "Association estimate and uncertainty for Caffeine")
+        XCTAssertTrue((chart.value as? String)?.contains("Higher values were associated") == true)
+        let observed = app.buttons["Observed measurements"]
+        for _ in 0..<6 where !observed.isHittable { app.swipeUp() }
+        XCTAssertTrue(observed.isHittable)
+        observed.tap()
+        let timeline = app.descendants(matching: .any)["explore.observedTimeline"].firstMatch
+        XCTAssertTrue(timeline.waitForExistence(timeout: 5))
+        XCTAssertEqual(timeline.label, "Observed timeline for Resting heart rate")
+        XCTAssertTrue((timeline.value as? String)?.contains("113") == true)
+        let scatter = app.descendants(matching: .any)["explore.observedScatter"].firstMatch
+        for _ in 0..<3 where !scatter.isHittable { app.swipeUp() }
+        XCTAssertTrue(scatter.isHittable)
+        XCTAssertEqual(scatter.label, "Observed scatterplot for Caffeine and Resting heart rate")
+        XCTAssertTrue((scatter.value as? String)?.contains("112") == true)
+        XCTAssertFalse(chart.exists)
+        app.navigationBars["Observed measurements"].buttons.firstMatch.tap()
+
         let coverage = app.buttons["Usable dates and gaps"]
         for _ in 0..<4 where !coverage.isHittable { app.swipeUp() }
         XCTAssertTrue(coverage.isHittable)
         coverage.tap()
         XCTAssertTrue(app.navigationBars["Usable dates and gaps"].waitForExistence(timeout: 5))
+        let source = app.descendants(matching: .any)["explore.outputSource"].firstMatch
+        for _ in 0..<3 where !source.isHittable { app.swipeUp() }
+        XCTAssertEqual(source.value as? String, "fixture.explore")
+        let missing = app.buttons["Inspect missing input dates"]
+        for _ in 0..<5 where !missing.isHittable { app.swipeUp() }
+        missing.tap()
+        XCTAssertTrue(app.navigationBars["Missing input dates"].waitForExistence(timeout: 5))
+        let missingCaffeine = app.descendants(matching: .any)["explore.missingInput"].firstMatch
+        XCTAssertTrue(missingCaffeine.isHittable)
+        XCTAssertTrue(missingCaffeine.label.contains("Caffeine"))
+        missingCaffeine.tap()
+        XCTAssertTrue(app.staticTexts["No tracking variables for this date"].waitForExistence(timeout: 5))
+        app.navigationBars["Log"].buttons.firstMatch.tap()
+        app.navigationBars["Missing input dates"].buttons.firstMatch.tap()
         app.navigationBars["Usable dates and gaps"].buttons.firstMatch.tap()
         app.navigationBars["Analysis result"].buttons.firstMatch.tap()
         XCTAssertTrue(analyze.isEnabled)
@@ -119,6 +151,18 @@ final class ExploreAnalysisUITests: XCTestCase {
         let adjustmentEstimate = app.staticTexts["Account for · Supplement"]
         for _ in 0..<8 where !adjustmentEstimate.isHittable { app.swipeUp() }
         XCTAssertTrue(adjustmentEstimate.isHittable)
+        let model = app.buttons["Model and evidence"]
+        for _ in 0..<5 where !model.isHittable { app.swipeUp() }
+        model.tap()
+        XCTAssertTrue(app.navigationBars["Model and evidence"].waitForExistence(timeout: 5))
+        let modeledSupplement = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Supplement (mg)")).firstMatch
+        for _ in 0..<3 where !modeledSupplement.isHittable { app.swipeUp() }
+        XCTAssertTrue(modeledSupplement.label.contains("Adjustment input"))
+        modeledSupplement.tap()
+        XCTAssertTrue(app.navigationBars["Supplement"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Explicit observations"].exists)
+        app.navigationBars["Supplement"].buttons.firstMatch.tap()
+        app.navigationBars["Model and evidence"].buttons.firstMatch.tap()
         app.navigationBars["Analysis result"].buttons.firstMatch.tap()
 
         for _ in 0..<3 where !accountFor.isHittable { app.swipeDown() }

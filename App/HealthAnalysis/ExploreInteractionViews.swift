@@ -61,6 +61,7 @@ struct InteractionResultSection: View {
     let moderator: AnalysisModeledInput
     let estimate: AnalysisInteractionEstimate?
     let isSleepDuration: Bool
+    @ScaledMetric private var chartHeight = 110.0
 
     private var scale: Double { isSleepDuration ? 60 : 1 }
 
@@ -125,8 +126,11 @@ struct InteractionResultSection: View {
         }
         .chartYScale(domain: [Level.lower.label, Level.higher.label])
         .chartXAxisLabel(axisLabel, position: .bottom, alignment: .center)
-        .frame(height: 110)
-        .accessibilityHidden(true)
+        .frame(height: chartHeight)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("Adjusted condition estimates for \(focal.name) across \(moderator.name)"))
+        .accessibilityValue(Text(finding(estimate.finding)))
+        .accessibilityIdentifier("explore.interaction.chart")
     }
 
     @ChartContentBuilder

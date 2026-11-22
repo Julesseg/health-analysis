@@ -15,6 +15,9 @@ final class ExploreInteractionUITests: XCTestCase {
         XCTAssertTrue(higher.label.contains("3 L"))
         XCTAssertEqual(try conditionEstimate(in: higher), 8, accuracy: 0.05)
         XCTAssertTrue(reveal(app.descendants(matching: .any)["explore.interaction.uncertainty"].firstMatch, in: app))
+        let chart = app.descendants(matching: .any)["explore.interaction.chart"].firstMatch
+        XCTAssertTrue(reveal(chart, in: app))
+        XCTAssertEqual(chart.label, "Adjusted condition estimates for Caffeine across Fluids")
         XCTAssertTrue(reveal(app.staticTexts["With Fluids at 2 L."], in: app))
 
         app.navigationBars["Analysis result"].buttons.firstMatch.tap()
@@ -48,6 +51,10 @@ final class ExploreInteractionUITests: XCTestCase {
             .waitForExistence(timeout: 5))
         let reason = app.staticTexts["Too few fully recorded windows support the lower and higher combinations."]
         XCTAssertTrue(reveal(reason, in: app))
+        let inspect = app.buttons["Inspect input records"]
+        XCTAssertTrue(reveal(inspect, in: app))
+        inspect.tap()
+        XCTAssertTrue(app.navigationBars["Observed measurements"].waitForExistence(timeout: 5))
     }
 
     @MainActor

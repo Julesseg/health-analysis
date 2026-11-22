@@ -46,6 +46,7 @@ struct TemporalAnalysisDataset: Sendable {
     struct InputWindow {
         let value: AnalysisObservation.Input?
         let missingDates: [Date]
+        var excludedCategoryInput: AnalysisInspection.OutputWithoutPair.ExcludedCategoryInput? = nil
     }
 
     struct Plan: Sendable {
@@ -99,7 +100,8 @@ struct TemporalAnalysisDataset: Sendable {
 
     @MainActor init(
         outputs: [Output], selectedSourceIdentifier: String? = nil, inputs: [ManualAnalysisSeries], manualLog: ManualLog,
-        window: AnalysisBehaviorWindow, history: AnalysisPeriod, asOf: Date, calendar: Calendar
+        window: AnalysisBehaviorWindow, history: AnalysisPeriod, asOf: Date, calendar: Calendar,
+        categoryInputs: [AnalysisSeriesID: AnalysisCategoryContrast] = [:]
     ) {
         let plan = Plan(
             outputs: outputs, selectedSourceIdentifier: selectedSourceIdentifier,
@@ -108,7 +110,12 @@ struct TemporalAnalysisDataset: Sendable {
         var dailyInputs: [AnalysisSeriesID: [Date: AnalysisObservation.Input.Day?]] = [:]
         let catalog = Dictionary(uniqueKeysWithValues: inputs.map { ($0.variable.id, $0) })
         self.init(plan: plan, inputs: inputs.map(\.variable.id), calendar: calendar) { id, row in
-            Self.summarizeInput(id, dates: row.behaviorDates) { date in
+            if let contrast = categoryInputs[id], let series = catalog[id] {
+                return Self.categoryInputWindow(
+                    series, contrast: contrast, dates: row.behaviorDates, manualLog: manualLog, timeZone: calendar.timeZone
+                )
+            }
+            return Self.summarizeInput(id, dates: row.behaviorDates) { date in
                 if let cached = dailyInputs[id]?[date] { return cached }
                 let input = catalog[id].flatMap {
                     Self.inputDay(date, for: $0, manualLog: manualLog, timeZone: calendar.timeZone)
@@ -123,11 +130,30 @@ struct TemporalAnalysisDataset: Sendable {
         _ date: Date, for series: ManualAnalysisSeries, manualLog: ManualLog, timeZone: TimeZone
     ) -> AnalysisObservation.Input.Day? {
         let day = ManualLogDay(date, timeZone: timeZone)
-        return series.numericValue(in: manualLog, on: day).map { sample in
-            AnalysisObservation.Input.Day(
-                date: date, value: sample.value, origin: sample.origin, trackingValue: sample.trackingValue
-            )
+        guard let sample = series.numericValue(in: manualLog, on: day), let value = sample.value else { return nil }
+        return .init(date: date, value: value, origin: sample.origin, trackingValue: sample.trackingValue)
+    }
+
+    @MainActor private static func categoryInputWindow(
+        _ series: ManualAnalysisSeries, contrast: AnalysisCategoryContrast, dates: [Date],
+        manualLog: ManualLog, timeZone: TimeZone
+    ) -> InputWindow {
+        guard dates.count == 1, let date = dates.first else { return .init(value: nil, missingDates: dates) }
+        let day = ManualLogDay(date, timeZone: timeZone)
+        guard let sample = series.numericValue(in: manualLog, on: day, category: .contrast(contrast)),
+              case .category(let category)? = sample.trackingValue else {
+            return .init(value: nil, missingDates: [date])
         }
+        let id = series.variable.id
+        guard let value = sample.value else {
+            return .init(value: nil, missingDates: [], excludedCategoryInput: .init(
+                series: id, date: date, category: category, origin: sample.origin
+            ))
+        }
+        let entry = AnalysisObservation.Input.Day(
+            date: date, value: value, origin: sample.origin, trackingValue: sample.trackingValue
+        )
+        return .init(value: .init(series: id, date: date, value: value, origin: sample.origin, days: [entry]), missingDates: [])
     }
 
     static func summarizeInput(
@@ -160,16 +186,18 @@ struct TemporalAnalysisDataset: Sendable {
         observations = plan.rows.compactMap { row -> AnalysisObservation? in
             var pairedInputs: [AnalysisObservation.Input] = []
             var missing: [AnalysisInspection.OutputWithoutPair.MissingInput] = []
+            var excluded: [AnalysisInspection.OutputWithoutPair.ExcludedCategoryInput] = []
             for id in inputs {
                 let window = inputWindow(id, row)
                 if let input = window.value { pairedInputs.append(input) }
                 missing += window.missingDates.map { .init(series: id, date: $0) }
+                if let category = window.excludedCategoryInput { excluded.append(category) }
             }
             guard pairedInputs.count == inputs.count else {
                 unpaired.append(.init(
                     date: row.output.date, anchor: row.output.anchor, value: row.output.value,
                     source: row.output.source, missingInputs: missing, origin: row.output.origin,
-                    trackingValue: row.output.trackingValue
+                    trackingValue: row.output.trackingValue, excludedCategoryInputs: excluded.isEmpty ? nil : excluded
                 ))
                 return nil
             }

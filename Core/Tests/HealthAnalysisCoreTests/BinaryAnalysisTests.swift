@@ -4,6 +4,33 @@ import Testing
 
 @MainActor
 struct BinaryAnalysisTests {
+    @Test func yesNoOutputComparesRatingThresholdGroupsAndRetainsRecordedLevels() throws {
+        let app = HealthAnalysisApplication()
+        let rating = try app.manualLog.createTypedVariable(
+            name: "Stress", kind: .rating(1...5), defaultValue: .rating(1), startsOn: day(0)
+        )
+        let headache = try binary("Headache", in: app, starting: 1)
+        for index in 0..<200 {
+            let level = index % 5 + 1
+            let rank = index / 5 * 17 % 40
+            app.manualLog.editTypedEntry(rating.id, on: day(index), value: .rating(level))
+            app.manualLog.editTypedEntry(headache.id, on: day(index + 1), value: .yesNo(rank < (level >= 3 ? 30 : 10)))
+        }
+
+        let input = AnalysisSeriesID.manualTyped(rating.id)
+        let result = try app.analyze(.init(
+            output: .manualTyped(headache.id), inputs: [input], timeZone: utc
+        ), asOf: date(201))
+        let estimate = try #require(result.estimates.first)
+        #expect(result.model == .binaryLogisticV1)
+        #expect(estimate.scale == .probabilityDifference)
+        #expect(abs(estimate.difference - 0.5) < 0.0001)
+        #expect(estimate.interval.contains(0.5))
+        #expect(result.evidence.reasons.contains(.ratingThresholdLimitations))
+        #expect(result.inputEvidence(for: input).observedPairs.first?.input.trackingValue == .rating(1))
+        #expect(result.inputEvidence(for: input).observedPairs.last?.input.trackingValue == .rating(5))
+    }
+
     @Test func binaryQuestionReportsAnAdjustedProbabilityDifferenceForYesVersusNo() throws {
         let app = HealthAnalysisApplication()
         let input = try binary("Late meal", in: app)

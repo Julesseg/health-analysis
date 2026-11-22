@@ -8,6 +8,14 @@ public struct AnalysisInspection: Codable, Sendable {
             public let date: Date
         }
 
+        public struct ExcludedCategoryInput: Codable, Identifiable, Sendable {
+            public var id: AnalysisSeriesID { series }
+            public let series: AnalysisSeriesID
+            public let date: Date
+            public let category: TrackingCategory.ID
+            public let origin: ManualValueOrigin
+        }
+
         public var id: Date { date }
         public let date: Date
         public let anchor: Date
@@ -16,6 +24,7 @@ public struct AnalysisInspection: Codable, Sendable {
         public let missingInputs: [MissingInput]
         public internal(set) var origin: ManualValueOrigin? = nil
         public internal(set) var trackingValue: ManualTrackingValue? = nil
+        public internal(set) var excludedCategoryInputs: [ExcludedCategoryInput]? = nil
     }
 
     public let unpairedOutputs: [OutputWithoutPair]
@@ -31,6 +40,7 @@ public struct AnalysisOutputEvidence: Identifiable, Sendable {
     public let origin: ManualValueOrigin?
     public let trackingValue: ManualTrackingValue?
     public let paired: Bool
+    public internal(set) var excludedByCategory: Bool = false
 
     public var isObserved: Bool { origin == nil || origin == .observation }
 }
@@ -84,7 +94,8 @@ extension AnalysisResult {
         let unpaired = (inspection?.unpairedOutputs ?? []).map {
             AnalysisOutputEvidence(
                 date: $0.date, anchor: $0.anchor, value: $0.value, source: $0.source,
-                origin: $0.origin, trackingValue: $0.trackingValue, paired: false
+                origin: $0.origin, trackingValue: $0.trackingValue, paired: false,
+                excludedByCategory: $0.excludedCategoryInputs != nil
             )
         }
         return (paired + unpaired).sorted { $0.date < $1.date }

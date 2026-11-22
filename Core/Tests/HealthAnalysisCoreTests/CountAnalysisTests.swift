@@ -12,8 +12,10 @@ struct CountAnalysisTests {
         let app = HealthAnalysisApplication(manualLogStoreURL: logURL, savedAnalysesStoreURL: savedURL)
         let input = try count("Coffees", in: app, starting: 1)
         let output = try count("Headaches", in: app, starting: 0)
-        let rating = try app.manualLog.createTypedVariable(
-            name: "Energy", kind: .rating(1...5), defaultValue: .rating(3), startsOn: day(0)
+        let option = TrackingCategory(name: "Home")
+        let category = try app.manualLog.createTypedVariable(
+            name: "Location", kind: .category([option, TrackingCategory(name: "Away")]),
+            defaultValue: .category(option.id), startsOn: day(0)
         )
         app.manualLog.editTypedEntry(input.id, on: day(1), value: .count(0))
         app.manualLog.editTypedEntry(output.id, on: day(1), value: .count(7))
@@ -33,7 +35,7 @@ struct CountAnalysisTests {
         let choice = try #require(catalog.first { $0.id == configuration.output })
         #expect(choice.kind == .tracked(.count))
         #expect(choice.supportsInput && choice.supportsOutput)
-        let unsupported = try #require(catalog.first { $0.id == .manualTyped(rating.id) })
+        let unsupported = try #require(catalog.first { $0.id == .manualTyped(category.id) })
         #expect(!unsupported.supportsInput && !unsupported.supportsOutput)
 
         let result = try reopened.analyze(configuration, asOf: date(5))

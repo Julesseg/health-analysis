@@ -23,7 +23,13 @@ struct HealthAnalysisApp: App {
         if let fixture = BinaryAnalysisUIFixture.applicationForLaunch() {
             return Configuration(application: fixture)
         }
+        if let fixture = CategoryAnalysisUIFixture.applicationForLaunch() {
+            return Configuration(application: fixture)
+        }
         if let fixture = CountAnalysisUIFixture.applicationForLaunch() {
+            return Configuration(application: fixture)
+        }
+        if let fixture = RatingAnalysisUIFixture.applicationForLaunch() {
             return Configuration(application: fixture)
         }
         if let fixture = ExploreAnalysisUIFixture.applicationForLaunch() {

@@ -7,7 +7,8 @@ struct AnalysisOutputHistory {
     var selectedSourceIdentifier: String? = nil
 
     @MainActor static func stored(
-        _ series: ManualAnalysisSeries, in log: ManualLog, asOf: Date, calendar: Calendar
+        _ series: ManualAnalysisSeries, in log: ManualLog, asOf: Date, calendar: Calendar,
+        categoryEvent: TrackingCategory.ID? = nil
     ) -> Self {
         guard let first = series.firstDay(in: log),
               let start = calendar.date(from: DateComponents(year: first.year, month: first.month, day: first.day))
@@ -18,9 +19,10 @@ struct AnalysisOutputHistory {
         let end = calendar.startOfDay(for: asOf)
         while date < end {
             let day = ManualLogDay(date, timeZone: calendar.timeZone)
-            if let sample = series.numericValue(in: log, on: day) {
+            if let sample = series.numericValue(in: log, on: day, category: categoryEvent.map(CategoryAnalysis.Transform.event)),
+               let value = sample.value {
                 outputs.append(.init(
-                    date: date, anchor: date, behaviorCutoff: date, value: sample.value,
+                    date: date, anchor: date, behaviorCutoff: date, value: value,
                     origin: sample.origin, trackingValue: sample.trackingValue
                 ))
             }

@@ -54,7 +54,7 @@ final class BinaryAnalysisUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Paired values"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["No"].firstMatch.exists)
         XCTAssertTrue(app.staticTexts["Explicit observation"].firstMatch.exists)
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "Assumed default effective")).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Assumed default effective")).firstMatch.exists)
         app.navigationBars["Paired values"].buttons.firstMatch.tap()
         app.navigationBars["Usable dates and gaps"].buttons.firstMatch.tap()
 
@@ -63,7 +63,7 @@ final class BinaryAnalysisUITests: XCTestCase {
         XCTAssertTrue(model.isHittable)
         model.tap()
         XCTAssertTrue(app.navigationBars["Model and evidence"].waitForExistence(timeout: 5))
-        let modeledShift = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Night shift (yes/no)")).firstMatch
+        let modeledShift = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Night shift (yes/no)")).firstMatch
         for _ in 0..<3 where !modeledShift.isHittable { app.swipeUp() }
         XCTAssertTrue(modeledShift.label.contains("Adjustment input"))
     }

@@ -13,7 +13,7 @@ public struct AnalysisVariable: Codable, Equatable, Identifiable, Sendable {
     public var supportsInput: Bool {
         switch id {
         case .manualQuantity: true
-        case .manualTyped: kind == .tracked(.count) || kind == .tracked(.yesNo)
+        case .manualTyped: kind == .tracked(.count) || kind == .tracked(.yesNo) || kind.ratingThreshold != nil || !categories.isEmpty
         case .health: false
         }
     }
@@ -21,9 +21,14 @@ public struct AnalysisVariable: Codable, Equatable, Identifiable, Sendable {
     public var supportsOutput: Bool {
         switch id {
         case .manualQuantity: false
-        case .manualTyped: kind == .tracked(.count) || kind == .tracked(.yesNo)
+        case .manualTyped: supportsInput
         case .health(let metric, _): metric == .restingHeartRate || metric == .sleepAnalysis
         }
+    }
+
+    public var categories: [TrackingCategory] {
+        if case .tracked(.category(let options)) = kind { return options }
+        return []
     }
 
     var unit: String {
@@ -51,7 +56,7 @@ extension HealthAnalysisApplication {
 
 enum ManualAnalysisSeries {
     struct Sample {
-        let value: Double
+        let value: Double?
         let origin: ManualValueOrigin
         var trackingValue: ManualTrackingValue? = nil
     }
@@ -68,7 +73,9 @@ enum ManualAnalysisSeries {
         }
     }
 
-    @MainActor func numericValue(in log: ManualLog, on day: ManualLogDay) -> Sample? {
+    @MainActor func numericValue(
+        in log: ManualLog, on day: ManualLogDay, category: CategoryAnalysis.Transform? = nil
+    ) -> Sample? {
         switch self {
         case .quantity(let quantity):
             guard let (amount, origin) = log.analysisValue(for: quantity, on: day) else { return nil }
@@ -82,6 +89,11 @@ enum ManualAnalysisSeries {
                 return Sample(value: Double(count), origin: origin, trackingValue: value)
             case (.yesNo, .yesNo(let isYes)):
                 return Sample(value: BinaryEvent.encode(isYes), origin: origin, trackingValue: value)
+            case (.rating(let levels), .rating(let level)) where levels.contains(level):
+                return Sample(value: Double(level), origin: origin, trackingValue: value)
+            case (.category(let options), .category(let id)) where options.contains(where: { $0.id == id }):
+                guard let category else { return nil }
+                return Sample(value: category.encode(id), origin: origin, trackingValue: value)
             default:
                 return nil
             }

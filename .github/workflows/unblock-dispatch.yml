@@ -1,0 +1,35 @@
+name: Unblock dispatch
+
+# See docs/agents/auto-dispatch.md.
+
+on:
+  issues:
+    types: [closed]
+  workflow_dispatch:
+
+# Serialize runs so two near-simultaneous events can't double-dispatch the
+# same issue. A cancelled pending run is harmless: each run re-scans
+# everything, so the surviving run covers the cancelled one's event.
+concurrency:
+  group: unblock-dispatch
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+  actions: write
+
+jobs:
+  dispatch:
+    if: vars.PASEO_PROJECT_DIR != '' && vars.PASEO_PROVIDER != '' && vars.PASEO_MODEL != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const { dispatchReadyIssues } = require('./ci/dispatch-ready-issues.cjs');
+            await dispatchReadyIssues({ github, context, core });

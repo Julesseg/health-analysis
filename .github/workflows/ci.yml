@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+env:
+  APP_NAME: HealthAnalysis
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  core-tests:
+    name: Core · swift test (Linux)
+    runs-on: ubuntu-24.04
+    container: swift:6.0.3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Core tests
+        working-directory: Core
+        run: swift test
+
+  dispatcher-tests:
+    name: Issue dispatcher
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: node --test ci/dispatch-ready-issues.test.cjs
+
+  app-ui-tests:
+    name: App · XCUITest (macOS)
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select latest stable Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Toolchain versions
+        run: xcodebuild -version
+
+      - name: Resolve an available iPhone simulator
+        id: sim
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+
+          devices = json.loads(subprocess.check_output(
+              ["xcrun", "simctl", "list", "devices", "available", "--json"]
+          ))["devices"]
+          candidates = []
+          for runtime, simulators in devices.items():
+              if not runtime.startswith("com.apple.CoreSimulator.SimRuntime.iOS-"):
+                  continue
+              version = tuple(map(int, runtime.split(".iOS-")[1].split("-")))
+              if version >= (26, 0):
+                  candidates.extend((version, sim["name"], sim["udid"]) for sim in simulators
+                                    if sim["name"].startswith("iPhone"))
+          if not candidates:
+              raise SystemExit("No available iPhone simulator with iOS 26 or later.")
+          version, name, udid = max(candidates)
+          print(f"Using {name} with iOS {'.'.join(map(str, version))} ({udid})")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              print(f"udid={udid}", file=output)
+          PY
+
+      - name: Build & run UI tests
+        working-directory: App
+        env:
+          SIMULATOR_UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project "$APP_NAME.xcodeproj" \
+            -scheme "$APP_NAME" \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-test-results
+          path: App/TestResults.xcresult
+          if-no-files-found: ignore

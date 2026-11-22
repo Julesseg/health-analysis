@@ -1,0 +1,24 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "Close": {},
+    "Daily log": {},
+    "Data": {},
+    "Discovered for you": {},
+    "Explore": {},
+    "Explore uses readable measurements and manually tracked variables.": {},
+    "Following": {},
+    "Health measurements": {},
+    "Insights": {},
+    "Latest measurements": {},
+    "Log": {},
+    "No discoveries yet": {},
+    "No followed analyses yet": {},
+    "No readable measurements": {},
+    "No settings available yet": {},
+    "No tracking variables": {},
+    "No variables to explore": {},
+    "Settings": {}
+  },
+  "version": "1.0"
+}

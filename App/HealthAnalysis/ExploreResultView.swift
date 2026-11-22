@@ -2,35 +2,19 @@ import Charts
 import HealthAnalysisCore
 import SwiftUI
 
-struct ExploreResultView: View {
+struct ExploreResultView<Status: View>: View {
     let application: HealthAnalysisApplication
-    let configuration: AnalysisConfiguration
+    let result: AnalysisResult
+    @ViewBuilder let status: () -> Status
 
-    @State private var run: Result<AnalysisResult, AnalysisRunFailure>?
+    private var configuration: AnalysisConfiguration { result.configuration }
 
     var body: some View {
-        List {
-            switch run {
-            case .success(let result):
-                findings(result)
-                evidence(result)
-                modeledInputs(result)
-                coverage(result)
-            case .failure(let failure):
-                Section {
-                    Text(failure.description)
-                    Button("Retry", action: analyze)
-                    measurementsLink
-                }
-            case nil:
-                ProgressView("Analyzing…")
-            }
-        }
-        .navigationTitle("Analysis result")
-        .navigationBarTitleDisplayMode(.inline)
-        .task {
-            if run == nil { analyze() }
-        }
+        findings(result)
+        status()
+        evidence(result)
+        modeledInputs(result)
+        coverage(result)
     }
 
     @ViewBuilder
@@ -155,14 +139,6 @@ struct ExploreResultView: View {
             HealthMeasurementHistoryView(
                 history: application.healthMeasurements, presentation: .restingHeartRate
             )
-        }
-    }
-
-    private func analyze() {
-        do {
-            run = .success(try application.analyze(configuration))
-        } catch {
-            run = .failure(error)
         }
     }
 }
@@ -342,19 +318,6 @@ private extension AnalysisEvidence.Reason {
         switch self {
         case .collinearInputs(let inputs), .defaultOnlyInputs(let inputs), .lowVariationInputs(let inputs): inputs
         default: []
-        }
-    }
-}
-
-private extension AnalysisRunFailure {
-    var description: LocalizedStringKey {
-        switch self {
-        case .unsupportedConfiguration: "This analysis configuration is unavailable."
-        case .inputUnavailable: "A selected quantity is unavailable."
-        case .manualLogUnavailable: "Couldn’t open the daily log."
-        case .chooseOutputSource: "Choose a preferred resting heart rate source in Health measurements."
-        case .healthHistoryUnavailable: "Couldn’t use Health history. Check Health measurements and try again."
-        case .healthHistoryLoading: "Health measurements are still being checked. Try again when the check finishes."
         }
     }
 }

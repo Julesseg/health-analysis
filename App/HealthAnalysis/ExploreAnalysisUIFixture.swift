@@ -41,6 +41,11 @@ enum ExploreAnalysisUIFixture {
                 application.manualLog.editQuantity(quantity.id, on: day.day, text: String(amount), locale: locale)
             }
         }
+        if ProcessInfo.processInfo.environment["HEALTH_ANALYSIS_SAVED_ANALYSIS_UI_FIXTURE"] == "1" {
+            _ = try! application.manualLog.createQuantity(
+                name: "Evening caffeine", unit: "mg", defaultValue: 0, startsOn: days[0].day
+            )
+        }
         return application
     }
 

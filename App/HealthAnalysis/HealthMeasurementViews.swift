@@ -55,6 +55,8 @@ struct LatestHealthMeasurementsSection: View {
                 HealthMeasurementRow(measurement: measurement, metricTitle: HealthMetricPresentation.restingHeartRate.title)
             } else if history.preferredSource(for: .restingHeartRate) != nil {
                 Text("No imported measurements for this source.")
+            } else if history.hasReadableRecords {
+                Text(HealthMetricPresentation.restingHeartRate.emptyHistoryTitle)
             }
         }
     }
@@ -79,7 +81,7 @@ struct HealthReadStatus: View {
                 Text("No readable measurements")
             }
         case .failed(let failure):
-            Text(message(for: failure))
+            Text(failure.message)
             if history.hasReadableRecords {
                 earlierMeasurementsNotice
             }
@@ -90,9 +92,11 @@ struct HealthReadStatus: View {
         Text("Showing measurements from earlier checks.")
             .foregroundStyle(.secondary)
     }
+}
 
-    private func message(for failure: HealthMeasurementReadFailure) -> LocalizedStringKey {
-        switch failure {
+extension HealthMeasurementReadFailure {
+    var message: LocalizedStringKey {
+        switch self {
         case .unavailable: "Apple Health is unavailable on this device."
         case .protectedData: "Health data is protected. Unlock your iPhone and try again."
         case .request: "Couldn’t request Health access. Try again."

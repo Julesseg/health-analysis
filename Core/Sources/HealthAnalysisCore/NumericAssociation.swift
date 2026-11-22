@@ -1,7 +1,7 @@
 import Foundation
 
-public struct AnalysisEstimate: Sendable {
-    public enum Finding: Sendable {
+public struct AnalysisEstimate: Codable, Sendable {
+    public enum Finding: Codable, Sendable {
         case higher
         case lower
         case nearZero
@@ -15,8 +15,8 @@ public struct AnalysisEstimate: Sendable {
     public let finding: Finding
 }
 
-public struct AnalysisEvidence: Sendable {
-    public enum Grade: Sendable {
+public struct AnalysisEvidence: Codable, Sendable {
+    public enum Grade: Codable, Sendable {
         case insufficient
         case low
         case moderate

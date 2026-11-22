@@ -58,6 +58,7 @@ public final class HealthMeasurementHistory {
     private let source: (any HealthMeasurementSource)?
     private let storeURL: URL?
     private var snapshot: Snapshot?
+    @ObservationIgnored private var analysisReadWaiters: [CheckedContinuation<ReadState?, Never>] = []
 
     nonisolated init(source: (any HealthMeasurementSource)?, storeURL: URL?) {
         self.source = source
@@ -150,23 +151,31 @@ public final class HealthMeasurementHistory {
     }
 
     public func requestAccessAndRefresh() async {
-        await load(requestingAccess: true)
+        _ = await load(requestingAccess: true)
     }
 
     public func refresh() async {
-        await load(requestingAccess: false)
+        _ = await load(requestingAccess: false)
     }
 
-    private func load(requestingAccess: Bool) async {
-        guard readState != .loading else { return }
+    func refreshForAnalysis() async -> ReadState? {
+        if readState == .loading {
+            return await withCheckedContinuation { analysisReadWaiters.append($0) }
+        }
+        return await load(requestingAccess: false)
+    }
+
+    private func load(requestingAccess: Bool) async -> ReadState? {
+        guard readState != .loading, !Task.isCancelled else { return nil }
         guard let source else {
             readState = .failed(.unavailable)
-            return
+            return readState
         }
 
         let previousState = readState
         readState = .loading
         var failure: HealthMeasurementReadFailure = .persistence
+        let completedRead: ReadState?
         do {
             if snapshot == nil, let storeURL {
                 snapshot = try Snapshot.load(from: storeURL)
@@ -209,11 +218,20 @@ public final class HealthMeasurementHistory {
             failure = .persistence
             try persist(updated)
             readState = .loaded
+            completedRead = readState
         } catch is CancellationError {
             readState = previousState
+            completedRead = nil
         } catch {
             readState = .failed(error as? HealthMeasurementReadFailure ?? failure)
+            completedRead = readState
         }
+        let waiters = analysisReadWaiters
+        analysisReadWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume(returning: completedRead)
+        }
+        return completedRead
     }
 
     private func reconciledWorkouts(_ changes: [HealthMeasurementChanges], deletedIDs: Set<UUID>) -> [HealthWorkout] {

@@ -11,7 +11,7 @@ The fit solves the Poisson score equations with a scaled design and backtracking
 - Require at least 42 joint days and 12 per fitted parameter, including the intercept.
 - Require at least six days outside the most common count for each count input, both among paired values and among paired recorded values. Quantities retain their numeric variation checks.
 - A count outcome needs at least 12 recorded days, six recorded positive days, and six recorded days outside its most common count. Defaults are included in the fit after these support checks. Constant recorded counts, defaults alone, and sparse variation can each withhold the estimate.
-- The existing design and variance-inflation checks detect collinear inputs. Fits with inadequate numerical information, separation, or unusable intervals are withheld. This is a guard against unstable estimates, with no general separation classification.
+- The existing design and variance-inflation checks detect collinear inputs. Fits with inadequate numerical information, separation, or residual variation too small to estimate an interval are withheld. This is a guard against unstable estimates, with no general separation classification.
 - A usable count estimate has low confidence. Coverage, frequent defaults, short history, uncertain direction, possible unmeasured influences, and finite lag coverage constrain interpretation. There is no calibrated practical near-zero band for daily count changes.
 
 ## Validation and extension

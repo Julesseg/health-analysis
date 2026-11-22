@@ -6,8 +6,13 @@ struct PoissonMeanFit {
     private let coefficients: [Double]
     private let residuals: [Double]
     private let information: CountInformation
+    private let hasResidualVariation: Bool
+    private static let convergenceTolerance = 1e-7
 
     init?(columns: [[Double]], counts: [Double]) {
+        guard !columns.isEmpty, counts.count > columns.count + 1,
+              columns.allSatisfy({ $0.count == counts.count }),
+              counts.allSatisfy({ $0 >= 0 && $0.isFinite }) else { return nil }
         let mean = counts.reduce(0, +) / Double(counts.count)
         guard mean > 0, mean.isFinite else { return nil }
         let centered = columns.map { column in
@@ -29,12 +34,15 @@ struct PoissonMeanFit {
             let step = information.solve(score)
             let maxChange = rows.map { abs(innerProduct($0, step)) }.max() ?? .infinity
             guard maxChange.isFinite else { return nil }
-            if maxChange < 1e-7 {
+            if maxChange < Self.convergenceTolerance {
                 self.rows = rows
                 self.scales = scales
                 self.coefficients = coefficients
                 self.residuals = fit.residuals
                 self.information = information
+                self.hasResidualVariation = zip(fit.means, fit.residuals).contains { mean, residual in
+                    abs(residual) > Self.convergenceTolerance * max(1, mean)
+                }
                 return
             }
             guard let next = Self.improvingStep(
@@ -48,6 +56,7 @@ struct PoissonMeanFit {
     func logContrast(
         _ contrast: [Double], dayNumbers: [Int], lagDays: Int
     ) -> (estimate: Double, halfWidth: Double)? {
+        guard hasResidualVariation, contrast.count == scales.count, dayNumbers.count == rows.count else { return nil }
         let weights = [0.0] + zip(contrast, scales).map(/)
         let estimate = innerProduct(weights, coefficients)
         let influence = information.solve(weights)

@@ -141,6 +141,22 @@ struct CountAnalysisTests {
         #expect(separated.estimates.isEmpty)
     }
 
+    @Test func countFitWithNoResidualVariationCannotReportAnUncertaintyInterval() throws {
+        let app = HealthAnalysisApplication()
+        let input = try count("Coffees", in: app)
+        let output = try count("Headaches", in: app, starting: 1)
+        for index in 0..<70 {
+            let count = index % 2
+            app.manualLog.editTypedEntry(input.id, on: day(index), value: .count(count))
+            app.manualLog.editTypedEntry(output.id, on: day(index + 1), value: .count(1 + count))
+        }
+        let result = try app.analyze(.init(
+            output: .manualTyped(output.id), inputs: [.manualTyped(input.id)], timeZone: utc
+        ), asOf: date(71))
+        #expect(result.evidence.reasons == [.uncertaintyUnavailable])
+        #expect(result.estimates.isEmpty)
+    }
+
     @Test func countInputEstimatesBPMPerEventWithRecordedZerosAndSparseNonzeros() async throws {
         let source = HealthMeasurement.Source(name: "Synthetic watch", bundleIdentifier: "fixture.count")
         let records = (0..<120).compactMap { index -> HealthMeasurement? in

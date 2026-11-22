@@ -33,8 +33,8 @@ struct DiscoveryEvidenceView: View {
                     if let latest = reassessment.latestEligibleOutputDate {
                         LabeledContent("Latest eligible output") {
                             Text(latest, format: result.analysisDateFormat)
+                                .accessibilityIdentifier("discovery.latestEligibleOutput")
                         }
-                        .accessibilityIdentifier("discovery.latestEligibleOutput")
                     }
                     evidenceDates(result, latestIdentifier: "discovery.later.latestPairedOutput")
                     contrastRows(result)
@@ -44,7 +44,7 @@ struct DiscoveryEvidenceView: View {
                             AnalysisCoverageView(result: result, application: application)
                         }
                     }
-                    Text("The later estimate uses fully recorded behavior windows after the cutoff. Dependence can persist across the cutoff, and repeated refreshes can reuse later observations.")
+                    Text("Reassessment requires fully recorded behavior windows after the cutoff. Dependence can persist across the cutoff, and repeated refreshes can reuse later observations.")
                 } else {
                     Text("Subsequent-data support is unassessed.")
                 }
@@ -62,8 +62,8 @@ struct DiscoveryEvidenceView: View {
             }
             LabeledContent("Latest paired output") {
                 Text(last, format: result.analysisDateFormat)
+                    .accessibilityIdentifier(latestIdentifier)
             }
-            .accessibilityIdentifier(latestIdentifier)
         }
         LabeledContent("Paired days", value: result.coverage.usableDates.count.formatted())
     }
@@ -116,10 +116,10 @@ extension DiscoveryReassessment.Support {
     var label: LocalizedStringKey {
         switch self {
         case .noLaterObservations: "No later outputs with a behavior window after the cutoff."
-        case .insufficient: "There isn’t enough later evidence to estimate this association."
+        case .insufficient: "There isn’t enough later evidence to estimate the selected comparison."
         case .sameDirection: "Later evidence points in the same direction."
         case .oppositeDirection: "Later evidence points in the opposite direction."
-        case .nearZero: "The later estimated association is close to zero."
+        case .nearZero: "The later estimate is close to zero."
         case .uncertain: "The later estimate is uncertain."
         }
     }

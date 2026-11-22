@@ -94,13 +94,14 @@ final class DiscoveryUITests: XCTestCase {
         XCTAssertTrue(originalDate.waitForExistence(timeout: 5))
         XCTAssertTrue(showsSelection(cutoff.formatted(format), in: originalDate))
 
+        let latestEligible = app.descendants(matching: .any)["discovery.latestEligibleOutput"].firstMatch
+        for _ in 0..<8 where !latestEligible.isHittable { app.swipeUp() }
+        XCTAssertTrue(latestEligible.isHittable)
+        XCTAssertTrue(showsSelection(head.formatted(format), in: latestEligible))
         let latestPaired = app.descendants(matching: .any)["discovery.later.latestPairedOutput"].firstMatch
         for _ in 0..<8 where !latestPaired.isHittable { app.swipeUp() }
         XCTAssertTrue(latestPaired.isHittable)
         XCTAssertTrue(showsSelection(paired.formatted(format), in: latestPaired))
-        let latestEligible = app.descendants(matching: .any)["discovery.latestEligibleOutput"].firstMatch
-        XCTAssertTrue(latestEligible.exists)
-        XCTAssertTrue(showsSelection(head.formatted(format), in: latestEligible))
     }
 
     @MainActor

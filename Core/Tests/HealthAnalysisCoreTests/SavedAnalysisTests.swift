@@ -138,6 +138,35 @@ struct SavedAnalysisTests {
         #expect(reopened.savedAnalyses.state(for: question.id).completed?.result.coverage.usableDates.count == 55)
     }
 
+    @Test func aDeletedSleepRecordRefreshesTheFollowedWakeTimeQuestion() async throws {
+        let store = TemporaryAnalysisStore()
+        let fixture = SavedQuestionHistory()
+        let sleep = HealthMeasurement(
+            id: UUID(), sleepStage: .asleepCore,
+            startDate: fixture.first.addingTimeInterval(2 * 86_400 + 23 * 3_600),
+            endDate: fixture.first.addingTimeInterval(3 * 86_400 + 7 * 3_600),
+            source: .init(name: "Watch", bundleIdentifier: "fixture.watch"), timeZoneIdentifier: "GMT"
+        )
+        let app = store.open(source: SavedQuestionSource(reads: [
+            .success(.init(queryID: "sleep", anchor: Data([1]), added: [sleep])),
+            .success(.init(queryID: "sleep", anchor: Data([2]), added: [], deleted: [sleep.id]))
+        ]))
+        var configuration = try fixture.configure(app)
+        configuration.output = .sleepTiming(.wake, sourceBundleIdentifier: "fixture.watch")
+        let question = try app.savedAnalyses.save(configuration)
+        try app.savedAnalyses.setPinned(true, for: question.id)
+
+        await app.healthMeasurements.refresh()
+        await app.refreshReconciledHealthInsights()
+        #expect(app.savedAnalyses.state(for: question.id).completed?.result.observations.map(\.outputValue) == [420])
+
+        await app.healthMeasurements.refresh()
+        await app.refreshReconciledHealthInsights()
+        let result = try #require(store.open().savedAnalyses.state(for: question.id).completed?.result)
+        #expect(result.configuration == configuration)
+        #expect(result.observations.isEmpty)
+    }
+
     @Test func reopensWholeQuestionsInStablePinOrderAfterEditing() throws {
         let store = TemporaryAnalysisStore()
         let app = store.open()

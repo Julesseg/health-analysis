@@ -98,8 +98,7 @@ extension HealthAnalysisApplication {
             for question in savedAnalyses.following {
                 guard !Task.isCancelled, healthMeasurements.reconciliationVersion == version,
                       healthMeasurements.readState == read else { return }
-                let output = question.configuration.output
-                guard case .health = output,
+                guard let output = question.configuration.output.healthHistorySeries,
                       savedAnalyses.isPinned(question.id),
                       savedAnalyses.question(id: question.id)?.configuration == question.configuration else { continue }
                 let state = savedAnalyses.state(for: question.id)
@@ -116,7 +115,9 @@ extension HealthAnalysisApplication {
                 } else {
                     result = analyzeReconciled(question.configuration, read: read, asOf: cutoff)
                 }
-                savedAnalyses.finishRefresh(for: question.id, requestID: requestID, result: result)
+                savedAnalyses.finishRefresh(
+                    for: question.id, requestID: requestID, result: savedAnalyses.isPinned(question.id) ? result : nil
+                )
             }
         }
         guard healthMeasurements.reconciliationVersion == version, healthMeasurements.readState == read else { return }
@@ -141,5 +142,15 @@ extension HealthAnalysisApplication {
     private func completedRefresh(from result: AnalysisResult) -> Result<CompletedAnalysis, AnalysisRunFailure> {
         if let failure = result.lastHealthReadFailure { return .failure(.healthHistoryUnavailable(failure)) }
         return .success(CompletedAnalysis(result: result, updatedAt: .now))
+    }
+}
+
+private extension AnalysisSeriesID {
+    var healthHistorySeries: AnalysisSeriesID? {
+        switch self {
+        case .health: self
+        case .sleepTiming(_, let source): .health(metric: .sleepAnalysis, sourceBundleIdentifier: source)
+        case .manualQuantity, .manualTyped: nil
+        }
     }
 }

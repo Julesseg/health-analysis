@@ -59,6 +59,11 @@ public final class ManualLog {
         case persistenceFailed
     }
 
+    public enum TypedVariableCreationError: Error {
+        case invalidDefinition
+        case persistenceFailed
+    }
+
     private struct Entry: Codable, Hashable, Sendable {
         let day: ManualLogDay
         let quantityID: TrackingQuantity.ID
@@ -74,7 +79,8 @@ public final class ManualLog {
         var quantities: [TrackingQuantity] = []
         var entries: [Entry: Decimal] = [:]
         var defaultHistories: [TrackingQuantity.ID: ManualDefaultHistory<Decimal>]?
-        var reviews: [ManualLogDay: ReviewedDay<Decimal>]?
+        var reviews: [ManualLogDay: ReviewedDay]?
+        var typed: TypedLogSnapshot?
 
         static func load(from url: URL) throws -> Self {
             do {
@@ -88,6 +94,7 @@ public final class ManualLog {
     private let storeURL: URL?
     private var snapshot: Snapshot?
     private var edits: [Entry: Edit] = [:]
+    private var typedEdits: [TypedLogEntryKey: TypedLogEdit] = [:]
 
     nonisolated init(storeURL: URL?) {
         self.storeURL = storeURL
@@ -95,6 +102,7 @@ public final class ManualLog {
     }
 
     public var quantities: [TrackingQuantity] { snapshot?.quantities ?? [] }
+    public var typedVariables: [TypedTrackingVariable] { snapshot?.typed?.variables ?? [] }
     public var isStoreAvailable: Bool { snapshot != nil }
 
     @discardableResult
@@ -177,20 +185,26 @@ public final class ManualLog {
     }
 
     public func review(on day: ManualLogDay) -> DayReview? {
-        snapshot?.reviews?[day]?.status(for: reviewFields(on: day), hasUnresolvedEdits: hasUnresolvedEdits(on: day))
+        snapshot?.reviews?[day]?.status(
+            for: reviewFields(on: day), typed: typedReviewFields(on: day), hasUnresolvedEdits: hasUnresolvedEdits(on: day)
+        )
     }
 
     public func canConfirmDay(_ day: ManualLogDay) -> Bool {
-        !hasUnresolvedEdits(on: day) && quantities.contains { reviewField(for: $0, on: day) != nil }
+        !hasUnresolvedEdits(on: day) && (
+            quantities.contains { reviewField(for: $0, on: day) != nil }
+                || typedVariables.contains { reviewField(for: $0, on: day) != nil }
+        )
     }
 
     public func confirmDay(_ day: ManualLogDay) throws(ReviewError) {
         guard var updated = snapshot else { throw .persistenceFailed }
         let fields = reviewFields(on: day)
-        guard !fields.isEmpty else { throw .noFields }
+        let typedFields = typedReviewFields(on: day)
+        guard !fields.isEmpty || !typedFields.isEmpty else { throw .noFields }
         guard !hasUnresolvedEdits(on: day) else { throw .unresolvedEdits }
         var reviews = updated.reviews ?? [:]
-        reviews[day] = ReviewedDay(reviewedAt: .now, fields: fields)
+        reviews[day] = ReviewedDay(reviewedAt: .now, fields: fields, typedFields: typedFields)
         updated.reviews = reviews
 
         do {
@@ -202,6 +216,7 @@ public final class ManualLog {
 
     private func hasUnresolvedEdits(on day: ManualLogDay) -> Bool {
         edits.contains { $0.key.day == day && $0.value.status != .saved }
+            || typedEdits.keys.contains { $0.day == day }
     }
 
     private func reviewFields(on day: ManualLogDay) -> [UUID: ReviewField<Decimal>] {
@@ -215,6 +230,20 @@ public final class ManualLog {
             observation: snapshot?.entries[Entry(day: day, quantityID: quantity.id)],
             previousReview: snapshot?.reviews?[day]?.fields[quantity.id],
             effectiveDefault: defaultHistory(for: quantity).effective(on: day)
+        )
+    }
+
+    private func typedReviewFields(on day: ManualLogDay) -> [UUID: ReviewField<ManualTrackingValue>] {
+        Dictionary(uniqueKeysWithValues: typedVariables.compactMap { variable in
+            reviewField(for: variable, on: day).map { (variable.id, $0) }
+        })
+    }
+
+    private func reviewField(for variable: TypedTrackingVariable, on day: ManualLogDay) -> ReviewField<ManualTrackingValue>? {
+        ReviewField.resolve(
+            observation: snapshot?.typed?.entries[TypedLogEntryKey(day: day, variableID: variable.id)],
+            previousReview: snapshot?.reviews?[day]?.typedFields?[variable.id],
+            effectiveDefault: defaultHistory(for: variable).effective(on: day)
         )
     }
 
@@ -239,6 +268,112 @@ public final class ManualLog {
         let entry = Entry(day: day, quantityID: id)
         guard let edit = edits[entry], edit.status == .saveFailed else { return }
         editQuantity(id, on: day, text: edit.text, locale: edit.locale)
+    }
+
+    @discardableResult
+    public func createTypedVariable(
+        name: String, kind: TrackingVariableKind, defaultValue: ManualTrackingValue, startsOn: ManualLogDay
+    ) throws(TypedVariableCreationError) -> TypedTrackingVariable {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, kind.accepts(defaultValue) else { throw .invalidDefinition }
+        guard var updated = snapshot else { throw .persistenceFailed }
+        let variable = TypedTrackingVariable(
+            id: UUID(), name: name, kind: kind, defaultValue: defaultValue, startsOn: startsOn
+        )
+        var typed = updated.typed ?? TypedLogSnapshot()
+        typed.variables.append(variable)
+        updated.typed = typed
+
+        do {
+            try persist(updated)
+        } catch {
+            throw .persistenceFailed
+        }
+        return variable
+    }
+
+    public func typedDefaults(_ id: TypedTrackingVariable.ID) -> [ManualDefaultVersion<ManualTrackingValue>] {
+        guard let variable = typedVariables.first(where: { $0.id == id }) else { return [] }
+        return defaultHistory(for: variable).versions
+    }
+
+    public func setTypedDefault(
+        _ id: TypedTrackingVariable.ID, value: ManualTrackingValue, effectiveOn: ManualLogDay,
+        scope: ManualDefaultScope = .effectiveDate
+    ) throws(DefaultError) {
+        guard var updated = snapshot else { throw .persistenceFailed }
+        guard var typed = updated.typed, let variable = typed.variables.first(where: { $0.id == id }) else {
+            throw .unknownTypedVariable
+        }
+        guard variable.kind.accepts(value) else { throw .invalidValue }
+
+        var history = defaultHistory(for: variable)
+        try history.set(ManualDefaultVersion(effectiveOn: effectiveOn, value: value), scope: scope)
+        typed.defaultHistories = typed.defaultHistories ?? [:]
+        typed.defaultHistories?[id] = history
+        updated.typed = typed
+
+        do {
+            try persist(updated)
+        } catch {
+            throw .persistenceFailed
+        }
+    }
+
+    private func defaultHistory(for variable: TypedTrackingVariable) -> ManualDefaultHistory<ManualTrackingValue> {
+        snapshot?.typed?.defaultHistories?[variable.id] ?? ManualDefaultHistory(
+            initial: ManualDefaultVersion(effectiveOn: variable.startsOn, value: variable.defaultValue)
+        )
+    }
+
+    public func dailyTypedEntries(on day: ManualLogDay) -> [DailyTypedEntry] {
+        typedVariables.compactMap { dailyTypedEntry($0, on: day) }
+    }
+
+    public func dailyTypedEntry(_ id: TypedTrackingVariable.ID, on day: ManualLogDay) -> DailyTypedEntry? {
+        guard let variable = typedVariables.first(where: { $0.id == id }) else { return nil }
+        return dailyTypedEntry(variable, on: day)
+    }
+
+    private func dailyTypedEntry(_ variable: TypedTrackingVariable, on day: ManualLogDay) -> DailyTypedEntry? {
+        guard let field = reviewField(for: variable, on: day) else { return nil }
+        let key = TypedLogEntryKey(day: day, variableID: variable.id)
+        let recordedValue = field.origin == .observation ? field.value : nil
+        let edit = typedEdits[key]
+        return DailyTypedEntry(
+            variable: variable,
+            day: day,
+            recordedValue: recordedValue,
+            draftValue: edit?.value,
+            status: edit?.status ?? (recordedValue == nil ? .assumedDefault : .saved),
+            origin: field.origin,
+            value: field.value
+        )
+    }
+
+    public func editTypedEntry(_ id: TypedTrackingVariable.ID, on day: ManualLogDay, value: ManualTrackingValue) {
+        guard var updated = snapshot, var typed = updated.typed,
+            let variable = typed.variables.first(where: { $0.id == id }), reviewField(for: variable, on: day) != nil
+        else { return }
+        let key = TypedLogEntryKey(day: day, variableID: id)
+        guard variable.kind.accepts(value) else {
+            typedEdits[key] = TypedLogEdit(value: value, status: .invalid)
+            return
+        }
+        typed.entries[key] = value
+        updated.typed = typed
+        do {
+            try persist(updated)
+            typedEdits[key] = nil
+        } catch {
+            typedEdits[key] = TypedLogEdit(value: value, status: .saveFailed)
+        }
+    }
+
+    public func retryTypedEntry(_ id: TypedTrackingVariable.ID, on day: ManualLogDay) {
+        let key = TypedLogEntryKey(day: day, variableID: id)
+        guard let edit = typedEdits[key], edit.status == .saveFailed else { return }
+        editTypedEntry(id, on: day, value: edit.value)
     }
 
     private func persist(_ updated: Snapshot) throws {

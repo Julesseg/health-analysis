@@ -64,7 +64,7 @@ struct FirstUseTests {
             name: "Alcohol drinks", kind: .count, defaultValue: .count(0), startsOn: logDay(1)
         )
         app.manualLog.editTypedEntry(alcohol.id, on: logDay(2), value: .count(2))
-        try app.manualLog.createTypedVariable(
+        let stress = try app.manualLog.createTypedVariable(
             name: "Stress", kind: .rating(1...5), defaultValue: .rating(3), startsOn: logDay(1)
         )
         for (day, value) in [(2, "90"), (3, "900")] {
@@ -79,8 +79,8 @@ struct FirstUseTests {
         #expect(!app.healthMeasurements.hrvSeries(for: .sdnn).isEmpty)
         let presets = app.analysisPresets(timeZone: .gmt, asOf: day(4))
         #expect(Set(presets.map(\.output)) == [.health(metric: .sleepAnalysis), .health(metric: .restingHeartRate)])
-        #expect(presets.count == 4)
-        #expect(Set(presets.flatMap(\.inputs)) == [.manualQuantity(caffeine.id), .manualTyped(alcohol.id)])
+        #expect(presets.count == 6)
+        #expect(Set(presets.flatMap(\.inputs)) == [.manualQuantity(caffeine.id), .manualTyped(alcohol.id), .manualTyped(stress.id)])
         let drinksAndSleep = try #require(presets.first {
             $0.output == .health(metric: .sleepAnalysis) && $0.inputs == [.manualTyped(alcohol.id)]
         })

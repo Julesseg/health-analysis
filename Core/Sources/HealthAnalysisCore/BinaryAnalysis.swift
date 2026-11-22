@@ -30,7 +30,9 @@ enum BinaryAnalysis {
             return result(.insufficient, [.sparseObservedBinaryOutput])
         }
 
-        let columns = inputs.indices.map { index in observations.map { $0.inputs[index].value } }
+        guard let columns = NumericAnalysis.inputColumns(observations, inputs: inputs) else {
+            return result(.insufficient, [.uncertaintyUnavailable])
+        }
         var limitations = NumericAnalysis.inputLimitations(observations, inputs: inputs, columns: columns)
         guard limitations.isEmpty else { return result(.insufficient, limitations) }
 
@@ -73,6 +75,7 @@ enum BinaryAnalysis {
             ))
         }
         limitations.append(.binaryModelLimitations)
+        if inputs.contains(where: { $0.kind?.ratingThreshold != nil }) { limitations.append(.ratingThresholdLimitations) }
         if count < 90 { limitations.append(.limitedHistory) }
         if Double(count) / Double(count + coverage.missingDays) < 0.75 { limitations.append(.sparseCoverage) }
         if Double(defaultDays) / Double(count) > 0.25 { limitations.append(.manyDefaults) }
@@ -83,7 +86,7 @@ enum BinaryAnalysis {
     private static func comparisons(
         for input: AnalysisModeledInput, at column: Int, in observations: [AnalysisObservation]
     ) -> [BinaryEventFit.Comparison]? {
-        if input.kind == .tracked(.yesNo) {
+        if input.kind == .tracked(.yesNo) || input.kind?.ratingThreshold != nil {
             return observations.indices.map {
                 .init(rowIndex: $0, lower: BinaryEvent.encode(false), upper: BinaryEvent.encode(true))
             }

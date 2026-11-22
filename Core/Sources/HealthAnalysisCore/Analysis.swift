@@ -198,6 +198,8 @@ public enum AnalysisRunFailure: Error, Equatable {
     case binaryInteractionUnavailable
     case countWindowUnavailable
     case countInteractionUnavailable
+    case ratingWindowUnavailable
+    case ratingInteractionUnavailable
     case manualLogUnavailable
     case chooseOutputSource
     case healthHistoryUnavailable(HealthMeasurementReadFailure)
@@ -275,6 +277,10 @@ extension HealthAnalysisApplication {
         if output?.kind == .tracked(.yesNo) || inputs.contains(where: { $0.variable.kind == .tracked(.yesNo) }) {
             guard configuration.behaviorWindow == .precedingDay else { throw .binaryWindowUnavailable }
             guard configuration.interaction == nil else { throw .binaryInteractionUnavailable }
+        }
+        if output?.kind.ratingThreshold != nil || inputs.contains(where: { $0.variable.kind.ratingThreshold != nil }) {
+            guard configuration.behaviorWindow == .precedingDay else { throw .ratingWindowUnavailable }
+            guard configuration.interaction == nil else { throw .ratingInteractionUnavailable }
         }
         if output?.kind == .tracked(.count) || inputs.contains(where: { $0.variable.kind == .tracked(.count) }) {
             guard configuration.behaviorWindow == .precedingDay else { throw .countWindowUnavailable }
@@ -366,7 +372,7 @@ extension AnalysisResult {
             assessment = NumericAnalysis.assess(
                 dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar,
                 behaviorWindow: configuration.behaviorWindow, practicalDifference: practicalDifference,
-                interaction: configuration.interaction
+                interaction: configuration.interaction, ratingOutputThreshold: output?.kind.ratingThreshold
             )
         }
         return AnalysisResult(

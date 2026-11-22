@@ -5,6 +5,7 @@ public enum AnalysisModel: String, Codable, Hashable, Sendable {
     case numericLinearV1
     case countLogLinearV1
     case binaryLogisticV1
+    case ratingThresholdLinearV1
     case numericInteractionV1
 }
 
@@ -43,9 +44,10 @@ struct NumericAnalysis {
         _ observations: [AnalysisObservation], inputs: [AnalysisModeledInput],
         coverage: AnalysisCoverage, calendar: Calendar,
         behaviorWindow: AnalysisBehaviorWindow = .precedingDay, practicalDifference: Double = 1,
-        interaction: AnalysisInteraction? = nil
+        interaction: AnalysisInteraction? = nil, ratingOutputThreshold: Int? = nil
     ) -> Self {
-        if interaction == nil, inputs.count == 1, inputs.first?.isMilligramQuantity == true {
+        let usesRatings = ratingOutputThreshold != nil || inputs.contains { $0.kind?.ratingThreshold != nil }
+        if !usesRatings, interaction == nil, inputs.count == 1, inputs.first?.isMilligramQuantity == true {
             let legacy = NumericAssociation.assess(
                 observations, coverage: coverage, calendar: calendar,
                 behaviorWindow: behaviorWindow, practicalDifference: practicalDifference
@@ -57,13 +59,17 @@ struct NumericAnalysis {
         }
 
         let count = observations.count
-        let defaultDays = observations.count { row in row.inputs.contains { $0.origin != .observation } }
+        let defaultDays = observations.count { row in
+            (row.outputOrigin != nil && row.outputOrigin != .observation)
+                || row.inputs.contains { $0.origin != .observation }
+        }
         func result(
             _ grade: AnalysisEvidence.Grade, _ reasons: [AnalysisEvidence.Reason],
             estimates: [AnalysisEstimate] = [], interactionEstimate: AnalysisInteractionEstimate? = nil, lagDays: Int? = nil
         ) -> Self {
             Self(
-                model: interaction == nil ? .numericLinearV1 : .numericInteractionV1,
+                model: usesRatings ? .ratingThresholdLinearV1
+                    : (interaction == nil ? .numericLinearV1 : .numericInteractionV1),
                 estimates: estimates, interaction: interactionEstimate,
                 evidence: AnalysisEvidence(
                     grade: grade, reasons: reasons, defaultDayCount: defaultDays, dependenceLagDays: lagDays
@@ -81,8 +87,21 @@ struct NumericAnalysis {
         }
         let dayNumbers = observations.compactMap { calendar.ordinality(of: .day, in: .era, for: $0.outputDate) }
         let lagDays = CalendarHAC.defaultLagDays(for: count)
-        var columns = inputs.indices.map { index in observations.map { $0.inputs[index].value } }
-        let outputs = observations.map(\.outputValue)
+        let outputs: [Double]
+        if let threshold = ratingOutputThreshold {
+            outputs = observations.compactMap { RatingAnalysis.indicator($0.outputTrackingValue, threshold: threshold) }
+            guard outputs.count == count else { return result(.insufficient, [.uncertaintyUnavailable]) }
+            let recorded = zip(observations, outputs).compactMap { $0.outputOrigin == .observation ? $1 : nil }
+            guard !recorded.isEmpty else { return result(.insufficient, [.defaultOnlyOutput]) }
+            guard RatingAnalysis.hasSupport(recorded) else {
+                return result(.insufficient, [.sparseObservedRatingOutput])
+            }
+        } else {
+            outputs = observations.map(\.outputValue)
+        }
+        guard var columns = inputColumns(observations, inputs: inputs) else {
+            return result(.insufficient, [.uncertaintyUnavailable])
+        }
         var limitations = inputLimitations(observations, inputs: inputs, columns: columns)
         guard limitations.isEmpty else { return result(.insufficient, limitations) }
 
@@ -114,7 +133,7 @@ struct NumericAnalysis {
         do {
             fit = try LinearAssociationFit(
                 columns: columns, outputs: outputs, dayNumbers: dayNumbers,
-                lagDays: lagDays, windowDays: behaviorWindow.dayCount
+                lagDays: lagDays, windowDays: behaviorWindow.dayCount, adjustsForResidualDependence: usesRatings
             )
         } catch .dependentColumns(let indices) {
             return collinear(indices)
@@ -139,8 +158,11 @@ struct NumericAnalysis {
             estimates.append(AnalysisEstimate(
                 input: input.series, inputIncrement: input.inputIncrement,
                 difference: estimate.difference, interval: interval,
-                finding: finding(interval, nearZero: input.isMilligramQuantity ? practicalDifference : nil),
-                reference: interactionDesign?.reference(for: index)
+                finding: finding(
+                    interval, nearZero: ratingOutputThreshold == nil && input.isMilligramQuantity ? practicalDifference : nil
+                ),
+                reference: interactionDesign?.reference(for: index),
+                scale: ratingOutputThreshold == nil ? nil : .ratingThresholdProbabilityDifference
             ))
         }
         let comparison = interactionDesign?.estimate(using: fit, practicalDifference: practicalDifference)
@@ -149,6 +171,7 @@ struct NumericAnalysis {
         }
         if let comparison { maximumLag = max(maximumLag, comparison.lagDays) }
         limitations.append(.adjustedModelLimitations)
+        if usesRatings { limitations.append(.ratingThresholdLimitations) }
         if coverage.nonOverlappingWindowCount < count { limitations.append(.overlappingBehaviorWindows) }
         if count < 90 { limitations.append(.limitedHistory) }
         if Double(count) / Double(count + coverage.missingDays) < 0.75 { limitations.append(.sparseCoverage) }
@@ -159,31 +182,43 @@ struct NumericAnalysis {
         return result(.low, limitations, estimates: estimates, interactionEstimate: comparison?.estimate, lagDays: maximumLag)
     }
 
+    static func inputColumns(_ observations: [AnalysisObservation], inputs: [AnalysisModeledInput]) -> [[Double]]? {
+        let columns = inputs.enumerated().map { index, input in
+            if let threshold = input.kind?.ratingThreshold {
+                return observations.compactMap {
+                    RatingAnalysis.indicator($0.inputs[index].trackingValue, threshold: threshold)
+                }
+            }
+            return observations.map { $0.inputs[index].value }
+        }
+        return columns.allSatisfy { $0.count == observations.count } ? columns : nil
+    }
+
     static func inputLimitations(
         _ observations: [AnalysisObservation], inputs: [AnalysisModeledInput], columns: [[Double]]
     ) -> [AnalysisEvidence.Reason] {
         var defaultOnly: Set<AnalysisSeriesID> = []
         var lowVariation: Set<AnalysisSeriesID> = []
+        var sparseRatings: Set<AnalysisSeriesID> = []
         for (index, input) in inputs.enumerated() {
-            let observed = observations.compactMap { row in
-                let value = row.inputs[index]
-                return value.origin == .observation ? value.value : nil
-            }
-            let hasObservedDay = observations.contains { $0.inputs[index].hasObservedDay }
-            if !hasObservedDay {
+            let column = columns[index]
+            let observed = zip(observations, column).compactMap { $0.inputs[index].origin == .observation ? $1 : nil }
+            if !observations.contains(where: { $0.inputs[index].hasObservedDay }) {
                 defaultOnly.insert(input.series)
-            } else if observed.isEmpty || !hasVariation(columns[index], input: input)
-                        || !hasVariation(observed, input: input) {
+            } else if input.kind?.ratingThreshold != nil {
+                if !RatingAnalysis.hasSupport(observed) { sparseRatings.insert(input.series) }
+            } else if !hasVariation(column, input: input) || !hasVariation(observed, input: input) {
                 lowVariation.insert(input.series)
             }
         }
-        var reasons: [AnalysisEvidence.Reason] = []
-        if !defaultOnly.isEmpty { reasons.append(.defaultOnlyInputs(defaultOnly)) }
-        if !lowVariation.isEmpty { reasons.append(.lowVariationInputs(lowVariation)) }
-        return reasons
+        var limitations: [AnalysisEvidence.Reason] = []
+        if !defaultOnly.isEmpty { limitations.append(.defaultOnlyInputs(defaultOnly)) }
+        if !lowVariation.isEmpty { limitations.append(.lowVariationInputs(lowVariation)) }
+        if !sparseRatings.isEmpty { limitations.append(.sparseObservedRatingInputs(sparseRatings)) }
+        return limitations
     }
 
-    static func hasVariation(_ values: [Double], input: AnalysisModeledInput) -> Bool {
+    private static func hasVariation(_ values: [Double], input: AnalysisModeledInput) -> Bool {
         if input.kind == .tracked(.yesNo) { return BinaryEvent.hasSupport(values) }
         if input.kind == .tracked(.count) { return CountAnalysis.supportingVariation(values) }
         guard !values.isEmpty else { return false }

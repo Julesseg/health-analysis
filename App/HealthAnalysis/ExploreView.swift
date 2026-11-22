@@ -50,7 +50,8 @@ struct ExploreView: View {
 
     private var usesCounts: Bool { selectedKinds.contains(.tracked(.count)) }
     private var usesYesNo: Bool { selectedKinds.contains(.tracked(.yesNo)) }
-    private var allowsLongerWindowsAndInteractions: Bool { !usesCounts && !usesYesNo }
+    private var usesRatings: Bool { selectedKinds.contains { $0.ratingThreshold != nil } }
+    private var allowsLongerWindowsAndInteractions: Bool { !(usesCounts || usesYesNo || usesRatings) }
 
     private var configuration: AnalysisConfiguration? {
         guard let output, !inputs.isEmpty else { return nil }
@@ -148,12 +149,17 @@ struct ExploreView: View {
                 )
             } footer: {
                 if inputChoices.isEmpty {
-                    Text("Add a daily quantity, count, or yes/no variable in Settings.")
+                    Text("Add a daily tracking variable in Settings to choose an input.")
                 }
                 if usesYesNo {
                     Text("Yes/no analyses use the complete preceding day.")
                     Text("Interactions with yes/no variables are unavailable.")
-                } else if usesCounts {
+                }
+                if usesRatings {
+                    Text("Rating analyses compare levels on either side of a fixed threshold using the complete preceding day.")
+                    Text("Interactions with ratings are unavailable.")
+                }
+                if usesCounts {
                     Text("Count analyses use the complete preceding day.")
                     Text("Interactions with counts are unavailable.")
                 }

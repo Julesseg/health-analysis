@@ -9,6 +9,11 @@ struct ManualLogView: View {
     @State private var selectedDay: ManualLogDay?
     @FocusState private var focusedQuantity: TrackingQuantity.ID?
 
+    init(log: ManualLog, initialDay: ManualLogDay? = nil) {
+        self.log = log
+        _selectedDay = State(initialValue: initialDay)
+    }
+
     var body: some View {
         let today = ManualLogDay(.now, timeZone: timeZone)
         Group {

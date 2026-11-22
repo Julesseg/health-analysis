@@ -44,6 +44,7 @@ public struct AnalysisObservation: Identifiable, Codable, Sendable {
         public let date: Date
         public let value: Double
         public let origin: ManualValueOrigin
+        public internal(set) var clockPrecision: ManualClockPrecision?
     }
 
     public var id: Date { outputDate }
@@ -96,6 +97,7 @@ public struct AnalysisResult: Codable, Sendable {
     public let modeledInputs: [AnalysisModeledInput]
     public let estimates: [AnalysisEstimate]
     public let evidence: AnalysisEvidence
+    public internal(set) var inspection: AnalysisInspection?
 }
 
 public enum AnalysisRunFailure: Error, Equatable {
@@ -163,7 +165,8 @@ extension HealthAnalysisApplication {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = configuration.timeZone
         let dataset = DailyQuantityDataset(
-            records: outputRecords, quantities: quantities, manualLog: manualLog, calendar: calendar
+            records: outputRecords, selectedSourceIdentifier: outputSourceID,
+            quantities: quantities, manualLog: manualLog, calendar: calendar
         )
         let modeledInputs = quantities.enumerated().map { index, quantity in
             AnalysisModeledInput(
@@ -185,7 +188,8 @@ extension HealthAnalysisApplication {
             model: assessment.model,
             modeledInputs: modeledInputs,
             estimates: assessment.estimates,
-            evidence: assessment.evidence
+            evidence: assessment.evidence,
+            inspection: dataset.inspection
         )
     }
 }
@@ -194,9 +198,11 @@ private struct DailyQuantityDataset {
     let observations: [AnalysisObservation]
     let coverage: AnalysisCoverage
     let outputSource: HealthMeasurement.Source?
+    let inspection: AnalysisInspection
 
     @MainActor init(
-        records: [HealthMeasurement], quantities: [TrackingQuantity], manualLog: ManualLog, calendar: Calendar
+        records: [HealthMeasurement], selectedSourceIdentifier: String?,
+        quantities: [TrackingQuantity], manualLog: ManualLog, calendar: Calendar
     ) {
         var dailyOutputs: [Date: HealthMeasurement] = [:]
         for record in records {
@@ -209,18 +215,31 @@ private struct DailyQuantityDataset {
             dailyOutputs[date] = record
         }
 
-        observations = dailyOutputs.keys.sorted().compactMap { date -> AnalysisObservation? in
-            guard let record = dailyOutputs[date],
-                  let preceding = calendar.dateInterval(of: .day, for: date.addingTimeInterval(-1))?.start else {
+        var unpaired: [AnalysisInspection.OutputWithoutPair] = []
+        observations = dailyOutputs.sorted { $0.key < $1.key }.compactMap { date, record -> AnalysisObservation? in
+            guard let preceding = calendar.dateInterval(of: .day, for: date.addingTimeInterval(-1))?.start else {
+                unpaired.append(.init(
+                    date: date, anchor: record.startDate, value: record.value, source: record.source, missingInputs: []
+                ))
                 return nil
             }
             let inputDay = ManualLogDay(preceding, timeZone: calendar.timeZone)
-            var inputs: [AnalysisObservation.Input] = []
-            for quantity in quantities {
+            var missing: [AnalysisInspection.OutputWithoutPair.MissingInput] = []
+            let inputs = quantities.compactMap { quantity -> AnalysisObservation.Input? in
                 guard let (amount, origin) = manualLog.analysisValue(for: quantity, on: inputDay) else { return nil }
                 let value = NSDecimalNumber(decimal: amount).doubleValue
                 guard value.isFinite, quantity.unit.lowercased() != "mg" || value >= 0 else { return nil }
-                inputs.append(.init(series: .manualQuantity(quantity.id), date: preceding, value: value, origin: origin))
+                return .init(series: .manualQuantity(quantity.id), date: preceding, value: value, origin: origin)
+            }
+            if inputs.count != quantities.count {
+                let available = Set(inputs.map(\.series))
+                for quantity in quantities where !available.contains(.manualQuantity(quantity.id)) {
+                    missing.append(.init(series: .manualQuantity(quantity.id), date: preceding))
+                }
+                unpaired.append(.init(
+                    date: date, anchor: record.startDate, value: record.value, source: record.source, missingInputs: missing
+                ))
+                return nil
             }
             return AnalysisObservation(
                 outputDate: date, outputAnchor: record.startDate, outputValue: record.value,
@@ -229,5 +248,11 @@ private struct DailyQuantityDataset {
         }
         coverage = AnalysisCoverage(observations: observations, outputDays: dailyOutputs.count, calendar: calendar)
         outputSource = observations.last.flatMap { dailyOutputs[$0.outputDate]?.source }
+        let behaviorDays = Set(observations.compactMap { $0.inputs.first?.date }).count
+        inspection = .init(
+            unpairedOutputs: unpaired,
+            windowOverlap: .init(distinctBehaviorDays: behaviorDays, nonOverlappingWindows: behaviorDays),
+            selectedOutputSourceIdentifier: selectedSourceIdentifier
+        )
     }
 }

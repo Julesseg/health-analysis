@@ -39,6 +39,9 @@ final class SavedAnalysisUITests: XCTestCase {
         analyze.tap()
         XCTAssertTrue(app.staticTexts["Higher values were associated with higher resting heart rate."].firstMatch
             .waitForExistence(timeout: 5))
+        let chart = app.descendants(matching: .any)["explore.estimateChart"].firstMatch
+        for _ in 0..<4 where !chart.isHittable { app.swipeUp() }
+        XCTAssertTrue(chart.label.contains("Adjusted estimate and uncertainty for Caffeine"))
         XCTAssertTrue(save.isEnabled)
         save.tap()
         let pin = app.buttons["analysis.pin"]
@@ -81,5 +84,25 @@ final class SavedAnalysisUITests: XCTestCase {
         question.tap()
         XCTAssertTrue(app.staticTexts["There isn’t enough evidence to estimate this association."]
             .waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Evening caffeine (mg)"].exists)
+        let inspect = app.buttons["Inspect input records"]
+        for _ in 0..<3 where !inspect.isHittable { app.swipeUp() }
+        XCTAssertTrue(inspect.isHittable)
+        inspect.tap()
+        XCTAssertTrue(app.navigationBars["Observed measurements"].waitForExistence(timeout: 5))
+        let empty = app.staticTexts["No explicit pairs for Evening caffeine."]
+        for _ in 0..<3 where !empty.isHittable { app.swipeUp() }
+        XCTAssertTrue(empty.isHittable)
+        XCTAssertFalse(app.descendants(matching: .any)["explore.observedScatter"].firstMatch.exists)
+        let input = app.descendants(matching: .any)["explore.observedInput"].firstMatch
+        for _ in 0..<3 where !input.isHittable { app.swipeDown() }
+        input.tap()
+        XCTAssertFalse(app.descendants(matching: .any)["Caffeine (mg)"].firstMatch.exists)
+        let observedFluids = app.descendants(matching: .any)["Fluids (L)"].firstMatch
+        XCTAssertTrue(observedFluids.waitForExistence(timeout: 5))
+        observedFluids.tap()
+        let scatter = app.descendants(matching: .any)["explore.observedScatter"].firstMatch
+        for _ in 0..<3 where !scatter.isHittable { app.swipeUp() }
+        XCTAssertEqual(scatter.label, "Observed scatterplot for Fluids and Resting heart rate")
     }
 }

@@ -7,27 +7,51 @@ struct ExploreResultView<Status: View>: View {
     let result: AnalysisResult
     @ViewBuilder let status: () -> Status
 
-    private var configuration: AnalysisConfiguration { result.configuration }
+    private var isAdjusted: Bool { result.modeledInputs.count > 1 }
 
     var body: some View {
-        findings(result)
+        findings
+        if result.lastHealthReadFailure != nil {
+            Section {
+                Text("The latest Health check failed. This analysis uses earlier imported measurements.")
+                    .foregroundStyle(.secondary)
+            }
+        }
         status()
-        evidence(result)
-        modeledInputs(result)
-        coverage(result)
+        Section("Inspect result") {
+            NavigationLink("Observed measurements") {
+                AnalysisObservedView(result: result, log: application.manualLog)
+                    .id(result.configuration)
+            }
+            NavigationLink("Usable dates and gaps") {
+                AnalysisCoverageView(result: result, application: application)
+            }
+            NavigationLink("Model and evidence") {
+                AnalysisModelView(result: result, log: application.manualLog)
+            }
+        }
     }
 
     @ViewBuilder
-    private func findings(_ result: AnalysisResult) -> some View {
+    private var findings: some View {
         if result.estimates.isEmpty {
             Section {
                 Text("There isn’t enough evidence to estimate this association.")
                     .font(.headline)
+                confidence
+                ForEach(result.evidence.reasons, id: \.self) { reason in
+                    AnalysisReasonRows(reason: reason, inputs: result.modeledInputs)
+                }
+                insufficientDataLink
             }
         }
         ForEach(Array(result.estimates.enumerated()), id: \.element.input) { index, estimate in
             if let input = result.modeledInputs.first(where: { $0.series == estimate.input }) {
                 Section {
+                    let estimateTitle: LocalizedStringKey = isAdjusted ? "Adjusted estimate" : "Association estimate"
+                    Text(estimateTitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                     Text(estimate.finding.description)
                         .font(.headline)
                     Text("\(estimate.difference, format: estimateNumber) bpm per \(estimate.inputIncrement, format: .number) \(input.unit) increase")
@@ -36,11 +60,17 @@ struct ExploreResultView<Status: View>: View {
                         Text(intervalLabel(estimate))
                     }
                     .accessibilityIdentifier(index == 0 ? "explore.uncertainty" : "explore.uncertainty.\(index)")
-                    EstimateChart(estimate: estimate, input: input)
+                    EstimateChart(estimate: estimate, input: input, isAdjusted: isAdjusted)
                         .accessibilityIdentifier(index == 0 ? "explore.estimateChart" : "explore.estimateChart.\(index)")
                     if estimate.finding == .nearZero {
                         Text("The full interval is within 1 bpm of zero for the reported increment.")
                             .foregroundStyle(.secondary)
+                    }
+                    if index == 0 {
+                        confidence
+                        ForEach(result.evidence.reasons.filter { $0 != .adequateCoverageAndPrecision }, id: \.self) { reason in
+                            AnalysisReasonRows(reason: reason, inputs: result.modeledInputs)
+                        }
                     }
                 } header: {
                     switch input.role {
@@ -50,102 +80,103 @@ struct ExploreResultView<Status: View>: View {
                 }
             }
         }
-        if result.lastHealthReadFailure != nil {
+    }
+
+    private var confidence: some View {
+        LabeledContent("Confidence") {
+            Text(result.evidence.grade.description)
+        }
+    }
+
+    @ViewBuilder
+    private var insufficientDataLink: some View {
+        let affected = Set(result.evidence.reasons.flatMap(\.affectedInputs))
+        if let input = result.modeledInputs.first(where: { affected.contains($0.series) })
+            ?? (result.evidence.reasons.contains(.noObservedInputs) || result.evidence.reasons.contains(.limitedInputVariation)
+                ? result.modeledInputs.first : nil) {
+            NavigationLink("Inspect input records") {
+                AnalysisObservedView(result: result, log: application.manualLog, initialInput: input.series)
+                    .id(result.configuration)
+            }
+        } else {
+            NavigationLink("Inspect available data") {
+                AnalysisCoverageView(result: result, application: application)
+            }
+        }
+    }
+}
+
+private struct AnalysisModelView: View {
+    let result: AnalysisResult
+    let log: ManualLog
+
+    var body: some View {
+        let hasEstimates = !result.estimates.isEmpty
+        List {
+            Section("Model and uncertainty") {
+                LabeledContent("Model") { Text(result.model.description) }
+                if hasEstimates {
+                    Text("The model includes an intercept.")
+                }
+                if let days = result.evidence.dependenceLagDays {
+                    Text("The interval accounts for dependence across up to \(days) calendar days.")
+                }
+                if hasEstimates && result.modeledInputs.count > 1 {
+                    Text("Each estimate accounts for the other modeled inputs and has its own uncertainty interval.")
+                }
+                Text("Other variables may also be associated with resting heart rate.")
+                    .foregroundStyle(.secondary)
+            }
             Section {
-                Text("The latest Health check failed. This analysis uses earlier imported measurements.")
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private func evidence(_ result: AnalysisResult) -> some View {
-        Section("Evidence") {
-            LabeledContent("Confidence") {
-                Text(result.evidence.grade.description)
-            }
-            LabeledContent("Model") {
-                Text(result.model.description)
-            }
-            ForEach(result.evidence.reasons, id: \.self) { reason in
-                Text(reason.description)
-                ForEach(result.modeledInputs.filter { reason.affectedInputs.contains($0.series) }) { input in
-                    Text("\(input.name) (\(input.unit))")
-                }
-            }
-            if let days = result.evidence.dependenceLagDays {
-                Text("The interval accounts for dependence across up to \(days) calendar days.")
-            }
-            if result.modeledInputs.count > 1 {
-                Text("Each estimate accounts for the other modeled inputs and has its own uncertainty interval.")
-                    .foregroundStyle(.secondary)
-            }
-            Text("Other variables may also be associated with resting heart rate.")
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private func modeledInputs(_ result: AnalysisResult) -> some View {
-        Section {
-            ForEach(result.modeledInputs) { input in
-                LabeledContent {
-                    Text(input.defaultDayCount, format: .number)
-                } label: {
-                    VStack(alignment: .leading) {
-                        Text("\(input.name) (\(input.unit))")
-                        Text(input.role == .input ? "Input" : "Adjustment input")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                ForEach(result.modeledInputs) { input in
+                    let role: LocalizedStringKey = input.role == .input ? "Input" : "Adjustment input"
+                    NavigationLink {
+                        AnalysisInputEvidenceView(result: result, input: input, log: log)
+                    } label: {
+                        VStack(alignment: .leading) {
+                            Text("\(input.name) (\(input.unit))")
+                            Text(role)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                    .accessibilityLabel(Text("\(input.name) (\(input.unit)), \(Text(role))"))
                 }
-                .accessibilityValue(Text("\(input.defaultDayCount) paired days using a default"))
+            } header: {
+                Text(hasEstimates ? "Modeled inputs" : "Inputs assessed")
             }
-        } header: {
-            Text("Modeled inputs")
-        } footer: {
-            Text("Quantities come from the daily log. Counts show paired days using a default for each input.")
+            Section("Evidence") {
+                LabeledContent("Confidence") { Text(result.evidence.grade.description) }
+                ForEach(result.evidence.reasons, id: \.self) { reason in
+                    AnalysisReasonRows(reason: reason, inputs: result.modeledInputs)
+                }
+            }
         }
+        .navigationTitle("Model and evidence")
+        .navigationBarTitleDisplayMode(.inline)
     }
+}
 
-    private func coverage(_ result: AnalysisResult) -> some View {
-        Section("Coverage") {
-            LabeledContent("Paired days") {
-                Text(result.coverage.usableDates.count, format: .number)
-            }
-            if let first = result.coverage.firstDate, let last = result.coverage.lastDate {
-                LabeledContent("Usable history") {
-                    AnalysisDateRange(first: first, last: last, timeZone: configuration.timeZone)
-                }
-                LabeledContent("Days without a usable pair in this range") {
-                    Text(result.coverage.missingDays, format: .number)
-                }
-            }
-            LabeledContent("Paired days using a default") {
-                Text(result.evidence.defaultDayCount, format: .number)
-            }
-            if let source = result.outputSource {
-                LabeledContent("Resting heart rate source") {
-                    Text(source.name)
-                }
-            }
-            NavigationLink("Usable dates and gaps") {
-                ExploreCoverageView(result: result)
-            }
-            measurementsLink
-        }
-    }
+private struct AnalysisReasonRows: View {
+    let reason: AnalysisEvidence.Reason
+    let inputs: [AnalysisModeledInput]
 
-    private var measurementsLink: some View {
-        NavigationLink("Inspect Health measurements") {
-            HealthMeasurementHistoryView(
-                history: application.healthMeasurements, presentation: .restingHeartRate
-            )
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(reason.description)
+            ForEach(inputs.filter { reason.affectedInputs.contains($0.series) }) { input in
+                Text("\(input.name) (\(input.unit))")
+            }
         }
+        .foregroundStyle(.secondary)
     }
 }
 
 private struct EstimateChart: View {
     let estimate: AnalysisEstimate
     let input: AnalysisModeledInput
+    let isAdjusted: Bool
+    @ScaledMetric private var chartHeight = 95.0
 
     private var domain: ClosedRange<Double> {
         let lower = min(0, estimate.interval.lowerBound)
@@ -175,85 +206,15 @@ private struct EstimateChart: View {
         .chartXScale(domain: domain)
         .chartXAxisLabel("Difference in resting heart rate (bpm)", position: .bottom, alignment: .center)
         .chartYAxis(.hidden)
-        .frame(height: 95)
+        .frame(height: chartHeight)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Estimated difference and uncertainty for \(input.name)")
-        .accessibilityValue(
-            Text("\(estimate.difference, format: estimateNumber) bpm per \(estimate.inputIncrement, format: .number) \(input.unit) increase, with an approximate 95% interval of \(intervalLabel(estimate)).")
+        .accessibilityLabel(isAdjusted
+            ? Text("Adjusted estimate and uncertainty for \(input.name)")
+            : Text("Association estimate and uncertainty for \(input.name)")
         )
-    }
-}
-
-private struct ExploreCoverageView: View {
-    let result: AnalysisResult
-
-    private var timeZone: TimeZone { result.configuration.timeZone }
-
-    var body: some View {
-        List {
-            Section("Question") {
-                LabeledContent("Output") { Text("Resting heart rate") }
-                LabeledContent("Behavior window") { Text("Complete preceding day") }
-                LabeledContent("History") { Text("Full usable history") }
-                LabeledContent("Analysis time zone") {
-                    Text(timeZone.identifier)
-                }
-                if let lastRead = result.healthHistoryReadAt {
-                    LabeledContent("Last successful Health check") {
-                        Text(lastRead, format: .dateTime.year().month().day().hour().minute())
-                    }
-                }
-                if let source = result.outputSource {
-                    LabeledContent("Source identifier") {
-                        Text(source.bundleIdentifier)
-                    }
-                }
-                Text("Each pair uses a complete input window before the resting heart rate sample began.")
-            }
-
-            Section("Gaps") {
-                LabeledContent("Output days without a complete input") {
-                    Text(result.coverage.outputDaysWithoutCompleteInput, format: .number)
-                }
-                if !result.coverage.usableDates.isEmpty && result.coverage.gaps.isEmpty {
-                    Text("No gaps between usable dates.")
-                }
-                ForEach(result.coverage.gaps) { gap in
-                    AnalysisDateRange(first: gap.firstDate, last: gap.lastDate, timeZone: timeZone)
-                }
-            }
-
-            Section("Usable dates") {
-                if result.coverage.usableDates.isEmpty {
-                    Text("No paired days.")
-                }
-                ForEach(result.coverage.usableDates, id: \.self) { date in
-                    AnalysisDateRange(first: date, last: date, timeZone: timeZone)
-                }
-            }
-        }
-        .navigationTitle("Usable dates and gaps")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-private struct AnalysisDateRange: View {
-    let first: Date
-    let last: Date
-    let timeZone: TimeZone
-
-    var body: some View {
-        if first == last {
-            Text(first, format: format)
-        } else {
-            Text("\(first, format: format) – \(last, format: format)")
-        }
-    }
-
-    private var format: Date.FormatStyle {
-        var format = Date.FormatStyle.dateTime.year().month(.abbreviated).day()
-        format.timeZone = timeZone
-        return format
+        .accessibilityValue(
+            Text("\(Text(estimate.finding.description)) \(estimate.difference, format: estimateNumber) bpm per \(estimate.inputIncrement, format: .number) \(input.unit) increase, with an approximate 95% interval of \(intervalLabel(estimate)).")
+        )
     }
 }
 

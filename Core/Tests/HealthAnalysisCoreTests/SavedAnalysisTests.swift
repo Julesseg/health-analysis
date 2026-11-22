@@ -44,9 +44,10 @@ struct SavedAnalysisTests {
         let fixture = SavedQuestionHistory()
         let watch = fixture.records(source: "fixture.watch", slope: 2)
         let bridge = fixture.records(source: "fixture.bridge", slope: -2)
+        let earlyWatch = fixture.measurement(day: 0, value: 77, source: "fixture.watch")
         let corrected = fixture.measurement(day: 2, value: 62, source: "fixture.bridge")
         let source = SavedQuestionSource(reads: [
-            .success(.init(queryID: "restingHeartRate", anchor: Data([1]), added: watch + bridge)),
+            .success(.init(queryID: "restingHeartRate", anchor: Data([1]), added: watch + bridge + [earlyWatch])),
             .success(.init(queryID: "restingHeartRate", anchor: Data([1]), added: [])),
             .success(.init(
                 queryID: "restingHeartRate", anchor: Data([2]),
@@ -72,6 +73,10 @@ struct SavedAnalysisTests {
         #expect(cached.result.estimates.first?.interval == first.result.estimates.first?.interval)
         #expect(cached.result.observations.count == 56)
         try reopened.healthMeasurements.setPreferredSource("fixture.bridge", for: .restingHeartRate)
+        let storedInspection = try #require(reopened.savedAnalyses.state(for: question.id).completed?.result.inspection)
+        #expect(storedInspection.unpairedOutputs.map(\.value) == [77])
+        #expect(storedInspection.unpairedOutputs.map(\.source.bundleIdentifier) == ["fixture.watch"])
+        #expect(storedInspection.unpairedOutputs.first?.missingInputs.map(\.series) == configuration.inputs)
 
         await reopened.refreshSavedAnalysis(question.id)
 
@@ -82,6 +87,7 @@ struct SavedAnalysisTests {
         #expect(updated.result.estimates.first?.finding == .lower)
         #expect(updated.result.coverage.usableDates.count == 55)
         #expect(updated.result.observations.first?.outputValue == 62)
+        #expect(updated.result.inspection?.unpairedOutputs.isEmpty == true)
         #expect(final.savedAnalyses.following.map(\.id) == [question.id])
 
         var edited = configuration

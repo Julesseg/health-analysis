@@ -1,0 +1,202 @@
+import Charts
+import HealthAnalysisCore
+import SwiftUI
+
+struct AnalysisObservedView: View {
+    let result: AnalysisResult
+    let log: ManualLog
+    @State private var selectedInput: AnalysisSeriesID?
+    @ScaledMetric private var chartHeight = 175.0
+
+    init(result: AnalysisResult, log: ManualLog, initialInput: AnalysisSeriesID? = nil) {
+        self.result = result
+        self.log = log
+        _selectedInput = State(initialValue: initialInput ?? result.modeledInputs.first?.series)
+    }
+
+    var body: some View {
+        List {
+            Section {
+                let outputs = result.inspectedOutputs
+                if outputs.isEmpty {
+                    Text("No output measurements are available for this result.")
+                } else {
+                    timeline(outputs)
+                    NavigationLink("Output dates and values") {
+                        AnalysisOutputValuesView(result: result)
+                    }
+                }
+            } header: {
+                Text("Observed timeline")
+            } footer: {
+                if result.inspection?.unpairedOutputs.isEmpty == false {
+                    Text("Includes output measurements with incomplete input windows.")
+                }
+            }
+
+            if let input = result.modeledInputs.first(where: { $0.series == selectedInput }) {
+                Section {
+                    if result.modeledInputs.count > 1 {
+                        Picker("Input", selection: $selectedInput) {
+                            ForEach(result.modeledInputs) { choice in
+                                Text("\(choice.name) (\(choice.unit))").tag(Optional(choice.series))
+                            }
+                        }
+                        .pickerStyle(.navigationLink)
+                        .accessibilityIdentifier("explore.observedInput")
+                    }
+                    let evidence = result.inputEvidence(for: input.series)
+                    let points = evidence.observedPairs
+                    if points.isEmpty {
+                        Text("No explicit pairs for \(input.name).")
+                    } else {
+                        scatterplot(points, input: input)
+                    }
+                    NavigationLink("Input provenance and paired values") {
+                        AnalysisInputEvidenceView(result: result, input: input, log: log)
+                    }
+                } header: {
+                    Text("Observed scatterplot")
+                } footer: {
+                    Text("Each point pairs an explicitly recorded input with an output used in this analysis.")
+                }
+            }
+        }
+        .navigationTitle("Observed measurements")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func timeline(_ outputs: [AnalysisInspectedOutput]) -> some View {
+        Chart(outputs) { row in
+            PointMark(
+                x: .value("Output date", row.date),
+                y: .value("Observed output", row.value)
+            )
+        }
+        .chartYScale(domain: .automatic(includesZero: false))
+        .chartXAxis {
+            AxisMarks(values: .automatic(desiredCount: 3)) {
+                AxisGridLine()
+                AxisTick()
+                AxisValueLabel(format: result.analysisDateFormat)
+            }
+        }
+        .chartYAxisLabel { result.analysisOutputAxis }
+        .frame(height: chartHeight)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("Observed timeline for \(result.analysisOutputTitle)"))
+        .accessibilityValue(Text("\(outputs.count) output measurements. Dates and values are listed below."))
+        .accessibilityIdentifier("explore.observedTimeline")
+    }
+
+    private func scatterplot(_ points: [AnalysisInputEvidence.Pair], input: AnalysisModeledInput) -> some View {
+        Chart(points) { pair in
+            PointMark(
+                x: .value("Observed input", pair.input.value),
+                y: .value("Observed output", pair.outputValue)
+            )
+            .opacity(0.65)
+        }
+        .chartXScale(domain: .automatic(includesZero: false))
+        .chartYScale(domain: .automatic(includesZero: false))
+        .chartXAxisLabel { Text("\(input.name) (\(input.unit))") }
+        .chartYAxisLabel { result.analysisOutputAxis }
+        .frame(height: chartHeight)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("Observed scatterplot for \(input.name) and \(result.analysisOutputTitle)"))
+        .accessibilityValue(Text("\(points.count) explicit pairs. Input and output values are listed below."))
+        .accessibilityIdentifier("explore.observedScatter")
+    }
+}
+
+struct AnalysisInputEvidenceView: View {
+    let result: AnalysisResult
+    let input: AnalysisModeledInput
+    let log: ManualLog
+
+    var body: some View {
+        let evidence = result.inputEvidence(for: input.series)
+        let total = evidence.pairs.count
+        List {
+            Section("Paired input windows") {
+                if total == 0 {
+                    Text("No complete pairs for \(input.name).")
+                } else {
+                    provenanceShare("Explicit observations", count: evidence.explicitCount, total: total)
+                    provenanceShare("Windows using assumed defaults", count: evidence.assumedDefaultCount, total: total)
+                    if let approximate = evidence.approximateCount {
+                        LabeledContent("Approximate entries", value: approximate.formatted())
+                    }
+                }
+                LabeledContent("Source") { Text("Daily log") }
+            }
+            if total > 0 {
+                Section("Paired values") {
+                    ForEach(evidence.pairs) { pair in
+                        NavigationLink {
+                            pairDetails(pair)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(pair.outputDate, format: result.analysisDateFormat)
+                                Text("\(pair.input.value, format: .number) \(input.unit) and \(result.analysisOutputValue(pair.outputValue))")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .accessibilityElement(children: .combine)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle(input.name)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func provenanceShare(_ title: LocalizedStringKey, count: Int, total: Int) -> some View {
+        LabeledContent(title) {
+            Text("\(count) of \(total) (\(Double(count) / Double(total), format: .percent.precision(.fractionLength(0))))")
+        }
+    }
+
+    private func pairDetails(_ pair: AnalysisInputEvidence.Pair) -> some View {
+        List {
+            Section("Output measurement") {
+                LabeledContent {
+                    result.analysisOutputValue(pair.outputValue)
+                } label: {
+                    result.analysisOutputTitle
+                }
+                LabeledContent("Output date") { Text(pair.outputDate, format: result.analysisDateFormat) }
+                if let source = result.outputSource {
+                    LabeledContent("Source", value: source.name)
+                }
+            }
+            Section("Input window") {
+                LabeledContent(input.name) { Text("\(pair.input.value, format: .number) \(input.unit)") }
+                LabeledContent("Behavior date") { Text(pair.input.date, format: result.analysisDateFormat) }
+                switch pair.input.origin {
+                case .observation:
+                    LabeledContent("Provenance") { Text("Explicit observation") }
+                case .assumedDefault(let effectiveOn):
+                    LabeledContent("Provenance") { Text("Assumed default") }
+                    if let date = result.analysisCalendar.date(from: DateComponents(
+                        year: effectiveOn.year, month: effectiveOn.month, day: effectiveOn.day
+                    )) {
+                        LabeledContent("Default effective from") { Text(date, format: result.analysisDateFormat) }
+                    }
+                }
+                if let precision = pair.input.clockPrecision {
+                    LabeledContent("Time precision") {
+                        Text(precision == .approximate ? "Approximate time" : "Exact time")
+                    }
+                }
+                NavigationLink("Open daily log") {
+                    ManualLogView(
+                        log: log, initialDay: ManualLogDay(pair.input.date, timeZone: result.configuration.timeZone)
+                    )
+                }
+            }
+        }
+        .navigationTitle("Paired values")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}

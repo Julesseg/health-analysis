@@ -2,7 +2,11 @@
   "sourceLanguage": "en",
   "strings": {
     "%@ %@": {},
+    "%@ %@ and %@": {},
+    "%@ %@ bpm per %@ %@ increase, with an approximate 95%% interval of %@.": {},
     "%@ (%@)": {},
+    "%@ (%@), %@": {},
+    "%@ (bpm)": {},
     "%@ beats per minute": {},
     "%@ beats per minute. Approximate 95%% interval: %@.": {},
     "%@ bpm": {},
@@ -13,8 +17,54 @@
     "%@ with %@": {},
     "%@ with %lld inputs": {},
     "%@ – %@": {},
+    "%lld explicit pairs. Input and output values are listed below.": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld explicit pair. Its input and output values are listed below."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld explicit pairs. Input and output values are listed below."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld of %lld (%@)": {},
+    "%lld output measurements. Dates and values are listed below.": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld output measurement. Its date and value are listed below."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld output measurements. Dates and values are listed below."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld paired days using a default": {},
     "%lld selected": {},
+    "A complete input window could not be prepared for this measurement.": {},
     "A selected quantity is unavailable.": {},
     "Account for": {},
     "Account for · %@": {},
@@ -29,6 +79,8 @@
     "Add rating": {},
     "Add time of day": {},
     "Add yes/no": {},
+    "Adjusted estimate": {},
+    "Adjusted estimate and uncertainty for %@": {},
     "Adjustment input": {},
     "All imported sources": {},
     "An interval includes zero and allows differences away from zero.": {},
@@ -40,9 +92,13 @@
     "Apple Health is unavailable on this device.": {},
     "Applies through the day before the first existing default.": {},
     "Approximate 95% uncertainty interval": {},
+    "Approximate entries": {},
     "Approximate time": {},
     "Approximate time for %@": {},
+    "Association estimate": {},
+    "Association estimate and uncertainty for %@": {},
     "Assumed default": {},
+    "Behavior date": {},
     "Behavior window": {},
     "Bundle identifier": {},
     "Caffeine amounts varied too little across paired days.": {},
@@ -50,6 +106,7 @@
     "Category": {},
     "Category %lld": {},
     "Change default": {},
+    "Check Health access and sources": {},
     "Checking Health measurements…": {},
     "Choose a preferred resting heart rate source in Health measurements.": {},
     "Choose a valid value.": {},
@@ -92,6 +149,7 @@
     "Days without workout records in this range": {},
     "Default category": {},
     "Default count": {},
+    "Default effective from": {},
     "Default history": {},
     "Default rating": {},
     "Default time": {},
@@ -99,9 +157,11 @@
     "Difference in resting heart rate (bpm)": {},
     "Discovered for you": {},
     "Distance": {},
+    "Distinct behavior days": {},
     "Each estimate accounts for the other modeled inputs and has its own uncertainty interval.": {},
     "Each pair uses a complete input window before the resting heart rate sample began.": {},
     "Each pair uses caffeine from the complete local day before the resting heart rate sample began.": {},
+    "Each point pairs an explicitly recorded input with an output used in this analysis.": {},
     "Edit analysis": {},
     "Effective date": {},
     "Enter a different name for each category.": {},
@@ -116,6 +176,9 @@
     "Every paired value for this input comes from a default.": {},
     "Evidence": {},
     "Evidence is limited to this history and the variables included in the model.": {},
+    "Exact time": {},
+    "Explicit observation": {},
+    "Explicit observations": {},
     "Explore": {},
     "Explore uses readable measurements and manually tracked variables.": {},
     "Fewer than three quarters of days in the usable history had a pair.": {},
@@ -143,10 +206,18 @@
     "History": {},
     "Imported records": {},
     "Imported workouts": {},
+    "Includes output measurements with incomplete input windows.": {},
     "Input": {},
+    "Input provenance and paired values": {},
+    "Input window": {},
     "Inputs": {},
+    "Inputs assessed": {},
     "Insights": {},
     "Inspect Health measurements": {},
+    "Inspect available data": {},
+    "Inspect input records": {},
+    "Inspect missing input dates": {},
+    "Inspect result": {},
     "Insufficient": {},
     "Insufficient asleep records to determine sleep duration or timing.": {},
     "Last reviewed": {},
@@ -164,7 +235,10 @@
     "Matching copies are counted once. Overlapping workouts with different details make the total unavailable.": {},
     "Maximum rating": {},
     "Minimum rating": {},
+    "Missing input dates": {},
     "Model": {},
+    "Model and evidence": {},
+    "Model and uncertainty": {},
     "Modeled inputs": {},
     "Moderate": {},
     "More than one quarter of paired days used an assumed caffeine amount.": {},
@@ -176,7 +250,10 @@
     "New time of day": {},
     "New yes/no": {},
     "No": {},
+    "No complete input window": {},
+    "No complete pairs for %@.": {},
     "No discoveries yet": {},
+    "No explicit pairs for %@.": {},
     "No followed analyses yet": {},
     "No gaps between usable dates.": {},
     "No imported measurements for this source.": {},
@@ -184,6 +261,7 @@
     "No imported sleep records for this source.": {},
     "No imported sources": {},
     "No imported workouts for this source.": {},
+    "No output measurements are available for this result.": {},
     "No paired days.": {},
     "No readable measurements": {},
     "No readable records for this HealthKit type.": {},
@@ -193,19 +271,41 @@
     "No saved analyses yet": {},
     "No settings available yet": {},
     "No tracking variables": {},
+    "No usable input on %@": {},
     "No variables to explore": {},
+    "Non-overlapping windows": {},
     "None": {},
     "Not recorded": {},
     "Numeric linear regression": {},
+    "Observed input": {},
+    "Observed measurements": {},
+    "Observed output": {},
+    "Observed scatterplot": {},
+    "Observed scatterplot for %@ and %@": {},
+    "Observed timeline": {},
+    "Observed timeline for %@": {},
+    "Open daily log": {},
     "Original HRV measure": {},
     "Original summary": {},
     "Other variables may also be associated with resting heart rate.": {},
     "Output": {},
+    "Output date": {},
+    "Output dates and values": {},
+    "Output days checked": {},
     "Output days without a complete input": {},
+    "Output measurement": {},
+    "Output source": {},
+    "Output value": {},
+    "Overlap": {},
     "Paired days": {},
     "Paired days using a default": {},
+    "Paired in this analysis": {},
+    "Paired input windows": {},
+    "Paired output days": {},
+    "Paired values": {},
     "Pin to Insights": {},
     "Preferred source": {},
+    "Provenance": {},
     "Quantities come from the daily log. Counts show paired days using a default for each input.": {},
     "Question": {},
     "Rating": {},
@@ -214,6 +314,7 @@
     "Recorded time zone": {},
     "Refresh Health measurements": {},
     "Refresh analysis": {},
+    "Refresh this analysis to inspect the missing input dates.": {},
     "Refreshing analysis…": {},
     "Request read access": {},
     "Resting heart rate": {},
@@ -238,6 +339,7 @@
     "Saved analyses": {},
     "Saved analysis unavailable": {},
     "Saving source": {},
+    "Selected source identifier": {},
     "Settings": {},
     "Showing measurements from earlier checks.": {},
     "Single-input linear association": {},
@@ -250,6 +352,7 @@
     "Source product": {},
     "Source product type": {},
     "Source version": {},
+    "Sources": {},
     "Start date": {},
     "Stored in HealthKit as RMSSD": {},
     "Stored in HealthKit as SDNN": {},
@@ -267,6 +370,7 @@
     "The interval accounts for dependence across up to %lld calendar days.": {},
     "The interval is compatible with a near-zero association and with a larger difference.": {},
     "The latest Health check failed. This analysis uses earlier imported measurements.": {},
+    "The model includes an intercept.": {},
     "The paired values could not support a usable uncertainty interval.": {},
     "The selected caffeine quantity is unavailable.": {},
     "The uncertainty interval spans more than 2 bpm for the reported increment.": {},
@@ -282,6 +386,7 @@
     "This model needs at least %lld paired days.": {},
     "This tracking value is unavailable.": {},
     "Time of day": {},
+    "Time precision": {},
     "Time zone assumed at import: %@": {},
     "Time zone: %@": {},
     "To review access, tap your profile in Apple Health, then Apps under Privacy.": {},
@@ -302,6 +407,7 @@
     "Wake date: %@": {},
     "Wake time: %@": {},
     "Walking": {},
+    "Windows using assumed defaults": {},
     "Workout (type %llu)": {},
     "Workout duration": {},
     "Workout time zone": {},

@@ -128,7 +128,7 @@ struct NumericAnalysis {
         do {
             fit = try LinearAssociationFit(
                 columns: columns, outputs: outputs, dayNumbers: dayNumbers,
-                lagDays: lagDays, windowDays: behaviorWindow.dayCount
+                lagDays: lagDays, windowDays: behaviorWindow.dayCount, adjustsForResidualDependence: usesRatings
             )
         } catch .dependentColumns(let indices) {
             return collinear(indices)

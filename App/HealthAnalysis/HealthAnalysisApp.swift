@@ -11,6 +11,9 @@ struct HealthAnalysisApp: App {
         if let fixture = CountAnalysisUIFixture.applicationForLaunch() {
             return fixture
         }
+        if let fixture = RatingAnalysisUIFixture.applicationForLaunch() {
+            return fixture
+        }
         if let fixture = ExploreAnalysisUIFixture.applicationForLaunch() {
             return fixture
         }

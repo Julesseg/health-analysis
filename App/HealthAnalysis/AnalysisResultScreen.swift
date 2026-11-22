@@ -183,6 +183,8 @@ private extension AnalysisRefreshFailure {
             case .outputUnavailable: "The selected output is unavailable."
             case .countWindowUnavailable: "Count analyses use the complete preceding day."
             case .countInteractionUnavailable: "Interactions with counts are unavailable."
+            case .ratingWindowUnavailable: "Rating analyses use the complete preceding day."
+            case .ratingInteractionUnavailable: "Interactions with ratings are unavailable."
             case .manualLogUnavailable: "Couldn’t open the daily log."
             case .chooseOutputSource: "Choose a preferred source for this output in Health measurements."
             case .healthHistoryUnavailable(let failure): failure.message

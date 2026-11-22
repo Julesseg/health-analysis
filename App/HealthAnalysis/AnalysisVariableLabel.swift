@@ -3,10 +3,29 @@ import SwiftUI
 
 extension AnalysisVariable {
     var analysisChoiceLabel: Text {
-        switch kind {
+        kind.choiceLabel(name: name)
+    }
+}
+
+extension AnalysisModeledInput {
+    var choiceLabel: Text {
+        (kind ?? .quantity(unit: unit)).choiceLabel(name: name)
+    }
+
+    func displayedValue(_ value: Double, trackingValue: ManualTrackingValue?) -> Text {
+        if case .rating(let level)? = trackingValue { return Text(level, format: .number) }
+        return Text("\(value, format: .number) \(unit)")
+    }
+}
+
+private extension AnalysisVariable.Kind {
+    func choiceLabel(name: String) -> Text {
+        switch self {
         case .quantity(let unit): Text("\(name) (\(unit))")
         case .tracked(.count): Text("\(name) (count)")
-        case .tracked: Text(name)
+        case .tracked(.rating(let levels)):
+            Text("\(name) (rating \(levels.lowerBound, format: .number) to \(levels.upperBound, format: .number))")
+        case .tracked: Text(verbatim: name)
         }
     }
 }

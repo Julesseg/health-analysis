@@ -36,10 +36,14 @@ struct ExploreView: View {
         inputChoices.filter { !inputs.contains($0.id) }
     }
 
-    private var usesCounts: Bool {
+    private var selectedVariables: [AnalysisVariable] {
         let selected = inputs + adjustments + [output].compactMap { $0 }
-        return variables.contains { selected.contains($0.id) && $0.kind == .tracked(.count) }
+        return variables.filter { selected.contains($0.id) }
     }
+
+    private var usesCounts: Bool { selectedVariables.contains { $0.kind == .tracked(.count) } }
+    private var usesRatings: Bool { selectedVariables.contains { $0.kind.ratingThreshold != nil } }
+    private var requiresPrecedingDay: Bool { usesCounts || usesRatings }
 
     private var configuration: AnalysisConfiguration? {
         guard let output, !inputs.isEmpty else { return nil }
@@ -47,9 +51,9 @@ struct ExploreView: View {
         configuration.output = output
         configuration.inputs = inputs
         configuration.adjustmentInputs = adjustments
-        configuration.behaviorWindow = usesCounts ? .precedingDay : behaviorWindow
+        configuration.behaviorWindow = requiresPrecedingDay ? .precedingDay : behaviorWindow
         configuration.history = history
-        configuration.interaction = usesCounts ? nil : interaction
+        configuration.interaction = requiresPrecedingDay ? nil : interaction
         configuration.timeZone = analysisTimeZone
         return configuration
     }
@@ -122,7 +126,7 @@ struct ExploreView: View {
                 .accessibilityLabel("Account for")
                 .accessibilityValue(selectionSummary(adjustments))
                 .accessibilityIdentifier("explore.adjustments")
-                if inputs.count >= 2 && !usesCounts {
+                if inputs.count >= 2 && !requiresPrecedingDay {
                     NavigationLink {
                         ExploreInteractionSelection(application: application, inputs: inputs, interaction: $interaction)
                     } label: {
@@ -133,13 +137,16 @@ struct ExploreView: View {
                     .accessibilityIdentifier("explore.interaction")
                 }
                 ExploreTemporalControls(
-                    behaviorWindow: $behaviorWindow, history: $history, allowsLongerWindows: !usesCounts
+                    behaviorWindow: $behaviorWindow, history: $history, allowsLongerWindows: !requiresPrecedingDay
                 )
             } footer: {
                 if inputChoices.isEmpty {
-                    Text("Add a daily quantity or count in Settings to choose another variable.")
+                    Text("Add a daily quantity, count, or rating in Settings to choose another variable.")
                 }
-                if usesCounts {
+                if usesRatings {
+                    Text("Rating analyses compare levels on either side of a fixed threshold using the complete preceding day.")
+                    Text("Interactions with ratings are unavailable.")
+                } else if usesCounts {
                     Text("Count analyses use the complete preceding day.")
                     Text("Interactions with counts are unavailable.")
                 }

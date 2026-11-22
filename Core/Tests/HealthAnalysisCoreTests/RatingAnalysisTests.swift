@@ -19,10 +19,13 @@ struct RatingAnalysisTests {
         let shifts = try app.manualLog.createTypedVariable(
             name: "Late shifts", kind: .count, defaultValue: .count(0), startsOn: day(0)
         )
-        for index in 0..<120 {
-            let highStress = index % 2
-            let shift = index / 2 % 2
-            let cycle = index / 4 % 10
+        let pairedDays = 240
+        var random = RatingRandom(state: 54_145)
+        let assignments = [0] + Array(1..<pairedDays).shuffled(using: &random)
+        for (index, assignment) in assignments.enumerated() {
+            let highStress = assignment % 2
+            let shift = assignment / 2 % 2
+            let cycle = assignment / 4 % 10
             let stressLevel = highStress == 0 ? 1 + cycle % 2 : 3 + cycle % 3
             let energyLevel = cycle < 2 + 3 * highStress + 2 * shift ? 8 - cycle % 4 : 2 + cycle % 3
             if index != 0 {
@@ -45,12 +48,12 @@ struct RatingAnalysisTests {
         let configuration = AnalysisConfiguration(
             output: output, inputs: [input], adjustmentInputs: [adjustment], timeZone: utc
         )
-        let result = try reopened.analyze(configuration, asOf: date(121))
-        #expect(result.coverage.usableDates == (1...120).map(date))
+        let result = try reopened.analyze(configuration, asOf: date(pairedDays + 1))
+        #expect(result.coverage.usableDates == (1...pairedDays).map(date))
         #expect(result.model == .ratingThresholdLinearV1)
         #expect(result.evidence.grade == .low)
         #expect(result.evidence.defaultDayCount == 1)
-        #expect(result.evidence.dependenceLagDays == 10)
+        #expect((result.evidence.dependenceLagDays ?? 0) >= 13)
         #expect(result.outputVariable?.kind == .tracked(.rating(2...8)))
         #expect(result.modeledInputs.map(\.role) == [.input, .adjustment])
         #expect(result.modeledInputs[0].kind == .tracked(.rating(1...5)))
@@ -120,6 +123,100 @@ struct RatingAnalysisTests {
         #expect(sparseInput.evidence.defaultDayCount == 20)
     }
 
+    @Test func ratingAdjustmentKeepsTheCountModelAndRejectsUnsupportedWindowsAndInteractions() throws {
+        let app = HealthAnalysisApplication()
+        let stress = try app.manualLog.createTypedVariable(
+            name: "Stress", kind: .rating(1...5), defaultValue: .rating(3), startsOn: day(0)
+        )
+        let exercise = try app.manualLog.createQuantity(name: "Exercise", unit: "min", defaultValue: 0, startsOn: day(0))
+        let output = try app.manualLog.createTypedVariable(
+            name: "Headaches", kind: .count, defaultValue: .count(0), startsOn: day(1)
+        )
+        for index in 0..<120 {
+            let highStress = index % 2
+            let exerciseMinutes = index / 2 % 2
+            let cycle = index / 4
+            let level = highStress == 0 ? 1 + cycle % 2 : 3 + cycle % 3
+            app.manualLog.editTypedEntry(stress.id, on: day(index), value: .rating(level))
+            app.manualLog.editQuantity(exercise.id, on: day(index), text: String(exerciseMinutes), locale: Locale(identifier: "en_US"))
+            let count = (1 + highStress) * (1 + 2 * exerciseMinutes) + cycle % 3 - 1
+            app.manualLog.editTypedEntry(output.id, on: day(index + 1), value: .count(count))
+        }
+        let stressID = AnalysisSeriesID.manualTyped(stress.id)
+        let exerciseID = AnalysisSeriesID.manualQuantity(exercise.id)
+        var configuration = AnalysisConfiguration(
+            output: .manualTyped(output.id), inputs: [exerciseID], adjustmentInputs: [stressID], timeZone: utc
+        )
+        let result = try app.analyze(configuration, asOf: date(121))
+        let adjusted = try #require(result.estimates.first { $0.input == stressID })
+        #expect(result.model == .countLogLinearV1)
+        #expect(adjusted.scale == .proportionalCountChange)
+        #expect(abs(adjusted.difference - 1) < 0.01)
+        #expect(adjusted.interval.contains(1))
+
+        configuration.behaviorWindow = .precedingWeek
+        #expect(throws: AnalysisRunFailure.ratingWindowUnavailable) {
+            try app.analyze(configuration, asOf: date(121))
+        }
+        let other = try app.manualLog.createQuantity(name: "Caffeine", unit: "mg", defaultValue: 0, startsOn: day(0))
+        let otherID = AnalysisSeriesID.manualQuantity(other.id)
+        configuration.output = .health(metric: .restingHeartRate)
+        configuration.behaviorWindow = .precedingDay
+        configuration.inputs.append(otherID)
+        configuration.interaction = .init(focal: exerciseID, moderator: otherID)
+        #expect(throws: AnalysisRunFailure.ratingInteractionUnavailable) {
+            try app.analyze(configuration, asOf: date(121))
+        }
+    }
+
+    @Test func thresholdIntervalsCoverKnownContrastsWithSerialDependence() throws {
+        let trials = 72
+        let days = 336
+        var coverage = [0, 0]
+        var width = [0.0, 0.0]
+        var bias = [0.0, 0.0]
+        for trial in 0..<trials {
+            let expected = trial.isMultiple(of: 2) ? 0.0 : 0.2
+            for (scenario, persistence) in [0.0, 0.8].enumerated() {
+                let app = HealthAnalysisApplication()
+                let stress = try app.manualLog.createTypedVariable(
+                    name: "Stress", kind: .rating(1...5), defaultValue: .rating(1), startsOn: day(0)
+                )
+                let energy = try app.manualLog.createTypedVariable(
+                    name: "Energy", kind: .rating(2...8), defaultValue: .rating(2), startsOn: day(1)
+                )
+                var random = RatingRandom(state: UInt64(trial + 47_000))
+                var outcomeRandom = RatingRandom(state: UInt64(trial + 932_000))
+                var stressGroup = 0
+                var latent = outcomeRandom.uniform()
+                for index in 0..<days {
+                    if index.isMultiple(of: 14) { stressGroup = random.uniform() < 0.5 ? 0 : 1 }
+                    let renew = outcomeRandom.uniform() >= persistence
+                    let draw = outcomeRandom.uniform()
+                    if renew { latent = draw }
+                    let thresholdProbability = 0.35 + expected * Double(stressGroup)
+                    let stressLevel = stressGroup == 0 ? 1 + index % 2 : 3 + index % 3
+                    let energyLevel = latent < thresholdProbability ? 5 + index % 4 : 2 + index % 3
+                    app.manualLog.editTypedEntry(stress.id, on: day(index), value: .rating(stressLevel))
+                    app.manualLog.editTypedEntry(energy.id, on: day(index + 1), value: .rating(energyLevel))
+                }
+                let result = try app.analyze(.init(
+                    output: .manualTyped(energy.id), inputs: [.manualTyped(stress.id)], timeZone: utc
+                ), asOf: date(days + 1))
+                let estimate = try #require(result.estimates.first)
+                if estimate.interval.contains(expected) { coverage[scenario] += 1 }
+                width[scenario] += estimate.interval.upperBound - estimate.interval.lowerBound
+                bias[scenario] += estimate.difference - expected
+                #expect(result.evidence.grade == .low)
+            }
+        }
+        #expect((0.85...1).contains(Double(coverage[0]) / Double(trials)))
+        #expect((0.91...1).contains(Double(coverage[1]) / Double(trials)))
+        #expect(width[1] / width[0] > 1.3)
+        #expect(abs(bias[0] / Double(trials)) < 0.035)
+        #expect(abs(bias[1] / Double(trials)) < 0.035)
+    }
+
     private let utc = TimeZone(secondsFromGMT: 0)!
 
     private func date(_ offset: Int) -> Date {
@@ -128,5 +225,21 @@ struct RatingAnalysisTests {
 
     private func day(_ offset: Int) -> ManualLogDay {
         ManualLogDay(date(offset), timeZone: utc)
+    }
+}
+
+private struct RatingRandom: RandomNumberGenerator {
+    var state: UInt64
+
+    mutating func next() -> UInt64 {
+        state = state &+ 0x9E3779B97F4A7C15
+        var mixed = state
+        mixed = (mixed ^ (mixed >> 30)) &* 0xBF58476D1CE4E5B9
+        mixed = (mixed ^ (mixed >> 27)) &* 0x94D049BB133111EB
+        return mixed ^ (mixed >> 31)
+    }
+
+    mutating func uniform() -> Double {
+        Double(next() >> 11) / 9_007_199_254_740_992
     }
 }

@@ -146,7 +146,9 @@ struct AnalysisCoverageView: View {
         List {
             ForEach(outputs) { output in
                 Section {
-                    LabeledContent("Output value") { result.analysisOutputValue(output.value) }
+                    LabeledContent("Output value") {
+                        result.analysisOutputValue(output.value, trackingValue: output.trackingValue)
+                    }
                     AnalysisOutputProvenanceRows(result: result, origin: output.origin)
                     if output.missingInputs.isEmpty {
                         Text("A complete input window could not be prepared for this measurement.")
@@ -186,7 +188,7 @@ struct AnalysisOutputValuesView: View {
         List(result.outputEvidence.filter(\.isObserved)) { output in
             VStack(alignment: .leading, spacing: 4) {
                 Text(output.date, format: result.analysisDateFormat)
-                result.analysisOutputValue(output.value)
+                result.analysisOutputValue(output.value, trackingValue: output.trackingValue)
                 if let source = output.source {
                     Text(source.name)
                 }
@@ -246,10 +248,12 @@ extension AnalysisResult {
 
     @MainActor var analysisOutputAxis: Text {
         if outputVariable?.kind == .tracked(.count) { return Text("\(analysisOutputTitle) (count)") }
+        if let outputVariable, outputVariable.kind.ratingThreshold != nil { return outputVariable.analysisChoiceLabel }
         return configuration.output.isSleepDuration ? Text("Sleep duration (hours)") : Text("\(analysisOutputTitle) (bpm)")
     }
 
-    func analysisOutputValue(_ value: Double) -> Text {
+    func analysisOutputValue(_ value: Double, trackingValue: ManualTrackingValue?) -> Text {
+        if case .rating(let level)? = trackingValue { return Text(level, format: .number) }
         if outputVariable?.kind == .tracked(.count) { return Text(value, format: .number.precision(.fractionLength(0))) }
         let format = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(0...2))
         return configuration.output.isSleepDuration

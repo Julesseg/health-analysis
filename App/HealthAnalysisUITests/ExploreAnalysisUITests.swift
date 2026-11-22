@@ -182,7 +182,7 @@ extension XCUIElement {
         let target = control.exists ? control : self
         let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: target)
         XCTAssertEqual(XCTWaiter.wait(for: [hittable], timeout: 5), .completed)
-        target.tap()
+        target.press(forDuration: 0.15)
         let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", expectedValue), object: self)
         XCTAssertEqual(XCTWaiter.wait(for: [changed], timeout: 5), .completed, "Switch \(label) should change to \(expectedValue)")
     }

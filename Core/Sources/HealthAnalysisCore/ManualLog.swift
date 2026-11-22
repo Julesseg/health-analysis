@@ -52,6 +52,11 @@ public final class ManualLog {
         case persistenceFailed
     }
 
+    public enum TypedVariableCreationError: Error {
+        case invalidDefinition
+        case persistenceFailed
+    }
+
     private struct Entry: Codable, Hashable, Sendable {
         let day: ManualLogDay
         let quantityID: TrackingQuantity.ID
@@ -66,6 +71,7 @@ public final class ManualLog {
     private struct Snapshot: Codable, Sendable {
         var quantities: [TrackingQuantity] = []
         var entries: [Entry: Decimal] = [:]
+        var typed: TypedLogSnapshot?
 
         static func load(from url: URL) throws -> Self {
             do {
@@ -79,6 +85,7 @@ public final class ManualLog {
     private let storeURL: URL?
     private var snapshot: Snapshot?
     private var edits: [Entry: Edit] = [:]
+    private var typedEdits: [TypedLogEntryKey: TypedLogEdit] = [:]
 
     nonisolated init(storeURL: URL?) {
         self.storeURL = storeURL
@@ -86,6 +93,7 @@ public final class ManualLog {
     }
 
     public var quantities: [TrackingQuantity] { snapshot?.quantities ?? [] }
+    public var typedVariables: [TypedTrackingVariable] { snapshot?.typed?.variables ?? [] }
     public var isStoreAvailable: Bool { snapshot != nil }
 
     @discardableResult
@@ -154,6 +162,76 @@ public final class ManualLog {
         let entry = Entry(day: day, quantityID: id)
         guard let edit = edits[entry], edit.status == .saveFailed else { return }
         editQuantity(id, on: day, text: edit.text, locale: edit.locale)
+    }
+
+    @discardableResult
+    public func createTypedVariable(
+        name: String, kind: TrackingVariableKind, defaultValue: ManualTrackingValue, startsOn: ManualLogDay
+    ) throws(TypedVariableCreationError) -> TypedTrackingVariable {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, kind.accepts(defaultValue) else { throw .invalidDefinition }
+        guard var updated = snapshot else { throw .persistenceFailed }
+        let variable = TypedTrackingVariable(
+            id: UUID(), name: name, kind: kind, defaultValue: defaultValue, startsOn: startsOn
+        )
+        var typed = updated.typed ?? TypedLogSnapshot()
+        typed.variables.append(variable)
+        updated.typed = typed
+
+        do {
+            try persist(updated)
+        } catch {
+            throw .persistenceFailed
+        }
+        return variable
+    }
+
+    public func dailyTypedEntries(on day: ManualLogDay) -> [DailyTypedEntry] {
+        typedVariables.filter { $0.startsOn <= day }.map { dailyTypedEntry($0, on: day) }
+    }
+
+    public func dailyTypedEntry(_ id: TypedTrackingVariable.ID, on day: ManualLogDay) -> DailyTypedEntry? {
+        guard let variable = typedVariables.first(where: { $0.id == id }), day >= variable.startsOn else {
+            return nil
+        }
+        return dailyTypedEntry(variable, on: day)
+    }
+
+    private func dailyTypedEntry(_ variable: TypedTrackingVariable, on day: ManualLogDay) -> DailyTypedEntry {
+        let key = TypedLogEntryKey(day: day, variableID: variable.id)
+        let recordedValue = snapshot?.typed?.entries[key]
+        let edit = typedEdits[key]
+        return DailyTypedEntry(
+            variable: variable,
+            day: day,
+            recordedValue: recordedValue,
+            draftValue: edit?.value,
+            status: edit?.status ?? (recordedValue == nil ? .assumedDefault : .saved)
+        )
+    }
+
+    public func editTypedEntry(_ id: TypedTrackingVariable.ID, on day: ManualLogDay, value: ManualTrackingValue) {
+        guard var updated = snapshot, var typed = updated.typed,
+            let variable = typed.variables.first(where: { $0.id == id }), day >= variable.startsOn else { return }
+        let key = TypedLogEntryKey(day: day, variableID: id)
+        guard variable.kind.accepts(value) else {
+            typedEdits[key] = TypedLogEdit(value: value, status: .invalid)
+            return
+        }
+        typed.entries[key] = value
+        updated.typed = typed
+        do {
+            try persist(updated)
+            typedEdits[key] = nil
+        } catch {
+            typedEdits[key] = TypedLogEdit(value: value, status: .saveFailed)
+        }
+    }
+
+    public func retryTypedEntry(_ id: TypedTrackingVariable.ID, on day: ManualLogDay) {
+        let key = TypedLogEntryKey(day: day, variableID: id)
+        guard let edit = typedEdits[key], edit.status == .saveFailed else { return }
+        editTypedEntry(id, on: day, value: edit.value)
     }
 
     private func persist(_ updated: Snapshot) throws {

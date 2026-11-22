@@ -13,7 +13,7 @@ public struct AnalysisVariable: Codable, Equatable, Identifiable, Sendable {
     public var supportsInput: Bool {
         switch id {
         case .manualQuantity: true
-        case .manualTyped: kind == .tracked(.count) || kind == .tracked(.yesNo) || kind == .tracked(.timeOfDay)
+        case .manualTyped: kind == .tracked(.count) || kind == .tracked(.yesNo) || kind == .tracked(.timeOfDay) || kind.ratingThreshold != nil
         case .health, .sleepTiming: false
         }
     }
@@ -21,7 +21,7 @@ public struct AnalysisVariable: Codable, Equatable, Identifiable, Sendable {
     public var supportsOutput: Bool {
         switch id {
         case .manualQuantity: false
-        case .manualTyped: kind == .tracked(.count) || kind == .tracked(.yesNo) || kind == .tracked(.timeOfDay)
+        case .manualTyped: supportsInput
         case .sleepTiming: true
         case .health(let metric, _): metric == .restingHeartRate || metric == .sleepAnalysis
         }
@@ -94,6 +94,8 @@ enum ManualAnalysisSeries {
                 return Sample(value: BinaryEvent.encode(isYes), origin: origin, trackingValue: value)
             case (.timeOfDay, .timeOfDay(let time, _)) where variable.kind.accepts(value):
                 return Sample(value: Double(time.hour * 60 + time.minute), origin: origin, trackingValue: value)
+            case (.rating(let levels), .rating(let level)) where levels.contains(level):
+                return Sample(value: Double(level), origin: origin, trackingValue: value)
             default:
                 return nil
             }

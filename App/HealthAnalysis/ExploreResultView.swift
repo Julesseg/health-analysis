@@ -79,9 +79,9 @@ struct ExploreResultView<Status: View>: View {
                         .foregroundStyle(.secondary)
                     Text(estimate.finding.description(isSleepDuration: isSleepDuration, output: result.outputVariable, input: input))
                         .font(.headline)
-                    estimateLabel(estimate, input: input, isSleepDuration: isSleepDuration)
+                    estimateLabel(estimate, input: input, isSleepDuration: isSleepDuration, output: result.outputVariable)
                         .monospacedDigit()
-                        .accessibilityIdentifier(estimate.scale.accessibilityIdentifier)
+                        .accessibilityIdentifier(effectIdentifier(estimate, input: input))
                     if let reference {
                         reference.foregroundStyle(.secondary)
                     }
@@ -122,6 +122,15 @@ struct ExploreResultView<Status: View>: View {
         guard let reference = estimate.reference,
               let other = result.modeledInputs.first(where: { $0.series == reference.input }) else { return nil }
         return Text("With \(other.name) at \(reference.value, format: .number) \(other.unit).")
+    }
+
+    private func effectIdentifier(_ estimate: AnalysisEstimate, input: AnalysisModeledInput) -> String {
+        if estimate.scale == .clockMinutesDifference { return "explore.clockEffect" }
+        if estimate.scale == .ratingThresholdProbabilityDifference || input.kind?.ratingThreshold != nil {
+            return "explore.ratingEffect"
+        }
+        if estimate.scale == .probabilityDifference { return "explore.binaryEffect" }
+        return estimate.scale == .proportionalCountChange ? "explore.countEffect" : "explore.effect"
     }
 
     private var confidence: some View {
@@ -211,6 +220,7 @@ private struct AnalysisModelView: View {
             } header: {
                 Text(hasEstimates ? "Modeled inputs" : "Inputs assessed")
             }
+            RatingSupportSections(result: result)
             Section("Evidence") {
                 LabeledContent("Confidence") { Text(result.evidence.grade.description) }
                 ForEach(result.evidence.reasons, id: \.self) { reason in
@@ -258,7 +268,7 @@ private struct EstimateChart: View {
     @ScaledMetric private var chartHeight = 95.0
 
     private var scale: Double {
-        if estimate.scale == .probabilityDifference { return 100 }
+        if estimate.scale.isProbabilityDifference { return 100 }
         return isSleepDuration ? 60 : 1
     }
     private var lower: Double { estimate.interval.lowerBound * scale }
@@ -267,6 +277,7 @@ private struct EstimateChart: View {
         if estimate.scale == .probabilityDifference { return "Difference in Yes probability (percentage points)" }
         if estimate.scale == .clockMinutesDifference { return "Difference in local clock time (minutes)" }
         if estimate.scale == .proportionalCountChange { return "Change in expected daily count" }
+        if estimate.scale == .ratingThresholdProbabilityDifference { return "Difference in probability (percentage points)" }
         return isSleepDuration ? "Difference in sleep duration (minutes)" : "Difference in resting heart rate (bpm)"
     }
 
@@ -328,8 +339,8 @@ private struct EstimateChart: View {
     private var estimateAccessibilityValue: Text {
         let direction = Text(estimate.finding.description(isSleepDuration: isSleepDuration, output: output, input: input))
         let interval = intervalLabel(estimate, isSleepDuration: isSleepDuration)
-        if estimate.scale != .difference || input.kind == .tracked(.count) || input.kind == .tracked(.yesNo) || input.isClock {
-            let effect = estimateLabel(estimate, input: input, isSleepDuration: isSleepDuration)
+        if estimate.scale != .difference || input.kind == .tracked(.count) || input.kind == .tracked(.yesNo) || input.kind?.ratingThreshold != nil || input.isClock {
+            let effect = estimateLabel(estimate, input: input, isSleepDuration: isSleepDuration, output: output)
             return Text("\(direction) \(effect). Dependence-adjusted interval \(interval).")
         }
         if isSleepDuration {
@@ -343,9 +354,36 @@ private let estimateNumber = FloatingPointFormatStyle<Double>.number.precision(.
 
 private let countPercent = FloatingPointFormatStyle<Double>.Percent.percent.precision(.fractionLength(0...2))
 
-func estimateLabel(_ estimate: AnalysisEstimate, input: AnalysisModeledInput, isSleepDuration: Bool) -> Text {
+func estimateLabel(
+    _ estimate: AnalysisEstimate, input: AnalysisModeledInput, isSleepDuration: Bool, output: AnalysisVariable? = nil
+) -> Text {
+    let inputThreshold = input.kind?.ratingThreshold
+    let outputThreshold = output?.kind.ratingThreshold
     let countInput = input.kind == .tracked(.count)
     let yesNoInput = input.kind == .tracked(.yesNo)
+    if inputThreshold != nil || outputThreshold != nil {
+        let effect: Text
+        if let output, let outputThreshold {
+            effect = Text("\(estimate.difference * 100, format: estimateNumber) percentage points for \(output.name) at \(outputThreshold, format: .number) or above")
+        } else if estimate.scale == .probabilityDifference {
+            effect = Text("\(estimate.difference * 100, format: estimateNumber) percentage points in the probability of Yes")
+        } else if estimate.scale == .proportionalCountChange {
+            effect = Text("\(estimate.difference, format: countPercent) change in expected daily count")
+        } else if estimate.scale == .clockMinutesDifference {
+            effect = Text("\(estimate.difference, format: estimateNumber) minutes")
+        } else if isSleepDuration {
+            effect = Text("\(estimate.difference * 60, format: estimateNumber) minutes")
+        } else {
+            effect = Text("\(estimate.difference, format: estimateNumber) bpm")
+        }
+        if let inputThreshold {
+            return Text("\(effect) for \(input.name) at \(inputThreshold, format: .number) or above vs. below \(inputThreshold, format: .number)")
+        }
+        if yesNoInput { return Text("\(effect) for Yes versus No") }
+        if countInput { return Text("\(effect) per additional event") }
+        if input.isClock { return Text("\(effect) per hour later") }
+        return Text("\(effect) per \(estimate.inputIncrement, format: .number) \(input.unit) increase")
+    }
     if estimate.scale == .probabilityDifference {
         let points = estimate.difference * 100
         if yesNoInput {
@@ -408,7 +446,7 @@ func estimateLabel(_ estimate: AnalysisEstimate, input: AnalysisModeledInput, is
 }
 
 private func intervalLabel(_ estimate: AnalysisEstimate, isSleepDuration: Bool) -> String {
-    if estimate.scale == .probabilityDifference {
+    if estimate.scale.isProbabilityDifference {
         return String(localized: "\(estimate.interval.lowerBound * 100, format: estimateNumber) to \(estimate.interval.upperBound * 100, format: estimateNumber) percentage points")
     }
     if estimate.scale == .proportionalCountChange {
@@ -436,6 +474,13 @@ private extension AnalysisEstimate.Finding {
             switch self {
             case .higher: return "The model estimates a higher probability of Yes for \(output.name) in this comparison."
             case .lower: return "The model estimates a lower probability of Yes for \(output.name) in this comparison."
+            case .nearZero, .uncertain: break
+            }
+        }
+        if let output, let threshold = output.kind.ratingThreshold {
+            switch self {
+            case .higher: return "The higher input condition was associated with a higher probability of \(output.name) at \(threshold, format: .number) or above."
+            case .lower: return "The higher input condition was associated with a lower probability of \(output.name) at \(threshold, format: .number) or above."
             case .nearZero, .uncertain: break
             }
         }
@@ -484,13 +529,8 @@ private extension AnalysisEvidence.Grade {
 }
 
 private extension AnalysisEstimate.Scale {
-    var accessibilityIdentifier: String {
-        switch self {
-        case .clockMinutesDifference: "explore.clockEffect"
-        case .difference: "explore.effect"
-        case .proportionalCountChange: "explore.countEffect"
-        case .probabilityDifference: "explore.binaryEffect"
-        }
+    var isProbabilityDifference: Bool {
+        self == .probabilityDifference || self == .ratingThresholdProbabilityDifference
     }
 }
 
@@ -501,6 +541,7 @@ private extension AnalysisModel {
         case .numericLinearV1: "Numeric linear regression"
         case .binaryLogisticV1: "Logistic regression for daily yes/no outcomes"
         case .countLogLinearV1: "Poisson regression for daily counts"
+        case .ratingThresholdLinearV1: "Linear regression with rating thresholds"
         case .numericInteractionV1: "Numeric linear regression with an interaction"
         }
     }
@@ -526,12 +567,15 @@ private extension AnalysisEvidence.Reason {
         case .indeterminateInterval: "An interval includes no change and also allows an increase or decrease."
         case .adequateCoverageAndPrecision: "The analysis has at least 90 paired days, good overlap, limited default use, and a narrow interval."
         case .defaultOnlyOutput:
-            isYesNoOutput ? "Every paired yes/no output comes from a default." : "Every paired output count comes from a default."
+            isYesNoOutput ? "Every paired yes/no output comes from a default." : "Every paired output value comes from a default."
         case .lowVariationOutput:
             isYesNoOutput ? "Recorded output days all have the same yes/no value." : "Recorded output counts do not vary on paired days."
         case .sparseObservedCountOutput: "Too few recorded output counts show repeated variation and nonzero counts."
         case .countModelUnavailable: "The count model could not estimate a stable association. Some input values may only occur with zero output counts."
-        case .countModelLimitations: "The model assumes a constant proportional change per input increment. Longer dependence, unmeasured variables, and default values can affect the estimate."
+        case .countModelLimitations: "The model assumes a constant proportional change for each reported comparison. Longer dependence, unmeasured variables, and default values can affect the estimate."
+        case .sparseObservedRatingOutput: "The output needs at least six recorded paired days on each side of its rating threshold."
+        case .sparseObservedRatingInputs: "These inputs each need at least six recorded paired days on each side of their rating thresholds."
+        case .ratingThresholdLimitations: "The estimate summarizes the selected rating groups. Longer dependence, unmeasured variables, and default values can affect it."
         case .sparseObservedBinaryOutput: "There are too few recorded Yes or No output days for this model."
         case .sparseBinaryCombinations: "Some combinations of Yes and No have fewer than six days when every value was recorded."
         case .binaryContrastUnavailable: "Too few paired days support the reported increase within this input’s observed range."
@@ -555,7 +599,8 @@ private extension AnalysisEvidence.Reason {
         switch self {
         case .collinearInputs(let inputs), .defaultOnlyInputs(let inputs), .lowVariationInputs(let inputs),
              .clockIntervalUnavailable(let inputs), .limitedRecordedClockVariation(let inputs), .clockIncrementUnavailable(let inputs),
-             .sparseBinaryCombinations(let inputs), .binaryContrastUnavailable(let inputs): inputs
+             .sparseBinaryCombinations(let inputs), .binaryContrastUnavailable(let inputs),
+             .sparseObservedRatingInputs(let inputs): inputs
         default: []
         }
     }

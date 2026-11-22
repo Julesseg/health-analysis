@@ -39,7 +39,7 @@ struct PairedObservationView: View {
         VStack(alignment: .leading) {
             LabeledContent(name) {
                 switch value {
-                case .count(let count): Text(count, format: .number)
+                case .count(let count), .rating(let count): Text(count, format: .number)
                 case .yesNo(let isYes): yesNoLabel(isYes)
                 case .timeOfDay(let time, _): analysisClockText(Double(time.hour * 60 + time.minute))
                 default: EmptyView()

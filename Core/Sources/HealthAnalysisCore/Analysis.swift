@@ -209,6 +209,8 @@ public enum AnalysisRunFailure: Error, Equatable {
     case clockInteractionUnavailable
     case countWindowUnavailable
     case countInteractionUnavailable
+    case ratingWindowUnavailable
+    case ratingInteractionUnavailable
     case manualLogUnavailable
     case chooseOutputSource
     case healthHistoryUnavailable(HealthMeasurementReadFailure)
@@ -308,6 +310,10 @@ extension HealthAnalysisApplication {
             guard configuration.behaviorWindow == .precedingDay else { throw .binaryWindowUnavailable }
             guard configuration.interaction == nil else { throw .binaryInteractionUnavailable }
         }
+        if output?.kind.ratingThreshold != nil || inputs.contains(where: { $0.variable.kind.ratingThreshold != nil }) {
+            guard configuration.behaviorWindow == .precedingDay else { throw .ratingWindowUnavailable }
+            guard configuration.interaction == nil else { throw .ratingInteractionUnavailable }
+        }
         if output?.kind == .tracked(.count) || inputs.contains(where: { $0.variable.kind == .tracked(.count) }) {
             guard configuration.behaviorWindow == .precedingDay else { throw .countWindowUnavailable }
             guard configuration.interaction == nil else { throw .countInteractionUnavailable }
@@ -388,10 +394,12 @@ extension AnalysisResult {
             )
         }
         let outputIsClock = output?.kind == .tracked(.timeOfDay)
+        let ratingOutputThreshold = output?.kind.ratingThreshold
+        let usesRatings = ratingOutputThreshold != nil || inputs.contains { $0.kind.ratingThreshold != nil }
         let model: AnalysisModel = switch output?.kind {
         case .tracked(.count): .countLogLinearV1
         case .tracked(.yesNo): .binaryLogisticV1
-        default: .numericLinearV1
+        default: usesRatings ? .ratingThresholdLinearV1 : .numericLinearV1
         }
         func fit(_ rows: [AnalysisObservation]) -> NumericAnalysis {
             switch model {
@@ -403,7 +411,7 @@ extension AnalysisResult {
                 return NumericAnalysis.assess(
                     rows, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar,
                     behaviorWindow: configuration.behaviorWindow, practicalDifference: practicalDifference,
-                    interaction: configuration.interaction, outputIsClock: outputIsClock
+                    interaction: configuration.interaction, ratingOutputThreshold: ratingOutputThreshold, outputIsClock: outputIsClock
                 )
             }
         }

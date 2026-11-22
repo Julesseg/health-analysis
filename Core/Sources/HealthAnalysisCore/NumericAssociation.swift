@@ -18,6 +18,7 @@ public struct AnalysisEstimate: Codable, Sendable {
         case proportionalCountChange
         case probabilityDifference
         case clockMinutesDifference
+        case ratingThresholdProbabilityDifference
     }
 
     public var scale: Scale { storedScale ?? .difference }
@@ -75,6 +76,9 @@ public struct AnalysisEvidence: Codable, Sendable {
         case binaryContrastUnavailable(Set<AnalysisSeriesID>)
         case binaryModelUnavailable
         case binaryModelLimitations
+        case sparseObservedRatingOutput
+        case sparseObservedRatingInputs(Set<AnalysisSeriesID>)
+        case ratingThresholdLimitations
         case adjustedModelLimitations
         case clockIntervalUnavailable(Set<AnalysisSeriesID>)
         case limitedRecordedClockVariation(Set<AnalysisSeriesID>)

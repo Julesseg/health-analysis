@@ -295,12 +295,14 @@ extension AnalysisResult {
     @MainActor var analysisOutputAxis: Text {
         if outputVariable?.kind == .tracked(.yesNo) { return analysisOutputTitle }
         if outputVariable?.kind == .tracked(.count) { return Text("\(analysisOutputTitle) (count)") }
+        if let outputVariable, outputVariable.kind.ratingThreshold != nil { return outputVariable.analysisChoiceLabel }
         return configuration.output.isSleepDuration ? Text("Sleep duration (hours)") : Text("\(analysisOutputTitle) (bpm)")
     }
 
     func analysisOutputValue(_ value: Double, trackingValue: ManualTrackingValue?) -> Text {
         if case .yesNo(let isYes)? = trackingValue { return yesNoLabel(isYes) }
         if isClockOutput { return analysisClockText(value) }
+        if case .rating(let level)? = trackingValue { return Text(level, format: .number) }
         if outputVariable?.kind == .tracked(.count) { return Text(value, format: .number.precision(.fractionLength(0))) }
         let format = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(0...2))
         return configuration.output.isSleepDuration

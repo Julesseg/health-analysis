@@ -6,9 +6,11 @@ The shared analysis dataset carries the original Yes or No and its origin. Recor
 
 ## Model and effect
 
-For imported resting heart rate or sleep duration, the linear fit reports the adjusted bpm or minute difference for Yes versus No. For a count output, the Poisson fit reports the adjusted proportional change in expected daily count for that comparison.
+For imported resting heart rate or sleep duration, the linear fit reports the adjusted bpm or minute difference for Yes versus No. For a count output, the Poisson fit reports the adjusted proportional change in expected daily count for that comparison. For a rating output, the [rating model](rating-associations.md) estimates a percentage-point difference in reaching the rating threshold.
 
 A yes/no output uses logistic regression with an intercept and all selected inputs and adjustments. For each yes/no input the model predicts the probability of a Yes output with the input set to Yes and to No, while keeping the other input values on each paired day fixed. The reported difference is the average of those paired probability differences, in percentage points. For numeric inputs the comparison increases the value by the usual increment, such as one event or 100 mg. It averages over paired days where both comparison values fit within the explicitly recorded range of that input. Numeric contrasts check each input’s recorded range. Overlap with numeric adjustments can still be limited. These are model-based associations for the paired history. [Marginal standardization for logistic predictions](https://doi.org/10.1093/ije/dyu029)
+
+A rating input in this model uses its configured threshold. The contrast compares the group at or above the threshold with the group below it. Evidence retains the actual recorded levels, and each group needs the same recorded support as for other rating analyses.
 
 ## Uncertainty and support
 

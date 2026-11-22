@@ -54,7 +54,8 @@ struct ExploreView: View {
         if case .sleepTiming? = output { return true }
         return selectedKinds.contains(.tracked(.timeOfDay))
     }
-    private var allowsLongerWindowsAndInteractions: Bool { !usesCounts && !usesYesNo && !usesClocks }
+    private var usesRatings: Bool { selectedKinds.contains { $0.ratingThreshold != nil } }
+    private var allowsLongerWindowsAndInteractions: Bool { !(usesCounts || usesYesNo || usesRatings || usesClocks) }
 
     private var configuration: AnalysisConfiguration? {
         guard let output, !inputs.isEmpty else { return nil }
@@ -152,7 +153,7 @@ struct ExploreView: View {
                 )
             } footer: {
                 if inputChoices.isEmpty {
-                    Text("Add a supported tracking variable in Settings to choose another input.")
+                    Text("Add a daily tracking variable in Settings to choose an input.")
                 }
                 if usesClocks {
                     Text("Clock analyses use the complete preceding day. The model compares times within a shared part of the day.")
@@ -160,7 +161,12 @@ struct ExploreView: View {
                 } else if usesYesNo {
                     Text("Yes/no analyses use the complete preceding day.")
                     Text("Interactions with yes/no variables are unavailable.")
-                } else if usesCounts {
+                }
+                if usesRatings {
+                    Text("Rating analyses compare levels on either side of a fixed threshold using the complete preceding day.")
+                    Text("Interactions with ratings are unavailable.")
+                }
+                if usesCounts {
                     Text("Count analyses use the complete preceding day.")
                     Text("Interactions with counts are unavailable.")
                 }

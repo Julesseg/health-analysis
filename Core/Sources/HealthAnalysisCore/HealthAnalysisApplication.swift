@@ -11,8 +11,12 @@ public struct HealthAnalysisApplication: Sendable {
     public let healthMeasurements: HealthMeasurementHistory
     public let manualLog: ManualLog
 
-    public init(healthSource: (any HealthMeasurementSource)? = nil, manualLogStoreURL: URL? = nil) {
-        healthMeasurements = HealthMeasurementHistory(source: healthSource)
+    public init(
+        healthSource: (any HealthMeasurementSource)? = nil,
+        healthHistoryStoreURL: URL? = nil,
+        manualLogStoreURL: URL? = nil
+    ) {
+        healthMeasurements = HealthMeasurementHistory(source: healthSource, storeURL: healthHistoryStoreURL)
         manualLog = ManualLog(storeURL: manualLogStoreURL)
     }
 

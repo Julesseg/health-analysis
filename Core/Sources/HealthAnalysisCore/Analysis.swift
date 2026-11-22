@@ -165,6 +165,10 @@ public enum AnalysisRunFailure: Error, Equatable {
 }
 
 extension HealthAnalysisApplication {
+    @MainActor public var analysisOutputChoices: [AnalysisSeriesID] {
+        [.health(metric: .restingHeartRate), .health(metric: .sleepAnalysis)]
+    }
+
     @MainActor public var analysisCaffeineQuantities: [TrackingQuantity] {
         analysisNumericQuantities.filter { $0.unit.lowercased() == "mg" }
     }
@@ -181,17 +185,9 @@ extension HealthAnalysisApplication {
     @MainActor public func analyze(
         _ configuration: AnalysisConfiguration, asOf: Date = .now
     ) throws(AnalysisRunFailure) -> AnalysisResult {
-        let series = configuration.inputs + configuration.adjustmentInputs
-        guard case .health(let metric, let sourceID) = configuration.output,
-              metric == .restingHeartRate || metric == .sleepAnalysis,
-              !configuration.inputs.isEmpty, Set(series).count == series.count else { throw .unsupportedConfiguration }
-        guard manualLog.isStoreAvailable else { throw .manualLogUnavailable }
-        let availableQuantities = Dictionary(uniqueKeysWithValues: analysisNumericQuantities.map { ($0.id, $0) })
-        var quantities: [TrackingQuantity] = []
-        for input in series {
-            guard case .manualQuantity(let quantityID) = input else { throw .unsupportedConfiguration }
-            guard let quantity = availableQuantities[quantityID] else { throw .inputUnavailable }
-            quantities.append(quantity)
+        let quantities = try analysisQuantities(for: configuration)
+        guard case .health(let metric, let sourceID) = configuration.output else {
+            throw .unsupportedConfiguration
         }
 
         let lastReadAt = healthMeasurements.lastSuccessfulReadAt
@@ -209,17 +205,7 @@ extension HealthAnalysisApplication {
 
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = configuration.timeZone
-        let outputs: [TemporalAnalysisDataset.Output]
-        if metric == .sleepAnalysis {
-            let episodes = healthMeasurements.deriveSleepEpisodes(
-                from: healthMeasurements.history.filter { $0.metric == .sleepAnalysis && $0.endDate <= asOf }
-            )
-            outputs = TemporalAnalysisDataset.sleepDurationOutputs(episodes, asOf: asOf, calendar: calendar)
-        } else {
-            outputs = TemporalAnalysisDataset.restingHeartRateOutputs(
-                healthMeasurements.history, asOf: asOf, calendar: calendar
-            )
-        }
+        let outputs = healthAnalysisOutputs(for: metric, asOf: asOf, calendar: calendar)
         let outputSourceID = sourceID ?? healthMeasurements.preferredSource(for: metric)?.bundleIdentifier
         let sources = Set(outputs.map(\.source.bundleIdentifier))
         guard outputSourceID != nil || sources.count <= 1 else { throw .chooseOutputSource }
@@ -252,5 +238,39 @@ extension HealthAnalysisApplication {
             estimates: assessment.estimates,
             evidence: assessment.evidence
         )
+    }
+
+    @MainActor func analysisQuantities(
+        for configuration: AnalysisConfiguration
+    ) throws(AnalysisRunFailure) -> [TrackingQuantity] {
+        let series = configuration.inputs + configuration.adjustmentInputs
+        guard case .health(let metric, _) = configuration.output,
+              analysisOutputChoices.contains(.health(metric: metric)),
+              !configuration.inputs.isEmpty, Set(series).count == series.count else { throw .unsupportedConfiguration }
+        guard manualLog.isStoreAvailable else { throw .manualLogUnavailable }
+        let available = Dictionary(uniqueKeysWithValues: analysisNumericQuantities.map { ($0.id, $0) })
+        var quantities: [TrackingQuantity] = []
+        for input in series {
+            guard case .manualQuantity(let id) = input else { throw .unsupportedConfiguration }
+            guard let quantity = available[id] else { throw .inputUnavailable }
+            quantities.append(quantity)
+        }
+        return quantities
+    }
+
+    @MainActor func healthAnalysisOutputs(
+        for metric: HealthMeasurement.Metric, asOf: Date, calendar: Calendar
+    ) -> [TemporalAnalysisDataset.Output] {
+        switch metric {
+        case .sleepAnalysis:
+            let episodes = healthMeasurements.deriveSleepEpisodes(
+                from: healthMeasurements.history.filter { $0.metric == metric && $0.endDate <= asOf }
+            )
+            return TemporalAnalysisDataset.sleepDurationOutputs(episodes, asOf: asOf, calendar: calendar)
+        case .restingHeartRate:
+            return TemporalAnalysisDataset.restingHeartRateOutputs(healthMeasurements.history, asOf: asOf, calendar: calendar)
+        default:
+            return []
+        }
     }
 }

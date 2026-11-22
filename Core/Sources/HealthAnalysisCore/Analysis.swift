@@ -171,6 +171,8 @@ public enum AnalysisRunFailure: Error, Equatable {
     case outputUnavailable
     case countWindowUnavailable
     case countInteractionUnavailable
+    case ratingWindowUnavailable
+    case ratingInteractionUnavailable
     case manualLogUnavailable
     case chooseOutputSource
     case healthHistoryUnavailable(HealthMeasurementReadFailure)
@@ -210,6 +212,11 @@ extension HealthAnalysisApplication {
             inputs.append(input)
         }
         let output = catalog[configuration.output]?.variable
+        let ratingOutputThreshold = output?.kind.ratingThreshold
+        if ratingOutputThreshold != nil || inputs.contains(where: { $0.variable.kind.ratingThreshold != nil }) {
+            guard configuration.behaviorWindow == .precedingDay else { throw .ratingWindowUnavailable }
+            guard configuration.interaction == nil else { throw .ratingInteractionUnavailable }
+        }
         if output?.kind == .tracked(.count) || inputs.contains(where: { $0.variable.kind == .tracked(.count) }) {
             guard configuration.behaviorWindow == .precedingDay else { throw .countWindowUnavailable }
             guard configuration.interaction == nil else { throw .countInteractionUnavailable }
@@ -255,7 +262,7 @@ extension HealthAnalysisApplication {
             assessment = NumericAnalysis.assess(
                 dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar,
                 behaviorWindow: configuration.behaviorWindow, practicalDifference: practicalDifference,
-                interaction: configuration.interaction
+                interaction: configuration.interaction, ratingOutputThreshold: ratingOutputThreshold
             )
         }
         return AnalysisResult(

@@ -39,19 +39,19 @@ struct HealthReadStatus: View {
     var body: some View {
         switch history.readState {
         case .idle:
-            if showsInitialState && history.history.isEmpty {
+            if showsInitialState && !history.hasReadableRecords {
                 Text("No readable measurements")
             }
         case .loading:
             ProgressView("Checking Health measurements…")
                 .accessibilityIdentifier("health.readProgress")
         case .loaded:
-            if history.history.isEmpty {
+            if !history.hasReadableRecords {
                 Text("No readable measurements")
             }
         case .failed(let failure):
             Text(message(for: failure))
-            if !history.history.isEmpty {
+            if history.hasReadableRecords {
                 earlierMeasurementsNotice
             }
         }

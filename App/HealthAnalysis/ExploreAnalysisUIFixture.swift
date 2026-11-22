@@ -9,7 +9,7 @@ enum ExploreAnalysisUIFixture {
 
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .current
-        let first = calendar.date(from: DateComponents(year: 2025, month: 1, day: 1))!
+        let first = calendar.date(byAdding: .day, value: -113, to: calendar.startOfDay(for: .now))!
         let source = HealthMeasurement.Source(name: "Fixture watch", bundleIdentifier: "fixture.explore")
         let days = (0..<112).map { index in
             let inputDate = calendar.date(byAdding: .day, value: index, to: first)!

@@ -8,6 +8,8 @@ struct ExploreView: View {
     @State private var output: AnalysisSeriesID?
     @State private var inputs: [AnalysisSeriesID]
     @State private var adjustments: [AnalysisSeriesID]
+    @State private var behaviorWindow: AnalysisBehaviorWindow
+    @State private var history: AnalysisPeriod
     @State private var analysisTimeZone: TimeZone
 
     init(application: HealthAnalysisApplication, editing: SavedAnalysis? = nil) {
@@ -16,6 +18,8 @@ struct ExploreView: View {
         _output = State(initialValue: editing?.configuration.output)
         _inputs = State(initialValue: editing?.configuration.inputs ?? [])
         _adjustments = State(initialValue: editing?.configuration.adjustmentInputs ?? [])
+        _behaviorWindow = State(initialValue: editing?.configuration.behaviorWindow ?? .precedingDay)
+        _history = State(initialValue: editing?.configuration.history ?? .fullHistory)
         _analysisTimeZone = State(initialValue: editing?.configuration.timeZone ?? .current)
     }
 
@@ -35,6 +39,8 @@ struct ExploreView: View {
         configuration.output = output
         configuration.inputs = inputs
         configuration.adjustmentInputs = adjustments
+        configuration.behaviorWindow = behaviorWindow
+        configuration.history = history
         configuration.timeZone = analysisTimeZone
         return configuration
     }
@@ -54,8 +60,11 @@ struct ExploreView: View {
                 Picker("Output", selection: $output) {
                     Text("Choose output").tag(nil as AnalysisSeriesID?)
                     let restingHeartRate = AnalysisSeriesID.health(metric: .restingHeartRate)
+                    let sleepDuration = AnalysisSeriesID.health(metric: .sleepAnalysis)
                     Text("Resting heart rate").tag(restingHeartRate as AnalysisSeriesID?)
-                    if let savedOutput = editing?.configuration.output, savedOutput != restingHeartRate {
+                    Text("Sleep duration").tag(sleepDuration as AnalysisSeriesID?)
+                    if let savedOutput = editing?.configuration.output,
+                       savedOutput != restingHeartRate, savedOutput != sleepDuration {
                         application.analysisSeriesTitle(savedOutput).tag(savedOutput as AnalysisSeriesID?)
                     }
                 }
@@ -92,10 +101,7 @@ struct ExploreView: View {
                 .accessibilityLabel("Account for")
                 .accessibilityValue(selectionSummary(adjustments))
                 .accessibilityIdentifier("explore.adjustments")
-                LabeledContent("Behavior window") { Text("Complete preceding day") }
-                    .accessibilityIdentifier("explore.behaviorWindow")
-                LabeledContent("History") { Text("Full usable history") }
-                    .accessibilityIdentifier("explore.history")
+                ExploreTemporalControls(behaviorWindow: $behaviorWindow, history: $history)
             } footer: {
                 if quantities.isEmpty {
                     Text("Add a daily quantity in Settings to choose an input.")

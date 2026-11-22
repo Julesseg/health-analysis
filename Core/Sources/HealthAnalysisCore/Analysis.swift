@@ -5,12 +5,32 @@ public enum AnalysisSeriesID: Codable, Hashable, Sendable {
     case health(metric: HealthMeasurement.Metric, sourceBundleIdentifier: String? = nil)
 }
 
-public enum AnalysisBehaviorWindow: String, Codable, Hashable, Sendable {
+public enum AnalysisBehaviorWindow: String, CaseIterable, Codable, Hashable, Sendable {
     case precedingDay
+    case precedingWeek
+    case precedingMonth
+
+    public var dayCount: Int {
+        switch self {
+        case .precedingDay: 1
+        case .precedingWeek: 7
+        case .precedingMonth: 30
+        }
+    }
 }
 
-public enum AnalysisPeriod: String, Codable, Hashable, Sendable {
+public enum AnalysisPeriod: String, CaseIterable, Codable, Hashable, Sendable {
     case fullHistory
+    case last90Days
+    case last365Days
+
+    var dayCount: Int? {
+        switch self {
+        case .fullHistory: nil
+        case .last90Days: 90
+        case .last365Days: 365
+        }
+    }
 }
 
 public struct AnalysisConfiguration: Codable, Hashable, Sendable {
@@ -40,10 +60,27 @@ public struct AnalysisConfiguration: Codable, Hashable, Sendable {
 
 public struct AnalysisObservation: Identifiable, Codable, Sendable {
     public struct Input: Codable, Sendable {
+        public struct Day: Codable, Sendable {
+            public let date: Date
+            public let value: Double
+            public let origin: ManualValueOrigin
+        }
+
         public let series: AnalysisSeriesID
         public let date: Date
         public let value: Double
         public let origin: ManualValueOrigin
+        public let days: [Day]
+
+        var hasObservedDay: Bool { origin == .observation || days.contains { $0.origin == .observation } }
+
+        init(series: AnalysisSeriesID, date: Date, value: Double, origin: ManualValueOrigin, days: [Day] = []) {
+            self.series = series
+            self.date = date
+            self.value = value
+            self.origin = origin
+            self.days = days
+        }
     }
 
     public var id: Date { outputDate }
@@ -64,14 +101,34 @@ public struct AnalysisCoverage: Codable, Sendable {
     public let usableDates: [Date]
     public let gaps: [Gap]
     public let outputDaysWithoutCompleteInput: Int
+    public let outputDatesWithoutCompleteInput: [Date]
+    public let distinctBehaviorDayCount: Int
+    public let nonOverlappingWindowCount: Int
 
     public var firstDate: Date? { usableDates.first }
     public var lastDate: Date? { usableDates.last }
     public var missingDays: Int { gaps.reduce(0) { $0 + $1.dayCount } }
+    public var outputDayCount: Int { usableDates.count + outputDaysWithoutCompleteInput }
 
-    init(observations: [AnalysisObservation], outputDays: Int, calendar: Calendar) {
+    init(observations: [AnalysisObservation], outputDates: [Date], calendar: Calendar) {
         usableDates = observations.map(\.outputDate)
-        outputDaysWithoutCompleteInput = outputDays - usableDates.count
+        let usable = Set(usableDates)
+        outputDatesWithoutCompleteInput = outputDates.filter { !usable.contains($0) }
+        outputDaysWithoutCompleteInput = outputDatesWithoutCompleteInput.count
+        var distinctDays: Set<Date> = []
+        let windows = observations.compactMap { observation -> ClosedRange<Date>? in
+            guard let input = observation.inputs.first else { return nil }
+            distinctDays.formUnion(input.days.map(\.date))
+            return input.date...(input.days.last?.date ?? input.date)
+        }.sorted { $0.upperBound < $1.upperBound }
+        distinctBehaviorDayCount = distinctDays.count
+        var lastEnd = Date.distantPast
+        nonOverlappingWindowCount = windows.reduce(into: 0) { count, window in
+            if window.lowerBound > lastEnd {
+                count += 1
+                lastEnd = window.upperBound
+            }
+        }
         gaps = zip(usableDates, usableDates.dropFirst()).compactMap { earlier, later in
             guard let earlierDay = calendar.ordinality(of: .day, in: .era, for: earlier),
                   let laterDay = calendar.ordinality(of: .day, in: .era, for: later),
@@ -125,10 +182,9 @@ extension HealthAnalysisApplication {
         _ configuration: AnalysisConfiguration, asOf: Date = .now
     ) throws(AnalysisRunFailure) -> AnalysisResult {
         let series = configuration.inputs + configuration.adjustmentInputs
-        guard case .health(let metric, let sourceID) = configuration.output, metric == .restingHeartRate,
-              !configuration.inputs.isEmpty, Set(series).count == series.count,
-              configuration.behaviorWindow == .precedingDay,
-              configuration.history == .fullHistory else { throw .unsupportedConfiguration }
+        guard case .health(let metric, let sourceID) = configuration.output,
+              metric == .restingHeartRate || metric == .sleepAnalysis,
+              !configuration.inputs.isEmpty, Set(series).count == series.count else { throw .unsupportedConfiguration }
         guard manualLog.isStoreAvailable else { throw .manualLogUnavailable }
         let availableQuantities = Dictionary(uniqueKeysWithValues: analysisNumericQuantities.map { ($0.id, $0) })
         var quantities: [TrackingQuantity] = []
@@ -151,19 +207,27 @@ extension HealthAnalysisApplication {
             lastReadFailure = nil
         }
 
-        let records = healthMeasurements.history.filter {
-            $0.metric == metric && $0.unit == .beatsPerMinute && $0.value.isFinite && $0.value > 0
-                && $0.startDate <= $0.endDate && $0.endDate <= asOf
-        }
-        let outputSourceID = sourceID ?? healthMeasurements.preferredSource(for: metric)?.bundleIdentifier
-        let sources = Set(records.map(\.source.bundleIdentifier))
-        guard outputSourceID != nil || sources.count <= 1 else { throw .chooseOutputSource }
-        let outputRecords = records.filter { outputSourceID == nil || $0.source.bundleIdentifier == outputSourceID }
-
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = configuration.timeZone
-        let dataset = DailyQuantityDataset(
-            records: outputRecords, quantities: quantities, manualLog: manualLog, calendar: calendar
+        let outputs: [TemporalAnalysisDataset.Output]
+        if metric == .sleepAnalysis {
+            let episodes = healthMeasurements.deriveSleepEpisodes(
+                from: healthMeasurements.history.filter { $0.metric == .sleepAnalysis && $0.endDate <= asOf }
+            )
+            outputs = TemporalAnalysisDataset.sleepDurationOutputs(episodes, asOf: asOf, calendar: calendar)
+        } else {
+            outputs = TemporalAnalysisDataset.restingHeartRateOutputs(
+                healthMeasurements.history, asOf: asOf, calendar: calendar
+            )
+        }
+        let outputSourceID = sourceID ?? healthMeasurements.preferredSource(for: metric)?.bundleIdentifier
+        let sources = Set(outputs.map(\.source.bundleIdentifier))
+        guard outputSourceID != nil || sources.count <= 1 else { throw .chooseOutputSource }
+        let selectedOutputs = outputs.filter { outputSourceID == nil || $0.source.bundleIdentifier == outputSourceID }
+
+        let dataset = TemporalAnalysisDataset(
+            outputs: selectedOutputs, quantities: quantities, manualLog: manualLog,
+            window: configuration.behaviorWindow, history: configuration.history, asOf: asOf, calendar: calendar
         )
         let modeledInputs = quantities.enumerated().map { index, quantity in
             AnalysisModeledInput(
@@ -173,7 +237,8 @@ extension HealthAnalysisApplication {
             )
         }
         let assessment = NumericAnalysis.assess(
-            dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar
+            dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar,
+            behaviorWindow: configuration.behaviorWindow, practicalDifference: metric == .sleepAnalysis ? 0.25 : 1
         )
         return AnalysisResult(
             configuration: configuration,
@@ -187,47 +252,5 @@ extension HealthAnalysisApplication {
             estimates: assessment.estimates,
             evidence: assessment.evidence
         )
-    }
-}
-
-private struct DailyQuantityDataset {
-    let observations: [AnalysisObservation]
-    let coverage: AnalysisCoverage
-    let outputSource: HealthMeasurement.Source?
-
-    @MainActor init(
-        records: [HealthMeasurement], quantities: [TrackingQuantity], manualLog: ManualLog, calendar: Calendar
-    ) {
-        var dailyOutputs: [Date: HealthMeasurement] = [:]
-        for record in records {
-            let date = calendar.startOfDay(for: record.startDate)
-            if let existing = dailyOutputs[date],
-               (existing.startDate, existing.endDate, existing.id.uuidString)
-                <= (record.startDate, record.endDate, record.id.uuidString) {
-                continue
-            }
-            dailyOutputs[date] = record
-        }
-
-        observations = dailyOutputs.keys.sorted().compactMap { date -> AnalysisObservation? in
-            guard let record = dailyOutputs[date],
-                  let preceding = calendar.dateInterval(of: .day, for: date.addingTimeInterval(-1))?.start else {
-                return nil
-            }
-            let inputDay = ManualLogDay(preceding, timeZone: calendar.timeZone)
-            var inputs: [AnalysisObservation.Input] = []
-            for quantity in quantities {
-                guard let (amount, origin) = manualLog.analysisValue(for: quantity, on: inputDay) else { return nil }
-                let value = NSDecimalNumber(decimal: amount).doubleValue
-                guard value.isFinite, quantity.unit.lowercased() != "mg" || value >= 0 else { return nil }
-                inputs.append(.init(series: .manualQuantity(quantity.id), date: preceding, value: value, origin: origin))
-            }
-            return AnalysisObservation(
-                outputDate: date, outputAnchor: record.startDate, outputValue: record.value,
-                inputs: inputs
-            )
-        }
-        coverage = AnalysisCoverage(observations: observations, outputDays: dailyOutputs.count, calendar: calendar)
-        outputSource = observations.last.flatMap { dailyOutputs[$0.outputDate]?.source }
     }
 }

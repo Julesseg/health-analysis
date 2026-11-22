@@ -75,9 +75,13 @@ struct HealthMeasurementHistoryView: View {
                         HealthMeasurementRow(measurement: measurement)
                     }
                 }
-            } else if history.preferredSource(for: metric) != nil {
+            } else if history.hasReadableRecords || history.preferredSource(for: metric) != nil {
                 Section("History") {
-                    Text("No imported measurements for this source.")
+                    if history.preferredSource(for: metric) == nil {
+                        Text("No imported resting heart rate measurements")
+                    } else {
+                        Text("No imported measurements for this source.")
+                    }
                 }
             }
         }
@@ -96,14 +100,14 @@ struct HealthAccessAndSourcesView: View {
     var body: some View {
         List {
             Section {
-                Text("Health Analysis reads resting heart rate to show your measurements over time.")
+                Text("Health Analysis reads your resting heart rate, workouts, and workout distance to show your history over time.")
                 Button("Request read access") {
                     Task { await history.requestAccessAndRefresh() }
                 }
                 .disabled(history.readState == .loading)
                 HealthReadStatus(history: history, showsInitialState: false)
             }
-            Section("Imported sources") {
+            Section("Resting heart rate sources") {
                 if sources.isEmpty {
                     Text("No imported sources")
                 }

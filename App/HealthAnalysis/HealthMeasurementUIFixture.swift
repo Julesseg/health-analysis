@@ -9,13 +9,14 @@ enum HealthMeasurementUIFixture: String {
 
     static func configurationForLaunch() -> (source: any HealthMeasurementSource, storeURL: URL)? {
         let environment = ProcessInfo.processInfo.environment
-        guard let name = environment["HEALTH_MEASUREMENT_UI_FIXTURE"],
-              let fixture = Self(rawValue: name) else { return nil }
+        guard let name = environment["HEALTH_MEASUREMENT_UI_FIXTURE"] else { return nil }
         let id = environment["HEALTH_MEASUREMENT_UI_FIXTURE_STORE"].flatMap(UUID.init(uuidString:)) ?? UUID()
         let url = URL.temporaryDirectory
             .appending(path: "HealthMeasurementUITests", directoryHint: .isDirectory)
             .appending(path: id.uuidString, directoryHint: .isDirectory)
             .appending(path: "measurements.json", directoryHint: .notDirectory)
+        if name == "workouts" { return (WorkoutUIFixture(), url) }
+        guard let fixture = Self(rawValue: name) else { return nil }
         return (Source(fixture: fixture), url)
     }
 

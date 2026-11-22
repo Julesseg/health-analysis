@@ -42,24 +42,32 @@ final class TypedManualLogUITests: XCTestCase {
 
         app.navigationBars["Settings"].buttons["Close"].tap()
         app.buttons["Log"].tap()
-        XCTAssertTrue(app.steppers["Alcohol servings"].waitForExistence(timeout: 5))
+        let servings = named("Alcohol servings", in: app.steppers)
+        let energy = named("Energy", in: app.steppers)
+        XCTAssertTrue(servings.waitForExistence(timeout: 5))
         assertValues(count: "2", medication: "0", rating: "3", location: "Indoors", in: app)
 
         app.buttons["Previous day"].tap()
-        app.steppers["Alcohol servings"].buttons["Decrement"].tap()
+        servings.buttons["Decrement"].tap()
         app.switches["Took medication"].tap()
-        app.steppers["Energy"].buttons["Increment"].tap()
-        let location = app.buttons["Workout location"]
+        energy.buttons["Increment"].tap()
+        let location = named("Workout location", in: app.buttons)
         location.tap()
         XCTAssertFalse(app.buttons["Unknown"].exists)
         XCTAssertFalse(app.staticTexts["Unknown"].exists)
         app.buttons["Outdoors"].tap()
         assertValues(count: "1", medication: "1", rating: "4", location: "Outdoors", in: app)
 
+        let confirm = app.buttons["Confirm day"]
+        for _ in 0..<3 where !confirm.isHittable { app.swipeUp() }
+        XCTAssertTrue(confirm.isHittable)
+        confirm.tap()
+        XCTAssertTrue(app.staticTexts["Day reviewed"].waitForExistence(timeout: 5))
+
         app.terminate()
         app.launch()
         app.buttons["Log"].tap()
-        XCTAssertTrue(app.steppers["Alcohol servings"].waitForExistence(timeout: 5))
+        XCTAssertTrue(servings.waitForExistence(timeout: 5))
         assertValues(count: "2", medication: "0", rating: "3", location: "Indoors", in: app)
         app.buttons["Previous day"].tap()
         assertValues(count: "1", medication: "1", rating: "4", location: "Outdoors", in: app)
@@ -87,9 +95,14 @@ final class TypedManualLogUITests: XCTestCase {
 
     @MainActor
     private func assertValues(count: String, medication: String, rating: String, location: String, in app: XCUIApplication) {
-        XCTAssertEqual(app.steppers["Alcohol servings"].value as? String, count)
+        XCTAssertEqual(named("Alcohol servings", in: app.steppers).value as? String, count)
         XCTAssertEqual(app.switches["Took medication"].value as? String, medication)
-        XCTAssertEqual(app.steppers["Energy"].value as? String, rating)
-        XCTAssertEqual(app.buttons["Workout location"].value as? String, location)
+        XCTAssertEqual(named("Energy", in: app.steppers).value as? String, rating)
+        XCTAssertEqual(named("Workout location", in: app.buttons).value as? String, location)
+    }
+
+    @MainActor
+    private func named(_ label: String, in query: XCUIElementQuery) -> XCUIElement {
+        query.matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", label, "\(label), ")).firstMatch
     }
 }

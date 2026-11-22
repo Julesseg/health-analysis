@@ -5,7 +5,6 @@ import SwiftUI
 struct ExploreResultView: View {
     let application: HealthAnalysisApplication
     let configuration: AnalysisConfiguration
-    let inputName: String
 
     @State private var run: Result<AnalysisResult, AnalysisRunFailure>?
 
@@ -17,6 +16,7 @@ struct ExploreResultView: View {
             case .success(let result):
                 findings(result)
                 evidence(result)
+                modeledInputs(result)
                 coverage(result)
             case .failure(let failure):
                 Section {
@@ -37,38 +37,41 @@ struct ExploreResultView: View {
 
     @ViewBuilder
     private func findings(_ result: AnalysisResult) -> some View {
-        Section {
-            if let estimate = result.estimates.first {
-                Text(estimate.finding.description(isSleepDuration: isSleepDuration))
-                    .font(.headline)
-                Group {
-                    if isSleepDuration {
-                        Text("\(estimate.difference * 60, format: estimateNumber) minutes per \(estimate.inputIncrement, format: .number) mg more caffeine")
-                    } else {
-                        Text("\(estimate.difference, format: estimateNumber) bpm per \(estimate.inputIncrement, format: .number) mg more caffeine")
-                    }
-                }
-                .monospacedDigit()
-                LabeledContent("Dependence-adjusted interval") {
-                    Text(intervalLabel(estimate, isSleepDuration: isSleepDuration))
-                }
-                .accessibilityIdentifier("explore.uncertainty")
-                EstimateChart(estimate: estimate, isSleepDuration: isSleepDuration)
-                if estimate.finding == .nearZero {
-                    Group {
-                        if isSleepDuration {
-                            Text("The full interval is within 15 minutes of zero per 100 mg of caffeine.")
-                        } else {
-                            Text("The full interval is within 1 bpm of zero per 100 mg of caffeine.")
-                        }
-                    }
-                    .foregroundStyle(.secondary)
-                }
-            } else {
+        if result.estimates.isEmpty {
+            Section {
                 Text("There isn’t enough evidence to estimate this association.")
                     .font(.headline)
             }
-            if result.lastHealthReadFailure != nil {
+        }
+        ForEach(Array(result.estimates.enumerated()), id: \.element.input) { index, estimate in
+            if let input = result.modeledInputs.first(where: { $0.series == estimate.input }) {
+                Section {
+                    Text(estimate.finding.description(isSleepDuration: isSleepDuration))
+                        .font(.headline)
+                    EstimateDifference(estimate: estimate, input: input, isSleepDuration: isSleepDuration)
+                        .monospacedDigit()
+                    LabeledContent("Dependence-adjusted interval") {
+                        Text(intervalLabel(estimate, isSleepDuration: isSleepDuration))
+                    }
+                    .accessibilityIdentifier(index == 0 ? "explore.uncertainty" : "explore.uncertainty.\(index)")
+                    EstimateChart(estimate: estimate, input: input, isSleepDuration: isSleepDuration)
+                        .accessibilityIdentifier(index == 0 ? "explore.estimateChart" : "explore.estimateChart.\(index)")
+                    if estimate.finding == .nearZero {
+                        Text(isSleepDuration
+                            ? "The full interval is within 15 minutes of zero for the reported increment."
+                            : "The full interval is within 1 bpm of zero for the reported increment.")
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    switch input.role {
+                    case .input: Text(input.name)
+                    case .adjustment: Text("Account for · \(input.name)")
+                    }
+                }
+            }
+        }
+        if result.lastHealthReadFailure != nil {
+            Section {
                 Text("The latest Health check failed. This analysis uses earlier imported measurements.")
                     .foregroundStyle(.secondary)
             }
@@ -80,14 +83,46 @@ struct ExploreResultView: View {
             LabeledContent("Confidence") {
                 Text(result.evidence.grade.description)
             }
+            LabeledContent("Model") {
+                Text(result.model.description)
+            }
             ForEach(result.evidence.reasons, id: \.self) { reason in
                 Text(reason.description(isSleepDuration: isSleepDuration))
+                ForEach(result.modeledInputs.filter { reason.affectedInputs.contains($0.series) }) { input in
+                    Text("\(input.name) (\(input.unit))")
+                }
             }
             if let days = result.evidence.dependenceLagDays {
                 Text("The interval allows for dependence across up to \(days) calendar days.")
             }
-            Text("This comparison uses one input. Other variables may also be associated with the output.")
+            if result.modeledInputs.count > 1 {
+                Text("Each estimate accounts for the other modeled inputs and has its own uncertainty interval.")
+                    .foregroundStyle(.secondary)
+            }
+            Text("Other variables may also be associated with this output.")
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private func modeledInputs(_ result: AnalysisResult) -> some View {
+        Section {
+            ForEach(result.modeledInputs) { input in
+                LabeledContent {
+                    Text(input.defaultDayCount, format: .number)
+                } label: {
+                    VStack(alignment: .leading) {
+                        Text("\(input.name) (\(input.unit))")
+                        Text(input.role == .input ? "Input" : "Adjustment input")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityValue(Text("\(input.defaultDayCount) paired days using a default"))
+            }
+        } header: {
+            Text("Modeled inputs")
+        } footer: {
+            Text("Quantities come from the daily log. Counts show paired days using a default for each input.")
         }
     }
 
@@ -97,20 +132,20 @@ struct ExploreResultView: View {
             LabeledContent("Paired days") {
                 Text(result.coverage.usableDates.count, format: .number)
             }
-            if let first = result.coverage.firstDate, let last = result.coverage.lastDate {
-                LabeledContent("Usable history") {
-                    AnalysisDateRange(first: first, last: last, timeZone: configuration.timeZone)
-                }
-                LabeledContent("Days without a usable pair in this range") {
-                    Text(result.coverage.missingDays, format: .number)
-                }
-            }
             if result.configuration.behaviorWindow != .precedingDay {
                 LabeledContent("Distinct behavior days") {
                     Text(result.coverage.distinctBehaviorDayCount, format: .number)
                 }
                 LabeledContent("Nonoverlapping windows") {
                     Text(result.coverage.nonOverlappingWindowCount, format: .number)
+                }
+            }
+            if let first = result.coverage.firstDate, let last = result.coverage.lastDate {
+                LabeledContent("Usable history") {
+                    AnalysisDateRange(first: first, last: last, timeZone: configuration.timeZone)
+                }
+                LabeledContent("Days without a usable pair in this range") {
+                    Text(result.coverage.missingDays, format: .number)
                 }
             }
             LabeledContent("Paired days using a default") {
@@ -122,7 +157,7 @@ struct ExploreResultView: View {
                 }
             }
             NavigationLink("Usable dates and gaps") {
-                ExploreCoverageView(result: result, inputName: inputName)
+                ExploreCoverageView(result: result)
             }
             measurementsLink
         }
@@ -145,16 +180,37 @@ struct ExploreResultView: View {
     }
 }
 
+private struct EstimateDifference: View {
+    let estimate: AnalysisEstimate
+    let input: AnalysisModeledInput
+    let isSleepDuration: Bool
+
+    var body: some View {
+        if isSleepDuration {
+            Text("\(estimate.difference * 60, format: estimateNumber) minutes per \(estimate.inputIncrement, format: .number) \(input.unit) increase")
+        } else {
+            Text("\(estimate.difference, format: estimateNumber) bpm per \(estimate.inputIncrement, format: .number) \(input.unit) increase")
+        }
+    }
+}
+
 private struct EstimateChart: View {
     let estimate: AnalysisEstimate
+    let input: AnalysisModeledInput
     let isSleepDuration: Bool
 
     private var scale: Double { isSleepDuration ? 60 : 1 }
     private var lower: Double { estimate.interval.lowerBound * scale }
     private var upper: Double { estimate.interval.upperBound * scale }
-    private var difference: Double { estimate.difference * scale }
     private var axisLabel: LocalizedStringKey {
         isSleepDuration ? "Difference in sleep duration (minutes)" : "Difference in resting heart rate (bpm)"
+    }
+
+    private var domain: ClosedRange<Double> {
+        let first = min(0, lower)
+        let last = max(0, upper)
+        let padding = (last - first) * 0.1
+        return (first - padding)...(last + padding)
     }
 
     var body: some View {
@@ -165,49 +221,42 @@ private struct EstimateChart: View {
             RuleMark(
                 xStart: .value("Lower limit", lower),
                 xEnd: .value("Upper limit", upper),
-                y: .value("Estimate", "Caffeine")
+                y: .value("Estimate", input.name)
             )
             .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round))
             .foregroundStyle(Color.accentColor)
             PointMark(
-                x: .value("Estimated difference", difference),
-                y: .value("Estimate", "Caffeine")
+                x: .value("Estimated difference", estimate.difference * scale),
+                y: .value("Estimate", input.name)
             )
             .foregroundStyle(Color.accentColor)
         }
-        .chartXScale(domain: min(-1, lower)...max(1, upper))
+        .chartXScale(domain: domain)
         .chartXAxisLabel(axisLabel, position: .bottom, alignment: .center)
         .chartYAxis(.hidden)
         .frame(height: 95)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Estimated difference and uncertainty")
+        .accessibilityLabel("Estimated difference and uncertainty for \(input.name)")
         .accessibilityValue(accessibilityValue)
-        .accessibilityIdentifier("explore.estimateChart")
     }
 
     private var accessibilityValue: Text {
         let interval = intervalLabel(estimate, isSleepDuration: isSleepDuration)
         if isSleepDuration {
-            return Text("\(difference, format: estimateNumber) minutes. Dependence-adjusted interval \(interval).")
+            return Text("\(estimate.difference * scale, format: estimateNumber) minutes. Dependence-adjusted interval \(interval).")
         }
-        return Text("\(difference, format: estimateNumber) beats per minute. Dependence-adjusted interval \(interval).")
+        return Text("\(estimate.difference, format: estimateNumber) beats per minute. Dependence-adjusted interval \(interval).")
     }
 }
 
 private struct ExploreCoverageView: View {
     let result: AnalysisResult
-    let inputName: String
 
     private var timeZone: TimeZone { result.configuration.timeZone }
 
     var body: some View {
         List {
             Section("Question") {
-                LabeledContent {
-                    Text(inputName)
-                } label: {
-                    Text("Caffeine quantity")
-                }
                 LabeledContent("Output") {
                     Text(result.configuration.output.isSleepDuration ? "Sleep duration" : "Resting heart rate")
                 }
@@ -225,15 +274,15 @@ private struct ExploreCoverageView: View {
                     }
                 }
                 if result.configuration.output.isSleepDuration {
-                    Text("Each recorded wake date uses its longest completed sleep episode. The caffeine window uses complete days before the episode began.")
+                    Text("Each recorded wake date uses its longest completed sleep episode. Each input uses complete days before the episode began.")
                 } else {
-                    Text("The caffeine window uses complete local days before the resting heart rate sample began.")
+                    Text("Each input uses complete local days before the resting heart rate sample began.")
                 }
                 if result.configuration.behaviorWindow != .precedingDay {
-                    Text("Caffeine amounts are added across the selected window.")
+                    Text("Each quantity is totaled across the selected window.")
                 }
                 if result.configuration.history != .fullHistory {
-                    Text("History limits output dates. Earlier caffeine can still complete a window.")
+                    Text("History limits output dates. Earlier inputs can still complete a window.")
                 }
             }
 
@@ -313,10 +362,10 @@ private extension AnalysisSeriesID {
 private extension AnalysisEstimate.Finding {
     func description(isSleepDuration: Bool) -> LocalizedStringKey {
         switch (self, isSleepDuration) {
-        case (.higher, false): "Higher caffeine amounts were associated with higher resting heart rate."
-        case (.lower, false): "Higher caffeine amounts were associated with lower resting heart rate."
-        case (.higher, true): "Higher caffeine amounts were associated with longer sleep."
-        case (.lower, true): "Higher caffeine amounts were associated with shorter sleep."
+        case (.higher, false): "Higher values were associated with higher resting heart rate."
+        case (.lower, false): "Higher values were associated with lower resting heart rate."
+        case (.higher, true): "Higher values were associated with longer sleep."
+        case (.lower, true): "Higher values were associated with shorter sleep."
         case (.nearZero, _): "The estimated association was close to zero."
         case (.uncertain, _): "The association is uncertain."
         }
@@ -333,24 +382,45 @@ private extension AnalysisEvidence.Grade {
     }
 }
 
+private extension AnalysisModel {
+    var description: LocalizedStringKey {
+        switch self {
+        case .caffeineLinearV1: "Single-input linear association"
+        case .numericLinearV1: "Numeric linear regression"
+        }
+    }
+}
+
 private extension AnalysisEvidence.Reason {
     func description(isSleepDuration: Bool) -> LocalizedStringKey {
         switch self {
         case .inadequateCoverage: "This comparison needs at least 42 paired days."
+        case .inadequateJointCoverage(let days): "This model needs at least \(days) paired days."
         case .limitedNonOverlappingWindows: "This comparison needs at least six windows that share no behavior days."
         case .overlappingBehaviorWindows: "Some windows share behavior days, which limits confidence in this result."
-        case .noObservedInputs: "Every caffeine day in the paired windows comes from a default."
-        case .limitedInputVariation: "Caffeine amounts varied too little across paired days."
+        case .noObservedInputs: "Every day in the paired input windows comes from a default."
+        case .limitedInputVariation: "The input varied too little across paired days."
         case .uncertaintyUnavailable: "The paired values could not support a usable uncertainty interval."
         case .limitedHistory: "The analysis uses fewer than 90 paired days."
         case .sparseCoverage: "Fewer than three quarters of days in the usable history had a pair."
-        case .manyDefaults: "More than one quarter of paired days used an assumed caffeine amount."
+        case .manyDefaults: "More than one quarter of paired days used at least one assumed input."
         case .wideInterval:
             isSleepDuration
-                ? "The uncertainty interval spans more than 30 minutes per 100 mg of caffeine."
-                : "The uncertainty interval spans more than 2 bpm per 100 mg of caffeine."
-        case .indeterminateInterval: "The interval is compatible with a near-zero association and with a larger difference."
+                ? "The uncertainty interval spans more than 30 minutes for the reported increment."
+                : "The uncertainty interval spans more than 2 bpm for the reported increment."
+        case .indeterminateInterval: "An interval includes zero and allows differences away from zero."
         case .adequateCoverageAndPrecision: "The analysis has at least 90 paired days, good overlap, limited default use, and a narrow interval."
+        case .adjustedModelLimitations: "Evidence is limited to this history and the variables included in the model."
+        case .collinearInputs: "These inputs vary together too closely to estimate their separate associations."
+        case .defaultOnlyInputs: "These inputs only have defaults on paired days."
+        case .lowVariationInputs: "These inputs vary too little on paired days."
+        }
+    }
+
+    var affectedInputs: Set<AnalysisSeriesID> {
+        switch self {
+        case .collinearInputs(let inputs), .defaultOnlyInputs(let inputs), .lowVariationInputs(let inputs): inputs
+        default: []
         }
     }
 }
@@ -359,7 +429,7 @@ private extension AnalysisRunFailure {
     var description: LocalizedStringKey {
         switch self {
         case .unsupportedConfiguration: "This analysis configuration is unavailable."
-        case .inputUnavailable: "The selected caffeine quantity is unavailable."
+        case .inputUnavailable: "A selected quantity is unavailable."
         case .manualLogUnavailable: "Couldn’t open the daily log."
         case .chooseOutputSource: "Choose a preferred source for this output in Health measurements."
         case .healthHistoryUnavailable: "Couldn’t use Health history. Check Health measurements and try again."

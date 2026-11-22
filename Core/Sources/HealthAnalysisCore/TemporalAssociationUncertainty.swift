@@ -2,15 +2,14 @@ import Foundation
 
 enum TemporalAssociationUncertainty {
     static func assess(
-        scores: [Double], residuals: [Double], dayNumbers: [Int], windowDays: Int, degreesOfFreedom: Int
+        scores: [Double], residuals: [Double], dayNumbers: [Int], windowDays: Int, parameterCount: Int
     ) -> (scoreHalfWidth: Double, lagDays: Int) {
         let count = scores.count
-        let baselineLag = max(7, windowDays - 1, Int(ceil(2 * pow(Double(count), 1.0 / 3.0))))
-        let correction = Double(count) / Double(degreesOfFreedom)
+        let baselineLag = max(windowDays - 1, CalendarHAC.defaultLagDays(for: count))
         func scoreHalfWidth(at lag: Int) -> Double {
-            let bandwidth = Double(lag + 1) / Double(count)
-            let criticalValue = 1.96 + bandwidth * (2.9694 + bandwidth * (0.4160 - 0.5324 * bandwidth))
-            return criticalValue * sqrt(correction * bartlettSum(scores, dayNumbers: dayNumbers, lag: lag))
+            CalendarHAC.halfWidth(
+                scores: scores, dayNumbers: dayNumbers, lagDays: lag, parameterCount: parameterCount
+            )
         }
         let baselineWidth = scoreHalfWidth(at: baselineLag)
         guard hasSerialDependence(residuals, dayNumbers: dayNumbers) else {
@@ -40,30 +39,5 @@ enum TemporalAssociationUncertainty {
             let correlation = abs(products) / (sqrt(priorSquares) * sqrt(currentSquares))
             return correlation > max(0.2, 3 / sqrt(Double(pairs)))
         }
-    }
-
-    private static func bartlettSum(_ scores: [Double], dayNumbers: [Int], lag: Int) -> Double {
-        // Two scores share lag + 1 - distance terms in the sum of squared rolling scores.
-        var entered = 0
-        var expired = 0
-        var day = dayNumbers[0]
-        var rolling = 0.0
-        var sum = 0.0
-        while expired < scores.count {
-            let start = entered < scores.count ? dayNumbers[entered] : Int.max
-            let end = dayNumbers[expired] + lag + 1
-            let next = min(start, end)
-            sum += Double(next - day) * rolling * rolling
-            if next == end {
-                rolling -= scores[expired]
-                expired += 1
-            }
-            if next == start {
-                rolling += scores[entered]
-                entered += 1
-            }
-            day = next
-        }
-        return sum / Double(lag + 1)
     }
 }

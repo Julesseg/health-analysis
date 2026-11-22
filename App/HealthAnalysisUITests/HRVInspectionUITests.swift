@@ -35,8 +35,9 @@ final class HRVInspectionUITests: XCTestCase {
         record.tap()
 
         XCTAssertTrue(app.staticTexts["42 milliseconds"].waitForExistence(timeout: 5))
-        let sourceVersion = app.staticTexts["1.2"]
+        let sourceVersion = app.descendants(matching: .any)["hrv.record.sourceVersion"].firstMatch
         for _ in 0..<3 where !sourceVersion.isHittable { app.swipeUp() }
         XCTAssertTrue(sourceVersion.isHittable)
+        XCTAssertEqual(sourceVersion.value as? String, "1.2")
     }
 }

@@ -139,6 +139,10 @@ private struct HRVRecordView: View {
                 LabeledContent("Source") { Text(verbatim: record.source.name) }
                 LabeledContent("Bundle identifier") { Text(verbatim: record.source.bundleIdentifier) }
                 LabeledContent("Source version") { metadata(record.sourceRevision?.version) }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(Text("Source version"))
+                    .accessibilityValue(metadata(record.sourceRevision?.version))
+                    .accessibilityIdentifier("hrv.record.sourceVersion")
                 LabeledContent("Source product type") { metadata(record.sourceRevision?.productType) }
                 LabeledContent("Source OS version") {
                     let version = record.sourceRevision?.operatingSystemVersion

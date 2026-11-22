@@ -72,6 +72,8 @@ public struct AnalysisObservation: Identifiable, Sendable {
         public let origin: ManualValueOrigin
         public let days: [Day]
 
+        var hasObservedDay: Bool { origin == .observation || days.contains { $0.origin == .observation } }
+
         init(series: AnalysisSeriesID, date: Date, value: Double, origin: ManualValueOrigin, days: [Day] = []) {
             self.series = series
             self.date = date
@@ -147,6 +149,8 @@ public struct AnalysisResult: Sendable {
     public let lastHealthReadFailure: HealthMeasurementReadFailure?
     public let observations: [AnalysisObservation]
     public let coverage: AnalysisCoverage
+    public let model: AnalysisModel
+    public let modeledInputs: [AnalysisModeledInput]
     public let estimates: [AnalysisEstimate]
     public let evidence: AnalysisEvidence
 }
@@ -162,19 +166,32 @@ public enum AnalysisRunFailure: Error, Equatable {
 
 extension HealthAnalysisApplication {
     @MainActor public var analysisCaffeineQuantities: [TrackingQuantity] {
-        manualLog.quantities.filter { $0.unit.lowercased() == "mg" }
+        analysisNumericQuantities.filter { $0.unit.lowercased() == "mg" }
+    }
+
+    @MainActor public var analysisNumericQuantities: [TrackingQuantity] {
+        manualLog.quantities
+    }
+
+    @MainActor public func analysisAdjustmentSuggestions(excluding inputIDs: [UUID]) -> [TrackingQuantity] {
+        let selected = Set(inputIDs)
+        return analysisNumericQuantities.filter { !selected.contains($0.id) }
     }
 
     @MainActor public func analyze(
         _ configuration: AnalysisConfiguration, asOf: Date = .now
     ) throws(AnalysisRunFailure) -> AnalysisResult {
+        let series = configuration.inputs + configuration.adjustmentInputs
         guard case .health(let metric, let sourceID) = configuration.output,
               metric == .restingHeartRate || metric == .sleepAnalysis,
-              configuration.inputs.count == 1, case .manualQuantity(let quantityID) = configuration.inputs[0],
-              configuration.adjustmentInputs.isEmpty else { throw .unsupportedConfiguration }
+              !configuration.inputs.isEmpty, Set(series).count == series.count else { throw .unsupportedConfiguration }
         guard manualLog.isStoreAvailable else { throw .manualLogUnavailable }
-        guard let quantity = analysisCaffeineQuantities.first(where: { $0.id == quantityID }) else {
-            throw .inputUnavailable
+        let availableQuantities = Dictionary(uniqueKeysWithValues: analysisNumericQuantities.map { ($0.id, $0) })
+        var quantities: [TrackingQuantity] = []
+        for input in series {
+            guard case .manualQuantity(let quantityID) = input else { throw .unsupportedConfiguration }
+            guard let quantity = availableQuantities[quantityID] else { throw .inputUnavailable }
+            quantities.append(quantity)
         }
 
         let lastReadAt = healthMeasurements.lastSuccessfulReadAt
@@ -209,11 +226,18 @@ extension HealthAnalysisApplication {
         let selectedOutputs = outputs.filter { outputSourceID == nil || $0.source.bundleIdentifier == outputSourceID }
 
         let dataset = TemporalAnalysisDataset(
-            outputs: selectedOutputs, quantities: [quantity], manualLog: manualLog,
+            outputs: selectedOutputs, quantities: quantities, manualLog: manualLog,
             window: configuration.behaviorWindow, history: configuration.history, asOf: asOf, calendar: calendar
         )
-        let assessment = NumericAssociation.assess(
-            dataset.observations, coverage: dataset.coverage, calendar: calendar,
+        let modeledInputs = quantities.enumerated().map { index, quantity in
+            AnalysisModeledInput(
+                series: .manualQuantity(quantity.id), name: quantity.name, unit: quantity.unit,
+                role: index < configuration.inputs.count ? .input : .adjustment,
+                defaultDayCount: dataset.observations.count { $0.inputs[index].origin != .observation }
+            )
+        }
+        let assessment = NumericAnalysis.assess(
+            dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar,
             behaviorWindow: configuration.behaviorWindow, practicalDifference: metric == .sleepAnalysis ? 0.25 : 1
         )
         return AnalysisResult(
@@ -223,7 +247,9 @@ extension HealthAnalysisApplication {
             lastHealthReadFailure: lastReadFailure,
             observations: dataset.observations,
             coverage: dataset.coverage,
-            estimates: assessment.estimate.map { [$0] } ?? [],
+            model: assessment.model,
+            modeledInputs: modeledInputs,
+            estimates: assessment.estimates,
             evidence: assessment.evidence
         )
     }

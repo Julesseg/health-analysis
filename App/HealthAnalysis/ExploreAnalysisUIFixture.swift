@@ -16,10 +16,14 @@ enum ExploreAnalysisUIFixture {
             let next = calendar.date(byAdding: .day, value: 1, to: inputDate)!
             let outputDate = calendar.date(byAdding: .hour, value: 9, to: next)!
             let amount = 50 + (index % 5) * 50
+            let fluids = 1 + index % 3
+            let exercise = 15 + index % 13 * 5
+            let supplement = 50 + index % 11 * 10
             let bpm = 60 + Double(amount) / 50 + Double(index % 7 - 3) * 0.17
+                + Double(fluids) * 0.2 - Double(exercise) * 0.01 + Double(supplement) * 0.003
             return (
                 day: ManualLogDay(inputDate, timeZone: calendar.timeZone),
-                amount: amount,
+                amounts: [amount, fluids, exercise, supplement],
                 measurement: HealthMeasurement(
                     id: UUID(), metric: .restingHeartRate, value: bpm, unit: .beatsPerMinute,
                     startDate: outputDate, endDate: outputDate, source: source
@@ -27,12 +31,15 @@ enum ExploreAnalysisUIFixture {
             )
         }
         let application = HealthAnalysisApplication(healthSource: Source(records: days.map(\.measurement)))
-        let caffeine = try! application.manualLog.createQuantity(
-            name: "Caffeine", unit: "mg", defaultValue: 0, startsOn: days[0].day
-        )
+        let quantities = [("Caffeine", "mg"), ("Fluids", "L"), ("Exercise log", "min"), ("Supplement", "mg")]
+            .map { name, unit in
+                try! application.manualLog.createQuantity(name: name, unit: unit, defaultValue: 0, startsOn: days[0].day)
+            }
         let locale = Locale(identifier: "en_US")
         for day in days {
-            application.manualLog.editQuantity(caffeine.id, on: day.day, text: String(day.amount), locale: locale)
+            for (quantity, amount) in zip(quantities, day.amounts) {
+                application.manualLog.editQuantity(quantity.id, on: day.day, text: String(amount), locale: locale)
+            }
         }
         return application
     }

@@ -22,8 +22,9 @@ public struct AnalysisEvidence: Sendable {
         case moderate
     }
 
-    public enum Reason: Sendable {
+    public enum Reason: Codable, Hashable, Sendable {
         case inadequateCoverage
+        case inadequateJointCoverage(minimumDays: Int)
         case limitedNonOverlappingWindows
         case overlappingBehaviorWindows
         case noObservedInputs
@@ -35,6 +36,10 @@ public struct AnalysisEvidence: Sendable {
         case wideInterval
         case indeterminateInterval
         case adequateCoverageAndPrecision
+        case adjustedModelLimitations
+        case collinearInputs(Set<AnalysisSeriesID>)
+        case defaultOnlyInputs(Set<AnalysisSeriesID>)
+        case lowVariationInputs(Set<AnalysisSeriesID>)
     }
 
     public let grade: Grade
@@ -62,9 +67,7 @@ enum NumericAssociation {
         guard count >= 42 else { return insufficient(.inadequateCoverage) }
         guard coverage.nonOverlappingWindowCount >= 6 else { return insufficient(.limitedNonOverlappingWindows) }
         let hasObservedInput = observations.contains { observation in
-            observation.inputs.contains { input in
-                input.origin == .observation || input.days.contains { $0.origin == .observation }
-            }
+            observation.inputs.contains(where: \.hasObservedDay)
         }
         guard hasObservedInput else { return insufficient(.noObservedInputs) }
         let dayNumbers = observations.compactMap { calendar.ordinality(of: .day, in: .era, for: $0.outputDate) }
@@ -136,7 +139,7 @@ enum NumericAssociation {
         let slope = scaledSlope / inputScale
         let uncertainty = TemporalAssociationUncertainty.assess(
             scores: scores, residuals: residuals, dayNumbers: dayNumbers,
-            windowDays: windowDays, degreesOfFreedom: inputs.count - 2
+            windowDays: windowDays, parameterCount: 2
         )
         let halfWidth = uncertainty.scoreHalfWidth / (sumSquares * inputScale)
 

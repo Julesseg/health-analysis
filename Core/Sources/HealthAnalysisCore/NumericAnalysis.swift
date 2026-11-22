@@ -29,10 +29,14 @@ struct NumericAnalysis {
 
     static func assess(
         _ observations: [AnalysisObservation], inputs: [AnalysisModeledInput],
-        coverage: AnalysisCoverage, calendar: Calendar
+        coverage: AnalysisCoverage, calendar: Calendar,
+        behaviorWindow: AnalysisBehaviorWindow = .precedingDay, practicalDifference: Double = 1
     ) -> Self {
         if inputs.count == 1, inputs.first?.isMilligramQuantity == true {
-            let legacy = NumericAssociation.assess(observations, coverage: coverage, calendar: calendar)
+            let legacy = NumericAssociation.assess(
+                observations, coverage: coverage, calendar: calendar,
+                behaviorWindow: behaviorWindow, practicalDifference: practicalDifference
+            )
             return Self(model: .caffeineLinearV1, estimates: [legacy.estimate].compactMap { $0 }, evidence: legacy.evidence)
         }
 
@@ -51,6 +55,9 @@ struct NumericAnalysis {
         guard count >= minimumDays else {
             return result(.insufficient, [.inadequateJointCoverage(minimumDays: minimumDays)])
         }
+        guard coverage.nonOverlappingWindowCount >= 6 else {
+            return result(.insufficient, [.limitedNonOverlappingWindows])
+        }
         let dayNumbers = observations.compactMap { calendar.ordinality(of: .day, in: .era, for: $0.outputDate) }
         let lagDays = CalendarHAC.defaultLagDays(for: count)
         let columns = inputs.indices.map { index in observations.map { $0.inputs[index].value } }
@@ -62,9 +69,11 @@ struct NumericAnalysis {
                 let value = row.inputs[index]
                 return value.origin == .observation ? value.value : nil
             }
-            if observed.isEmpty {
+            let hasObservedDay = observations.contains { $0.inputs[index].hasObservedDay }
+            if !hasObservedDay {
                 defaultOnly.insert(input.series)
-            } else if !hasVariation(columns[index], input: input) || !hasVariation(observed, input: input) {
+            } else if observed.isEmpty || !hasVariation(columns[index], input: input)
+                        || !hasVariation(observed, input: input) {
                 lowVariation.insert(input.series)
             }
         }
@@ -78,7 +87,10 @@ struct NumericAnalysis {
         }
         let fit: LinearAssociationFit
         do {
-            fit = try LinearAssociationFit(columns: columns, outputs: outputs, dayNumbers: dayNumbers, lagDays: lagDays)
+            fit = try LinearAssociationFit(
+                columns: columns, outputs: outputs, dayNumbers: dayNumbers,
+                lagDays: lagDays, windowDays: behaviorWindow.dayCount
+            )
         } catch .dependentColumns(let indices) {
             return collinear(indices)
         } catch {
@@ -89,6 +101,7 @@ struct NumericAnalysis {
         guard collinearIndices.isEmpty else { return collinear(collinearIndices) }
 
         var estimates: [AnalysisEstimate] = []
+        var maximumLag = lagDays
         for (index, input) in inputs.enumerated() {
             var contrast = Array(repeating: 0.0, count: inputs.count)
             contrast[index] = input.inputIncrement
@@ -96,18 +109,20 @@ struct NumericAnalysis {
                 return result(.insufficient, [.uncertaintyUnavailable])
             }
             let interval = (estimate.difference - estimate.halfWidth)...(estimate.difference + estimate.halfWidth)
+            maximumLag = max(maximumLag, estimate.lagDays)
             estimates.append(AnalysisEstimate(
                 input: input.series, inputIncrement: input.inputIncrement,
                 difference: estimate.difference, interval: interval,
-                finding: finding(interval, nearZero: input.isMilligramQuantity ? 1 : nil)
+                finding: finding(interval, nearZero: input.isMilligramQuantity ? practicalDifference : nil)
             ))
         }
         limitations.append(.adjustedModelLimitations)
+        if coverage.nonOverlappingWindowCount < count { limitations.append(.overlappingBehaviorWindows) }
         if count < 90 { limitations.append(.limitedHistory) }
         if Double(count) / Double(count + coverage.missingDays) < 0.75 { limitations.append(.sparseCoverage) }
         if Double(defaultDays) / Double(count) > 0.25 { limitations.append(.manyDefaults) }
         if estimates.contains(where: { $0.finding == .uncertain }) { limitations.append(.indeterminateInterval) }
-        return result(.low, limitations, estimates: estimates, lagDays: lagDays)
+        return result(.low, limitations, estimates: estimates, lagDays: maximumLag)
     }
 
     private static func hasVariation(_ values: [Double], input: AnalysisModeledInput) -> Bool {

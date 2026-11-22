@@ -11,9 +11,10 @@ struct LinearAssociationFit {
     private let residuals: [Double]
     private let dayNumbers: [Int]
     private let lagDays: Int
+    private let windowDays: Int
     private let hasResidualVariation: Bool
 
-    init(columns: [[Double]], outputs: [Double], dayNumbers: [Int], lagDays: Int) throws(Failure) {
+    init(columns: [[Double]], outputs: [Double], dayNumbers: [Int], lagDays: Int, windowDays: Int = 1) throws(Failure) {
         guard !columns.isEmpty, outputs.count > columns.count + 1, dayNumbers.count == outputs.count,
               (0..<outputs.count).contains(lagDays),
               zip(dayNumbers, dayNumbers.dropFirst()).allSatisfy(<),
@@ -33,22 +34,34 @@ struct LinearAssociationFit {
         self.residuals = residuals
         self.dayNumbers = dayNumbers
         self.lagDays = lagDays
+        self.windowDays = windowDays
         hasResidualVariation = (residuals.map(abs).max() ?? 0) > 64 * Double.ulpOfOne * abs(mean)
     }
 
     var varianceInflation: [Double] { design.varianceInflation }
 
     // Weights in the original units, one per supplied design column.
-    func estimate(contrast: [Double]) -> (difference: Double, halfWidth: Double)? {
+    func estimate(contrast: [Double]) -> (difference: Double, halfWidth: Double, lagDays: Int)? {
         guard contrast.count == design.basis.count, hasResidualVariation else { return nil }
         let weights = design.observationWeights(for: contrast)
         let difference = dot(weights, centeredOutput)
         let scores = zip(weights, residuals).map(*)
-        let halfWidth = CalendarHAC.halfWidth(
-            scores: scores, dayNumbers: dayNumbers, lagDays: lagDays, parameterCount: design.basis.count + 1
-        )
+        let parameterCount = design.basis.count + 1
+        let halfWidth: Double
+        let maximumLag: Int
+        if windowDays > 1 {
+            (halfWidth, maximumLag) = TemporalAssociationUncertainty.assess(
+                scores: scores, residuals: residuals, dayNumbers: dayNumbers,
+                windowDays: windowDays, parameterCount: parameterCount
+            )
+        } else {
+            halfWidth = CalendarHAC.halfWidth(
+                scores: scores, dayNumbers: dayNumbers, lagDays: lagDays, parameterCount: parameterCount
+            )
+            maximumLag = lagDays
+        }
         guard halfWidth > 0, (abs(difference) + halfWidth).isFinite else { return nil }
-        return (difference, halfWidth)
+        return (difference, halfWidth, maximumLag)
     }
 }
 

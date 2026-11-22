@@ -16,13 +16,7 @@ public struct AnalysisInspection: Codable, Sendable {
         public let missingInputs: [MissingInput]
     }
 
-    public struct WindowOverlap: Codable, Sendable {
-        public let distinctBehaviorDays: Int
-        public let nonOverlappingWindows: Int
-    }
-
     public let unpairedOutputs: [OutputWithoutPair]
-    public let windowOverlap: WindowOverlap
     public let selectedOutputSourceIdentifier: String?
 }
 
@@ -32,6 +26,12 @@ public struct AnalysisInputEvidence: Sendable {
         public let outputDate: Date
         public let outputValue: Double
         public let input: AnalysisObservation.Input
+
+        public var entries: [AnalysisObservation.Input.Day] {
+            input.days.isEmpty
+                ? [.init(date: input.date, value: input.value, origin: input.origin)]
+                : input.days
+        }
     }
 
     public let pairs: [Pair]
@@ -39,8 +39,16 @@ public struct AnalysisInputEvidence: Sendable {
     public var observedPairs: [Pair] { pairs.filter { $0.input.origin == .observation } }
     public var explicitCount: Int { pairs.count { $0.input.origin == .observation } }
     public var assumedDefaultCount: Int { pairs.count - explicitCount }
+    public var distinctEntries: [AnalysisObservation.Input.Day] {
+        var entries: [Date: AnalysisObservation.Input.Day] = [:]
+        for pair in pairs {
+            for entry in pair.entries { entries[entry.date] = entry }
+        }
+        return entries.values.sorted { $0.date < $1.date }
+    }
+
     public var approximateCount: Int? {
-        let precisions = pairs.compactMap(\.input.clockPrecision)
+        let precisions = distinctEntries.compactMap(\.clockPrecision)
         guard !precisions.isEmpty else { return nil }
         return precisions.count { $0 == .approximate }
     }

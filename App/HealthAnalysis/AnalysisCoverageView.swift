@@ -9,17 +9,19 @@ struct AnalysisCoverageView: View {
         List {
             Section("Question") {
                 LabeledContent("Output") { result.analysisOutputTitle }
-                LabeledContent("Behavior window") {
-                    switch result.configuration.behaviorWindow {
-                    case .precedingDay: Text("Complete preceding day")
-                    }
-                }
-                LabeledContent("History") {
-                    switch result.configuration.history {
-                    case .fullHistory: Text("Full usable history")
-                    }
-                }
+                ExploreTemporalSummary(configuration: result.configuration)
                 LabeledContent("Analysis time zone", value: result.configuration.timeZone.identifier)
+                if result.configuration.output.isSleepDuration {
+                    Text("Each recorded wake date uses its longest completed sleep episode. Each input uses complete days before the episode began.")
+                } else {
+                    Text("Each input uses complete local days before the resting heart rate sample began.")
+                }
+                if result.configuration.behaviorWindow != .precedingDay {
+                    Text("Each quantity is totaled across the selected window.")
+                }
+                if result.configuration.history != .fullHistory {
+                    Text("History limits output dates. Earlier inputs can still complete a window.")
+                }
             }
             Section("Sources") {
                 if let source = result.outputSource ?? result.inspection?.unpairedOutputs.first?.source {
@@ -37,7 +39,7 @@ struct AnalysisCoverageView: View {
                         Text(lastRead, format: result.analysisDateFormat.hour().minute())
                     }
                 }
-                if result.coverage.usableDates.isEmpty && result.coverage.outputDaysWithoutCompleteInput == 0 {
+                if result.coverage.outputDayCount == 0 {
                     Text("No output measurements are available for this result.")
                     NavigationLink("Check Health access and sources") {
                         HealthAccessAndSourcesView(history: application.healthMeasurements)
@@ -46,11 +48,9 @@ struct AnalysisCoverageView: View {
             }
             Section("Overlap") {
                 LabeledContent("Paired output days", value: result.coverage.usableDates.count.formatted())
-                LabeledContent("Output days checked", value: outputDays.formatted())
-                if let overlap = result.inspection?.windowOverlap {
-                    LabeledContent("Distinct behavior days", value: overlap.distinctBehaviorDays.formatted())
-                    LabeledContent("Non-overlapping windows", value: overlap.nonOverlappingWindows.formatted())
-                }
+                LabeledContent("Output days in selected history", value: result.coverage.outputDayCount.formatted())
+                LabeledContent("Distinct behavior days", value: result.coverage.distinctBehaviorDayCount.formatted())
+                LabeledContent("Nonoverlapping windows", value: result.coverage.nonOverlappingWindowCount.formatted())
                 if let first = result.coverage.firstDate, let last = result.coverage.lastDate {
                     LabeledContent("Usable history") {
                         dateRange(first, last)
@@ -68,6 +68,9 @@ struct AnalysisCoverageView: View {
                     }
                 } else if result.coverage.outputDaysWithoutCompleteInput > 0 {
                     Text("Refresh this analysis to inspect the missing input dates.")
+                    ForEach(result.coverage.outputDatesWithoutCompleteInput, id: \.self) {
+                        Text($0, format: result.analysisDateFormat)
+                    }
                 }
                 if !result.coverage.usableDates.isEmpty && result.coverage.gaps.isEmpty {
                     Text("No gaps between usable dates.")
@@ -87,10 +90,6 @@ struct AnalysisCoverageView: View {
         }
         .navigationTitle("Usable dates and gaps")
         .navigationBarTitleDisplayMode(.inline)
-    }
-
-    private var outputDays: Int {
-        result.coverage.usableDates.count + result.coverage.outputDaysWithoutCompleteInput
     }
 
     private var selectedSourceIdentifier: String? {
@@ -185,6 +184,7 @@ extension AnalysisResult {
     }
 
     @MainActor var analysisOutputTitle: Text {
+        if configuration.output.isSleepDuration { return Text("Sleep duration") }
         if case .health(let metric, _) = configuration.output,
            let presentation = HealthMetricPresentation.supported.first(where: { $0.metric == metric }) {
             return Text(presentation.title)
@@ -192,10 +192,15 @@ extension AnalysisResult {
         return Text("Output")
     }
 
-    @MainActor var analysisOutputAxis: Text { Text("\(analysisOutputTitle) (bpm)") }
+    @MainActor var analysisOutputAxis: Text {
+        configuration.output.isSleepDuration ? Text("Sleep duration (hours)") : Text("\(analysisOutputTitle) (bpm)")
+    }
 
     func analysisOutputValue(_ value: Double) -> Text {
-        Text("\(value, format: .number.precision(.fractionLength(0...2))) bpm")
+        let format = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(0...2))
+        return configuration.output.isSleepDuration
+            ? Text("\(value, format: format) h")
+            : Text("\(value, format: format) bpm")
     }
 
     var inspectedOutputs: [AnalysisInspectedOutput] {

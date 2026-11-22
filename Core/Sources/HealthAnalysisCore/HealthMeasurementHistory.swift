@@ -51,8 +51,12 @@ public final class HealthMeasurementHistory {
     public var lastSuccessfulReadAt: Date? { snapshot?.lastSuccessfulReadAt }
     public var latest: HealthMeasurement? { measurements(for: .restingHeartRate).first }
     public var sleepEpisodes: [SleepEpisode] {
+        deriveSleepEpisodes(from: measurements(for: .sleepAnalysis))
+    }
+
+    func deriveSleepEpisodes(from records: [HealthMeasurement]) -> [SleepEpisode] {
         let fallback = snapshot?.sleepFallbackTimeZoneIdentifier.flatMap(TimeZone.init(identifier:)) ?? .current
-        return SleepDerivation.episodes(from: measurements(for: .sleepAnalysis), fallback: fallback)
+        return SleepDerivation.episodes(from: records, fallback: fallback)
     }
 
     private let source: (any HealthMeasurementSource)?

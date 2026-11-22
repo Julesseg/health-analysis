@@ -25,6 +25,8 @@ public struct AnalysisEvidence: Codable, Sendable {
     public enum Reason: Codable, Hashable, Sendable {
         case inadequateCoverage
         case inadequateJointCoverage(minimumDays: Int)
+        case limitedNonOverlappingWindows
+        case overlappingBehaviorWindows
         case noObservedInputs
         case limitedInputVariation
         case uncertaintyUnavailable
@@ -48,7 +50,8 @@ public struct AnalysisEvidence: Codable, Sendable {
 
 enum NumericAssociation {
     static func assess(
-        _ observations: [AnalysisObservation], coverage: AnalysisCoverage, calendar: Calendar
+        _ observations: [AnalysisObservation], coverage: AnalysisCoverage, calendar: Calendar,
+        behaviorWindow: AnalysisBehaviorWindow = .precedingDay, practicalDifference: Double = 1
     ) -> (estimate: AnalysisEstimate?, evidence: AnalysisEvidence) {
         let count = observations.count
         let defaultDays = observations.reduce(into: 0) { days, observation in
@@ -62,7 +65,11 @@ enum NumericAssociation {
         }
 
         guard count >= 42 else { return insufficient(.inadequateCoverage) }
-        guard defaultDays < count else { return insufficient(.noObservedInputs) }
+        guard coverage.nonOverlappingWindowCount >= 6 else { return insufficient(.limitedNonOverlappingWindows) }
+        let hasObservedInput = observations.contains { observation in
+            observation.inputs.contains(where: \.hasObservedDay)
+        }
+        guard hasObservedInput else { return insufficient(.noObservedInputs) }
         let dayNumbers = observations.compactMap { calendar.ordinality(of: .day, in: .era, for: $0.outputDate) }
         guard dayNumbers.count == count else { return insufficient(.uncertaintyUnavailable) }
 
@@ -72,16 +79,15 @@ enum NumericAssociation {
             return insufficient(.limitedInputVariation)
         }
 
-        let lagDays = CalendarHAC.defaultLagDays(for: count)
         let increment = 100.0
         guard let input = observations.first?.inputs.first?.series,
               let fit = fit(
                 amounts.map { $0 / increment }, observations.map(\.outputValue),
-                dayNumbers: dayNumbers, lagDays: lagDays
+                dayNumbers: dayNumbers, windowDays: behaviorWindow.dayCount
               ) else { return insufficient(.uncertaintyUnavailable) }
 
         let interval = (fit.slope - fit.halfWidth)...(fit.slope + fit.halfWidth)
-        let reference = 1.0
+        let reference = practicalDifference
         let finding: AnalysisEstimate.Finding
         if interval.lowerBound >= -reference && interval.upperBound <= reference {
             finding = .nearZero
@@ -94,6 +100,7 @@ enum NumericAssociation {
         }
 
         var reasons: [AnalysisEvidence.Reason] = []
+        if coverage.nonOverlappingWindowCount < count { reasons.append(.overlappingBehaviorWindows) }
         if count < 90 { reasons.append(.limitedHistory) }
         if Double(count) / Double(count + coverage.missingDays) < 0.75 { reasons.append(.sparseCoverage) }
         if Double(defaultDays) / Double(count) > 0.25 { reasons.append(.manyDefaults) }
@@ -106,7 +113,7 @@ enum NumericAssociation {
             grade: reasons.isEmpty ? .moderate : .low,
             reasons: reasons.isEmpty ? [.adequateCoverageAndPrecision] : reasons,
             defaultDayCount: defaultDays,
-            dependenceLagDays: lagDays
+            dependenceLagDays: fit.lagDays
         )
         return (AnalysisEstimate(
             input: input, inputIncrement: increment, difference: fit.slope, interval: interval, finding: finding
@@ -114,8 +121,8 @@ enum NumericAssociation {
     }
 
     private static func fit(
-        _ inputs: [Double], _ outputs: [Double], dayNumbers: [Int], lagDays: Int
-    ) -> (slope: Double, halfWidth: Double)? {
+        _ inputs: [Double], _ outputs: [Double], dayNumbers: [Int], windowDays: Int
+    ) -> (slope: Double, halfWidth: Double, lagDays: Int)? {
         let count = Double(inputs.count)
         let meanInput = inputs.reduce(0, +) / count
         let meanOutput = outputs.reduce(0, +) / count
@@ -128,16 +135,17 @@ enum NumericAssociation {
         let sumSquares = design.reduce(0) { $0 + $1 * $1 }
         let scaledSlope = zip(design, centeredOutput).reduce(0) { $0 + $1.0 * $1.1 } / sumSquares
         let residuals = zip(design, centeredOutput).map { $1 - $0 * scaledSlope }
-        let divisor = sumSquares * inputScale
+        let scores = zip(design, residuals).map(*)
         let slope = scaledSlope / inputScale
-        let scores = zip(design, residuals).map { $0 * $1 / divisor }
-        let halfWidth = CalendarHAC.halfWidth(
-            scores: scores, dayNumbers: dayNumbers, lagDays: lagDays, parameterCount: 2
+        let uncertainty = TemporalAssociationUncertainty.assess(
+            scores: scores, residuals: residuals, dayNumbers: dayNumbers,
+            windowDays: windowDays, parameterCount: 2
         )
+        let halfWidth = uncertainty.scoreHalfWidth / (sumSquares * inputScale)
 
         guard let maxResidual = residuals.map(abs).max(),
               maxResidual > 64 * Double.ulpOfOne * abs(meanOutput),
               halfWidth > 0, (abs(slope) + halfWidth).isFinite else { return nil }
-        return (slope, halfWidth)
+        return (slope, halfWidth, uncertainty.lagDays)
     }
 }

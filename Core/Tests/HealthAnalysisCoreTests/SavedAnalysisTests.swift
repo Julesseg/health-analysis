@@ -16,6 +16,8 @@ struct SavedAnalysisTests {
         )
         var edited = original
         edited.inputs.reverse()
+        edited.behaviorWindow = .precedingMonth
+        edited.history = .last90Days
         let first = try app.savedAnalyses.save(original)
         let second = try app.savedAnalyses.save(edited)
         let unpinned = try app.savedAnalyses.save(original)
@@ -72,6 +74,8 @@ struct SavedAnalysisTests {
         #expect(cached.result.configuration == configuration)
         #expect(cached.result.estimates.first?.interval == first.result.estimates.first?.interval)
         #expect(cached.result.observations.count == 56)
+        #expect(cached.result.observations.first?.inputs.first?.days.count == 1)
+        #expect(cached.result.coverage.nonOverlappingWindowCount == 56)
         try reopened.healthMeasurements.setPreferredSource("fixture.bridge", for: .restingHeartRate)
         let storedInspection = try #require(reopened.savedAnalyses.state(for: question.id).completed?.result.inspection)
         #expect(storedInspection.unpairedOutputs.map(\.value) == [77])

@@ -2,7 +2,7 @@
 
 `HealthAnalysisApplication.savedAnalyses` saves the complete `AnalysisConfiguration` under a stable ID. Passing that ID to `save(_:updating:completed:)` updates the question in place. Pinning appends the ID to Following. Editing and refreshing preserve its position. Unpinning removes that position, and pinning again appends it.
 
-A cached result belongs to the saved ID and the exact configuration that produced it. A configuration edit clears the previous result and invalidates its in-flight refresh, even if a later edit restores the old configuration. Refreshing reconciles Health history, including the current preferred source when the question leaves the source automatic. A successful run updates the durable result and timestamp even when the evidence is insufficient. Read and write failures keep the previous completion. In-progress and failure feedback live in memory.
+A cached result belongs to the saved ID and the exact configuration that produced it. A configuration edit clears the previous result and invalidates its in-flight refresh, even if a later edit restores the old configuration. Refreshing reconciles Health history, including the current preferred source when the question leaves the source automatic. A successful run updates the durable result and timestamp even when the evidence is insufficient. Read and write failures keep the previous completion. In-progress and failure feedback live in memory. Older cached results without the window and coverage details are recomputed, and their saved questions and pins carry forward.
 
 ## Integration with questions, discovery, and refresh
 

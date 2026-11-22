@@ -90,7 +90,7 @@ final class SavedAnalysisUITests: XCTestCase {
         XCTAssertTrue(inspect.isHittable)
         inspect.tap()
         XCTAssertTrue(app.navigationBars["Observed measurements"].waitForExistence(timeout: 5))
-        let empty = app.staticTexts["No explicit pairs for Evening caffeine."]
+        let empty = app.staticTexts["No pairs with a fully observed input window for Evening caffeine."]
         for _ in 0..<3 where !empty.isHittable { app.swipeUp() }
         XCTAssertTrue(empty.isHittable)
         XCTAssertFalse(app.descendants(matching: .any)["explore.observedScatter"].firstMatch.exists)

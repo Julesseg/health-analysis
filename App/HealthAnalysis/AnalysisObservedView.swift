@@ -48,7 +48,7 @@ struct AnalysisObservedView: View {
                     let evidence = result.inputEvidence(for: input.series)
                     let points = evidence.observedPairs
                     if points.isEmpty {
-                        Text("No explicit pairs for \(input.name).")
+                        Text("No pairs with a fully observed input window for \(input.name).")
                     } else {
                         scatterplot(points, input: input)
                     }
@@ -58,7 +58,7 @@ struct AnalysisObservedView: View {
                 } header: {
                     Text("Observed scatterplot")
                 } footer: {
-                    Text("Each point pairs an explicitly recorded input with an output used in this analysis.")
+                    Text("Each point pairs a complete input window made up of explicit observations with an output used in this analysis.")
                 }
             }
         }
@@ -116,21 +116,25 @@ struct AnalysisInputEvidenceView: View {
 
     var body: some View {
         let evidence = result.inputEvidence(for: input.series)
-        let total = evidence.pairs.count
+        let entries = evidence.distinctEntries
         List {
-            Section("Paired input windows") {
-                if total == 0 {
+            Section("Input provenance") {
+                if entries.isEmpty {
                     Text("No complete pairs for \(input.name).")
                 } else {
-                    provenanceShare("Explicit observations", count: evidence.explicitCount, total: total)
-                    provenanceShare("Windows using assumed defaults", count: evidence.assumedDefaultCount, total: total)
+                    let explicit = entries.count { $0.origin == .observation }
+                    provenanceShare("Explicit observations", count: explicit, total: entries.count)
+                    provenanceShare("Assumed defaults", count: entries.count - explicit, total: entries.count)
+                    if result.configuration.behaviorWindow != .precedingDay {
+                        provenanceShare("Windows using assumed defaults", count: evidence.assumedDefaultCount, total: evidence.pairs.count)
+                    }
                     if let approximate = evidence.approximateCount {
                         LabeledContent("Approximate entries", value: approximate.formatted())
                     }
                 }
                 LabeledContent("Source") { Text("Daily log") }
             }
-            if total > 0 {
+            if !entries.isEmpty {
                 Section("Paired values") {
                     ForEach(evidence.pairs) { pair in
                         NavigationLink {
@@ -172,31 +176,39 @@ struct AnalysisInputEvidenceView: View {
             }
             Section("Input window") {
                 LabeledContent(input.name) { Text("\(pair.input.value, format: .number) \(input.unit)") }
-                LabeledContent("Behavior date") { Text(pair.input.date, format: result.analysisDateFormat) }
-                switch pair.input.origin {
-                case .observation:
-                    LabeledContent("Provenance") { Text("Explicit observation") }
-                case .assumedDefault(let effectiveOn):
-                    LabeledContent("Provenance") { Text("Assumed default") }
-                    if let date = result.analysisCalendar.date(from: DateComponents(
-                        year: effectiveOn.year, month: effectiveOn.month, day: effectiveOn.day
-                    )) {
-                        LabeledContent("Default effective from") { Text(date, format: result.analysisDateFormat) }
-                    }
-                }
-                if let precision = pair.input.clockPrecision {
-                    LabeledContent("Time precision") {
-                        Text(precision == .approximate ? "Approximate time" : "Exact time")
-                    }
-                }
-                NavigationLink("Open daily log") {
-                    ManualLogView(
-                        log: log, initialDay: ManualLogDay(pair.input.date, timeZone: result.configuration.timeZone)
-                    )
-                }
+            }
+            ForEach(pair.entries, id: \.date) { entry in
+                entryDetails(entry)
             }
         }
         .navigationTitle("Paired values")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func entryDetails(_ entry: AnalysisObservation.Input.Day) -> some View {
+        Section {
+            LabeledContent(input.name) { Text("\(entry.value, format: .number) \(input.unit)") }
+            switch entry.origin {
+            case .observation:
+                LabeledContent("Provenance") { Text("Explicit observation") }
+            case .assumedDefault(let effectiveOn):
+                LabeledContent("Provenance") { Text("Assumed default") }
+                if let date = result.analysisCalendar.date(from: DateComponents(
+                    year: effectiveOn.year, month: effectiveOn.month, day: effectiveOn.day
+                )) {
+                    LabeledContent("Default effective from") { Text(date, format: result.analysisDateFormat) }
+                }
+            }
+            if let precision = entry.clockPrecision {
+                LabeledContent("Time precision") {
+                    Text(precision == .approximate ? "Approximate time" : "Exact time")
+                }
+            }
+            NavigationLink("Open daily log") {
+                ManualLogView(log: log, initialDay: ManualLogDay(entry.date, timeZone: result.configuration.timeZone))
+            }
+        } header: {
+            Text(entry.date, format: result.analysisDateFormat)
+        }
     }
 }

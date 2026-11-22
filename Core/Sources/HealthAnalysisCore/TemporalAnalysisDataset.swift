@@ -46,9 +46,10 @@ struct TemporalAnalysisDataset {
     let observations: [AnalysisObservation]
     let coverage: AnalysisCoverage
     let outputSource: HealthMeasurement.Source?
+    let inspection: AnalysisInspection
 
     @MainActor init(
-        outputs: [Output], inputs: [ManualAnalysisSeries], manualLog: ManualLog,
+        outputs: [Output], selectedSourceIdentifier: String? = nil, inputs: [ManualAnalysisSeries], manualLog: ManualLog,
         window: AnalysisBehaviorWindow, history: AnalysisPeriod, asOf: Date, calendar: Calendar
     ) {
         var dailyOutputs: [Date: Output] = [:]
@@ -76,26 +77,46 @@ struct TemporalAnalysisDataset {
         }
 
         let outputDates = dailyOutputs.keys.sorted()
+        var unpaired: [AnalysisInspection.OutputWithoutPair] = []
         observations = outputDates.compactMap { date -> AnalysisObservation? in
             guard let output = dailyOutputs[date] else { return nil }
+            func recordUnpaired(_ missing: [AnalysisInspection.OutputWithoutPair.MissingInput]) {
+                unpaired.append(.init(
+                    date: date, anchor: output.anchor, value: output.value, source: output.source, missingInputs: missing,
+                    origin: output.origin, trackingValue: output.trackingValue
+                ))
+            }
             var cursor = output.behaviorCutoff
             var behaviorDates: [Date] = []
             for _ in 0..<window.dayCount {
-                guard let preceding = calendar.precedingDay(before: cursor) else { return nil }
+                guard let preceding = calendar.precedingDay(before: cursor) else {
+                    recordUnpaired([])
+                    return nil
+                }
                 behaviorDates.append(preceding)
                 cursor = preceding
             }
             let dates = behaviorDates.reversed()
+            var missing: [AnalysisInspection.OutputWithoutPair.MissingInput] = []
             var pairedInputs: [AnalysisObservation.Input] = []
             for input in inputs {
-                let days = dates.compactMap { inputDay($0, for: input) }
-                guard days.count == dates.count else { return nil }
+                let series = input.variable.id
+                let days = dates.compactMap { date -> AnalysisObservation.Input.Day? in
+                    if let day = inputDay(date, for: input) { return day }
+                    missing.append(.init(series: series, date: date))
+                    return nil
+                }
+                guard days.count == dates.count else { continue }
                 let total = days.reduce(0) { $0 + $1.value }
-                guard total.isFinite else { return nil }
+                guard total.isFinite else { continue }
                 pairedInputs.append(.init(
-                    series: input.variable.id, date: cursor, value: total,
+                    series: series, date: cursor, value: total,
                     origin: days.first { $0.origin != .observation }?.origin ?? .observation, days: days
                 ))
+            }
+            guard pairedInputs.count == inputs.count else {
+                recordUnpaired(missing)
+                return nil
             }
             return AnalysisObservation(
                 outputDate: date, outputAnchor: output.anchor, outputValue: output.value, inputs: pairedInputs,
@@ -104,6 +125,7 @@ struct TemporalAnalysisDataset {
         }
         coverage = AnalysisCoverage(observations: observations, outputDates: outputDates, calendar: calendar)
         outputSource = outputDates.last.flatMap { dailyOutputs[$0]?.source }
+        inspection = AnalysisInspection(unpairedOutputs: unpaired, selectedOutputSourceIdentifier: selectedSourceIdentifier)
     }
 }
 

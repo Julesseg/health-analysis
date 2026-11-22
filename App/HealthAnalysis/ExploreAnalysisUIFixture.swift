@@ -34,7 +34,12 @@ enum ExploreAnalysisUIFixture {
                 )
             )
         }
-        let application = HealthAnalysisApplication(healthSource: Source(records: days.map(\.measurement)))
+        let earlyOutput = calendar.date(byAdding: .hour, value: 9, to: first)!
+        let unpaired = HealthMeasurement(
+            id: UUID(), metric: .restingHeartRate, value: 72, unit: .beatsPerMinute,
+            startDate: earlyOutput, endDate: earlyOutput, source: source
+        )
+        let application = HealthAnalysisApplication(healthSource: Source(records: [unpaired] + days.map(\.measurement)))
         let quantities = [("Caffeine", "mg"), ("Fluids", "L"), ("Exercise log", "min"), ("Supplement", "mg")]
             .map { name, unit in
                 try! application.manualLog.createQuantity(name: name, unit: unit, defaultValue: 0, startsOn: days[0].day)

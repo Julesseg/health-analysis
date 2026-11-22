@@ -41,12 +41,14 @@ struct ExploreAnalysisTests {
         question.behaviorWindow = month
         let full = try app.analyze(question, asOf: endOfHistory)
         #expect(full.coverage.outputDaysWithoutCompleteInput == 1)
+        #expect(full.inspection?.unpairedOutputs.map(\.value) == [61])
         #expect(full.observations.map(\.outputAnchor) == [monthOutput])
         #expect(full.observations.map { $0.inputs[0].value } == [320])
 
         question.history = recent
         let selected = try app.analyze(question, asOf: endOfHistory)
         #expect(selected.coverage.outputDaysWithoutCompleteInput == 0)
+        #expect(selected.inspection?.unpairedOutputs.isEmpty == true)
         #expect(selected.coverage.usableDates == [instant("2025-03-31T22:00:00Z")])
         #expect(selected.observations.map { $0.inputs[0].value } == [320])
 
@@ -107,10 +109,47 @@ struct ExploreAnalysisTests {
         ])
         #expect(result.coverage.gaps.map(\.firstDate) == [instant("2025-03-31T22:00:00Z")])
         #expect(result.coverage.outputDaysWithoutCompleteInput == 1)
+        let unpaired = try #require(result.inspection?.unpairedOutputs.first)
+        #expect(result.inspection?.unpairedOutputs.count == 1)
+        #expect(unpaired.date == instant("2025-03-28T23:00:00Z"))
+        #expect(unpaired.anchor == early)
+        #expect(unpaired.value == 90)
+        #expect(unpaired.missingInputs.map(\.series) == [.manualQuantity(caffeine.id)])
+        #expect(unpaired.missingInputs.map(\.date) == [instant("2025-03-27T23:00:00Z")])
         #expect(result.observations.map(\.outputValue) == [62, 64, 65])
         #expect(result.observations.compactMap { $0.inputs.first?.value } == [100, 0, 75])
         #expect(result.observations[1].inputs.first?.origin == .observation)
         #expect(result.evidence.defaultDayCount == 1)
+        let input = result.inputEvidence(for: .manualQuantity(caffeine.id))
+        #expect(input.explicitCount == 2)
+        #expect(input.assumedDefaultCount == 1)
+        #expect(input.approximateCount == nil)
+        #expect(input.observedPairs.map(\.input.value) == [100, 0])
+        #expect(input.observedPairs.map(\.outputValue) == [62, 64])
+        #expect(result.coverage.distinctBehaviorDayCount == 3)
+        #expect(result.coverage.nonOverlappingWindowCount == 3)
+
+        let resultData = try JSONEncoder().encode(result)
+        var earlierPayload = try #require(JSONSerialization.jsonObject(with: resultData) as? [String: Any])
+        earlierPayload.removeValue(forKey: "inspection")
+        var earlierCoverage = try #require(earlierPayload["coverage"] as? [String: Any])
+        for key in ["distinctBehaviorDayCount", "nonOverlappingWindowCount", "outputDatesWithoutCompleteInput"] {
+            earlierCoverage.removeValue(forKey: key)
+        }
+        earlierPayload["coverage"] = earlierCoverage
+        var earlierObservations = try #require(earlierPayload["observations"] as? [[String: Any]])
+        for index in earlierObservations.indices {
+            var inputs = try #require(earlierObservations[index]["inputs"] as? [[String: Any]])
+            for input in inputs.indices { inputs[input].removeValue(forKey: "days") }
+            earlierObservations[index]["inputs"] = inputs
+        }
+        earlierPayload["observations"] = earlierObservations
+        let earlierData = try JSONSerialization.data(withJSONObject: earlierPayload)
+        let earlierResult = try JSONDecoder().decode(AnalysisResult.self, from: earlierData)
+        #expect(earlierResult.inspection == nil)
+        #expect(earlierResult.coverage.outputDaysWithoutCompleteInput == 1)
+        #expect(earlierResult.coverage.distinctBehaviorDayCount == 3)
+        #expect(earlierResult.inputEvidence(for: .manualQuantity(caffeine.id)).observedPairs.map(\.outputValue) == [62, 64])
     }
 
     @Test func coverageCountsCivilDaysWhenDaylightSavingStartsAtMidnight() async throws {
@@ -158,6 +197,11 @@ struct ExploreAnalysisTests {
         #expect(result.coverage.missingDays == 5)
         #expect(result.coverage.distinctBehaviorDayCount == 14)
         #expect(result.coverage.nonOverlappingWindowCount == 2)
+        #expect(result.inspection?.unpairedOutputs.first?.missingInputs.map(\.date) == [day(-1)])
+        let provenance = result.inputEvidence(for: .manualQuantity(caffeine.id))
+        #expect(provenance.distinctEntries.count == 14)
+        #expect(provenance.distinctEntries.filter { $0.origin == .observation }.map(\.date) == [day(7)])
+        #expect(provenance.observedPairs.isEmpty)
         let days = try #require(result.observations[1].inputs.first?.days)
         #expect(days.map(\.date) == (1...7).map(day))
         #expect(days.last?.origin == .observation)

@@ -76,6 +76,11 @@ struct FirstUseTests {
         let presets = app.analysisPresets(timeZone: .gmt, asOf: day(4))
         #expect(Set(presets.map(\.output)) == [.health(metric: .sleepAnalysis), .health(metric: .restingHeartRate)])
         #expect(presets.allSatisfy { $0.inputs == [.manualQuantity(caffeine.id)] })
+        #expect(throws: AnalysisRunFailure.unsupportedConfiguration) {
+            try app.analyze(.init(
+                output: .health(metric: HRVSeries.StoredType.sdnn.metric), inputs: [.manualQuantity(caffeine.id)]
+            ), asOf: day(4))
+        }
         var sleep = try #require(presets.first { $0.output == .health(metric: .sleepAnalysis) })
         #expect(sleep.behaviorWindow == .precedingDay)
         #expect(sleep.history == .fullHistory)

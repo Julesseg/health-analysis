@@ -5,6 +5,9 @@ import SwiftUI
 struct HealthAnalysisApp: App {
     private let application: HealthAnalysisApplication = {
         #if DEBUG
+        if let fixture = FirstUseUIFixture.applicationForLaunch() {
+            return fixture
+        }
         if let fixture = ExploreAnalysisUIFixture.applicationForLaunch() {
             return fixture
         }
@@ -16,7 +19,9 @@ struct HealthAnalysisApp: App {
             manualLogStoreURL: ManualLogStoreLocation.url,
             savedAnalysesStoreURL: URL.applicationSupportDirectory
                 .appending(path: "SavedAnalyses", directoryHint: .isDirectory)
-                .appending(path: "questions.json", directoryHint: .notDirectory)
+                .appending(path: "questions.json", directoryHint: .notDirectory),
+            firstUseStoreURL: URL.applicationSupportDirectory
+                .appending(path: "first-use-complete", directoryHint: .notDirectory)
         )
     }()
 

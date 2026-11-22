@@ -4,6 +4,7 @@ import SwiftUI
 struct ExploreView: View {
     let application: HealthAnalysisApplication
     private let editing: SavedAnalysis?
+    @Environment(\.timeZone) private var timeZone
 
     @State private var output: AnalysisSeriesID?
     @State private var inputs: [AnalysisSeriesID]
@@ -62,13 +63,12 @@ struct ExploreView: View {
             Section {
                 Picker("Output", selection: $output) {
                     Text("Choose output").tag(nil as AnalysisSeriesID?)
-                    let restingHeartRate = AnalysisSeriesID.health(metric: .restingHeartRate)
-                    let sleepDuration = AnalysisSeriesID.health(metric: .sleepAnalysis)
-                    Text("Resting heart rate").tag(restingHeartRate as AnalysisSeriesID?)
-                    Text("Sleep duration").tag(sleepDuration as AnalysisSeriesID?)
-                    if let savedOutput = editing?.configuration.output,
-                       savedOutput != restingHeartRate, savedOutput != sleepDuration {
-                        application.analysisSeriesTitle(savedOutput).tag(savedOutput as AnalysisSeriesID?)
+                    let choices = application.analysisOutputChoices
+                    ForEach(choices, id: \.self) { choice in
+                        application.analysisSeriesTitle(choice).tag(Optional(choice))
+                    }
+                    if let output, !choices.contains(output) {
+                        application.analysisSeriesTitle(output).tag(Optional(output))
                     }
                 }
                 .accessibilityIdentifier("explore.output")
@@ -138,9 +138,24 @@ struct ExploreView: View {
             }
 
             if editing == nil {
+                Section {
+                    NavigationLink("Suggested questions") {
+                        AnalysisPresetsView(application: application, timeZone: timeZone, onSelect: applyPreset)
+                    }
+                }
                 SavedAnalysisListSection(application: application)
             }
         }
+    }
+
+    private func applyPreset(_ preset: AnalysisConfiguration) {
+        output = preset.output
+        inputs = preset.inputs
+        adjustments = preset.adjustmentInputs
+        interaction = preset.interaction
+        behaviorWindow = preset.behaviorWindow
+        history = preset.history
+        analysisTimeZone = preset.timeZone
     }
 
     private var interactionSummary: Text {

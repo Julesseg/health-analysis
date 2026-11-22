@@ -9,6 +9,9 @@ struct AnalysisCoverageView: View {
         List {
             Section("Question") {
                 LabeledContent("Output") { result.analysisOutputTitle }
+                if let event = result.categoryEvent {
+                    LabeledContent("Output event", value: event.name)
+                }
                 ExploreTemporalSummary(configuration: result.configuration)
                 LabeledContent("Analysis time zone", value: result.configuration.timeZone.identifier)
                 if result.outputVariable != nil {
@@ -80,13 +83,14 @@ struct AnalysisCoverageView: View {
                 }
             }
             Section("Gaps") {
-                LabeledContent(
-                    "Output days without a complete input",
-                    value: result.coverage.outputDaysWithoutCompleteInput.formatted()
-                )
+                let label: LocalizedStringKey = result.categoryEvidence == nil
+                    ? "Output days without a complete input" : "Output days without a usable pair"
+                LabeledContent(label, value: result.coverage.outputDaysWithoutCompleteInput.formatted())
                 if let unpaired = result.inspection?.unpairedOutputs, !unpaired.isEmpty {
-                    NavigationLink("Inspect missing input dates") {
-                        missingInputDates(unpaired)
+                    let title: LocalizedStringKey = result.categoryEvidence == nil
+                        ? "Inspect missing input dates" : "Inspect unpaired output dates"
+                    NavigationLink(title) {
+                        unpairedOutputDates(unpaired)
                     }
                 } else if result.coverage.outputDaysWithoutCompleteInput > 0 {
                     Text("Refresh this analysis to inspect the missing input dates.")
@@ -142,14 +146,44 @@ struct AnalysisCoverageView: View {
         return Text("\(first, format: format) – \(last, format: format)")
     }
 
-    private func missingInputDates(_ outputs: [AnalysisInspection.OutputWithoutPair]) -> some View {
+    private func excludedInputRow(
+        _ excluded: AnalysisInspection.OutputWithoutPair.ExcludedCategoryInput, input: AnalysisModeledInput
+    ) -> some View {
+        NavigationLink {
+            ManualLogView(
+                log: application.manualLog,
+                initialDay: ManualLogDay(excluded.date, timeZone: result.configuration.timeZone)
+            )
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                let category = categoryValueLabel(.category(excluded.category), categories: input.categories)
+                Text("\(input.name) · \(category)")
+                Text("Outside the selected comparison")
+                Text(excluded.date, format: result.analysisDateFormat)
+                switch excluded.origin {
+                case .observation:
+                    Text("Explicit observation")
+                case .assumedDefault:
+                    Text("Assumed default")
+                }
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func unpairedOutputDates(_ outputs: [AnalysisInspection.OutputWithoutPair]) -> some View {
         List {
             ForEach(outputs) { output in
                 Section {
-                    LabeledContent("Output value") { result.analysisOutputValue(output.value) }
+                    LabeledContent("Output value") { result.analysisOutputValue(output.value, trackingValue: output.trackingValue) }
                     AnalysisOutputProvenanceRows(result: result, origin: output.origin)
-                    if output.missingInputs.isEmpty {
+                    if output.missingInputs.isEmpty && output.excludedCategoryInputs == nil {
                         Text("A complete input window could not be prepared for this measurement.")
+                    }
+                    ForEach(output.excludedCategoryInputs ?? []) { excluded in
+                        if let input = result.modeledInputs.first(where: { $0.series == excluded.series }) {
+                            excludedInputRow(excluded, input: input)
+                        }
                     }
                     ForEach(output.missingInputs) { missing in
                         if let input = result.modeledInputs.first(where: { $0.series == missing.series }) {
@@ -174,7 +208,7 @@ struct AnalysisCoverageView: View {
                 }
             }
         }
-        .navigationTitle("Missing input dates")
+        .navigationTitle(result.categoryEvidence == nil ? "Missing input dates" : "Unpaired output dates")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -186,12 +220,16 @@ struct AnalysisOutputValuesView: View {
         List(result.outputEvidence.filter(\.isObserved)) { output in
             VStack(alignment: .leading, spacing: 4) {
                 Text(output.date, format: result.analysisDateFormat)
-                result.analysisOutputValue(output.value)
+                result.analysisOutputValue(output.value, trackingValue: output.trackingValue)
                 if let source = output.source {
                     Text(source.name)
                 }
                 Text(output.anchor, format: result.analysisDateFormat.hour().minute())
-                Text(output.paired ? "Paired in this analysis" : "No complete input window")
+                if output.excludedByCategory {
+                    Text("Outside the selected comparison")
+                } else {
+                    Text(output.paired ? "Paired in this analysis" : "No complete input window")
+                }
             }
             .accessibilityElement(children: .combine)
         }
@@ -245,11 +283,15 @@ extension AnalysisResult {
     }
 
     @MainActor var analysisOutputAxis: Text {
+        if let outputVariable, !outputVariable.categories.isEmpty { return analysisOutputTitle }
         if outputVariable?.kind == .tracked(.count) { return Text("\(analysisOutputTitle) (count)") }
         return configuration.output.isSleepDuration ? Text("Sleep duration (hours)") : Text("\(analysisOutputTitle) (bpm)")
     }
 
-    func analysisOutputValue(_ value: Double) -> Text {
+    func analysisOutputValue(_ value: Double, trackingValue: ManualTrackingValue? = nil) -> Text {
+        if let outputVariable, !outputVariable.categories.isEmpty {
+            return categoryValueLabel(trackingValue, categories: outputVariable.categories)
+        }
         if outputVariable?.kind == .tracked(.count) { return Text(value, format: .number.precision(.fractionLength(0))) }
         let format = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(0...2))
         return configuration.output.isSleepDuration

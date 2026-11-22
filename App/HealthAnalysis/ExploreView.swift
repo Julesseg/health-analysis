@@ -13,6 +13,8 @@ struct ExploreView: View {
     @State private var history: AnalysisPeriod
     @State private var interaction: AnalysisInteraction?
     @State private var analysisTimeZone: TimeZone
+    @State private var categoryOutputEvent: TrackingCategory.ID?
+    @State private var categoryInputSelections: [AnalysisSeriesID: CategoryContrastSelection]
 
     init(application: HealthAnalysisApplication, editing: SavedAnalysis? = nil) {
         self.application = application
@@ -24,6 +26,10 @@ struct ExploreView: View {
         _history = State(initialValue: editing?.configuration.history ?? .fullHistory)
         _interaction = State(initialValue: editing?.configuration.interaction)
         _analysisTimeZone = State(initialValue: editing?.configuration.timeZone ?? .current)
+        _categoryOutputEvent = State(initialValue: editing?.configuration.categories?.outputEvent)
+        _categoryInputSelections = State(initialValue: editing?.configuration.categories?.inputContrasts.mapValues {
+            CategoryContrastSelection(reference: $0.reference, comparison: $0.comparison)
+        } ?? [:])
     }
 
     private var variables: [AnalysisVariable] { application.analysisVariables }
@@ -41,16 +47,44 @@ struct ExploreView: View {
         return variables.contains { selected.contains($0.id) && $0.kind == .tracked(.count) }
     }
 
+    private var categoryOutput: AnalysisVariable? {
+        variables.first { $0.id == output && !$0.categories.isEmpty }
+    }
+
+    private var categoryInputs: [AnalysisVariable] {
+        (inputs + adjustments).compactMap { id in
+            variables.first { $0.id == id && !$0.categories.isEmpty }
+        }
+    }
+
+    private var usesCategories: Bool { categoryOutput != nil || !categoryInputs.isEmpty }
+    private var allowsLongerWindowsAndInteractions: Bool { !usesCounts && !usesCategories }
+
     private var configuration: AnalysisConfiguration? {
         guard let output, !inputs.isEmpty else { return nil }
         var configuration = editing?.configuration ?? .init(output: output, inputs: inputs)
         configuration.output = output
         configuration.inputs = inputs
         configuration.adjustmentInputs = adjustments
-        configuration.behaviorWindow = usesCounts ? .precedingDay : behaviorWindow
+        configuration.behaviorWindow = allowsLongerWindowsAndInteractions ? behaviorWindow : .precedingDay
         configuration.history = history
-        configuration.interaction = usesCounts ? nil : interaction
+        configuration.interaction = allowsLongerWindowsAndInteractions ? interaction : nil
         configuration.timeZone = analysisTimeZone
+        if usesCategories {
+            var contrasts: [AnalysisSeriesID: AnalysisCategoryContrast] = [:]
+            for input in categoryInputs {
+                guard let contrast = categoryInputSelections[input.id]?.contrast(in: input.categories) else { return nil }
+                contrasts[input.id] = contrast
+            }
+            if let categoryOutput, !categoryOutput.categories.contains(where: { $0.id == categoryOutputEvent }) {
+                return nil
+            }
+            configuration.categories = .init(
+                inputContrasts: contrasts, outputEvent: categoryOutput == nil ? nil : categoryOutputEvent
+            )
+        } else {
+            configuration.categories = nil
+        }
         return configuration
     }
 
@@ -66,7 +100,13 @@ struct ExploreView: View {
             }
 
             Section {
-                Picker("Output", selection: $output) {
+                Picker("Output", selection: Binding(
+                    get: { output },
+                    set: { selection in
+                        if selection != output { categoryOutputEvent = nil }
+                        output = selection
+                    }
+                )) {
                     Text("Choose output").tag(nil as AnalysisSeriesID?)
                     let outputs = variables.filter(\.supportsOutput)
                     ForEach(outputs) { choice in
@@ -85,6 +125,16 @@ struct ExploreView: View {
                 .onChange(of: output) { _, selected in
                     inputs.removeAll { $0 == selected }
                     adjustments.removeAll { $0 == selected }
+                }
+
+                if let categoryOutput {
+                    Picker("Output event", selection: $categoryOutputEvent) {
+                        Text("Choose category").tag(nil as TrackingCategory.ID?)
+                        ForEach(categoryOutput.categories) { category in
+                            Text(category.name).tag(Optional(category.id))
+                        }
+                    }
+                    .accessibilityIdentifier("explore.category.event")
                 }
 
                 NavigationLink {
@@ -122,7 +172,7 @@ struct ExploreView: View {
                 .accessibilityLabel("Account for")
                 .accessibilityValue(selectionSummary(adjustments))
                 .accessibilityIdentifier("explore.adjustments")
-                if inputs.count >= 2 && !usesCounts {
+                if inputs.count >= 2 && allowsLongerWindowsAndInteractions {
                     NavigationLink {
                         ExploreInteractionSelection(application: application, inputs: inputs, interaction: $interaction)
                     } label: {
@@ -133,15 +183,37 @@ struct ExploreView: View {
                     .accessibilityIdentifier("explore.interaction")
                 }
                 ExploreTemporalControls(
-                    behaviorWindow: $behaviorWindow, history: $history, allowsLongerWindows: !usesCounts
+                    behaviorWindow: $behaviorWindow, history: $history, allowsLongerWindows: allowsLongerWindowsAndInteractions
                 )
             } footer: {
                 if inputChoices.isEmpty {
-                    Text("Add a daily quantity or count in Settings to choose another variable.")
+                    Text("Add a supported daily tracking variable in Settings to choose another input.")
                 }
-                if usesCounts {
+                if usesCategories {
+                    Text("Category analyses use the complete preceding day.")
+                    Text("Interactions with categories are unavailable.")
+                    if categoryOutput != nil {
+                        Text("The model estimates the odds of the selected output category versus all other categories.")
+                    }
+                } else if usesCounts {
                     Text("Count analyses use the complete preceding day.")
                     Text("Interactions with counts are unavailable.")
+                }
+            }
+
+            ForEach(categoryInputs) { input in
+                Section {
+                    CategoryContrastFields(
+                        categories: input.categories,
+                        selection: Binding(
+                            get: { categoryInputSelections[input.id, default: CategoryContrastSelection()] },
+                            set: { categoryInputSelections[input.id] = $0 }
+                        )
+                    )
+                } header: {
+                    Text(input.name)
+                } footer: {
+                    Text("Choose two different categories. Only days with either selected category can be paired.")
                 }
             }
 
@@ -176,6 +248,10 @@ struct ExploreView: View {
         behaviorWindow = preset.behaviorWindow
         history = preset.history
         analysisTimeZone = preset.timeZone
+        categoryOutputEvent = preset.categories?.outputEvent
+        categoryInputSelections = preset.categories?.inputContrasts.mapValues {
+            CategoryContrastSelection(reference: $0.reference, comparison: $0.comparison)
+        } ?? [:]
     }
 
     private var interactionSummary: Text {

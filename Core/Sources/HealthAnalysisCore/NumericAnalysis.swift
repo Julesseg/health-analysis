@@ -4,6 +4,7 @@ public enum AnalysisModel: String, Codable, Hashable, Sendable {
     case caffeineLinearV1
     case numericLinearV1
     case countLogLinearV1
+    case categoryEventLogisticV1
     case numericInteractionV1
 }
 

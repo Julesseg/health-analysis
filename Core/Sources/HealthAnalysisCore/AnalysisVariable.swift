@@ -13,7 +13,7 @@ public struct AnalysisVariable: Codable, Equatable, Identifiable, Sendable {
     public var supportsInput: Bool {
         switch id {
         case .manualQuantity: true
-        case .manualTyped: kind == .tracked(.count)
+        case .manualTyped: kind == .tracked(.count) || !categories.isEmpty
         case .health: false
         }
     }
@@ -21,9 +21,14 @@ public struct AnalysisVariable: Codable, Equatable, Identifiable, Sendable {
     public var supportsOutput: Bool {
         switch id {
         case .manualQuantity: false
-        case .manualTyped: kind == .tracked(.count)
+        case .manualTyped: kind == .tracked(.count) || !categories.isEmpty
         case .health(let metric, _): metric == .restingHeartRate || metric == .sleepAnalysis
         }
+    }
+
+    public var categories: [TrackingCategory] {
+        if case .tracked(.category(let options)) = kind { return options }
+        return []
     }
 
     var unit: String {
@@ -51,7 +56,7 @@ extension HealthAnalysisApplication {
 
 enum ManualAnalysisSeries {
     struct Sample {
-        let value: Double
+        let value: Double?
         let origin: ManualValueOrigin
         var trackingValue: ManualTrackingValue? = nil
     }
@@ -68,7 +73,9 @@ enum ManualAnalysisSeries {
         }
     }
 
-    @MainActor func numericValue(in log: ManualLog, on day: ManualLogDay) -> Sample? {
+    @MainActor func numericValue(
+        in log: ManualLog, on day: ManualLogDay, category: CategoryAnalysis.Transform? = nil
+    ) -> Sample? {
         switch self {
         case .quantity(let quantity):
             guard let (amount, origin) = log.analysisValue(for: quantity, on: day) else { return nil }
@@ -76,9 +83,16 @@ enum ManualAnalysisSeries {
             guard value.isFinite, quantity.unit.lowercased() != "mg" || value >= 0 else { return nil }
             return Sample(value: value, origin: origin)
         case .typed(let variable):
-            guard variable.kind == .count,
-                  case let (.count(count), origin)? = log.analysisValue(for: variable, on: day), count >= 0 else { return nil }
-            return Sample(value: Double(count), origin: origin, trackingValue: .count(count))
+            guard let (value, origin) = log.analysisValue(for: variable, on: day) else { return nil }
+            switch value {
+            case .count(let count) where variable.kind == .count && count >= 0:
+                return Sample(value: Double(count), origin: origin, trackingValue: value)
+            case .category(let id) where !self.variable.categories.isEmpty:
+                guard let category else { return nil }
+                return Sample(value: category.encode(id), origin: origin, trackingValue: value)
+            default:
+                return nil
+            }
         }
     }
 

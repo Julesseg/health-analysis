@@ -189,7 +189,7 @@ extension HRVSeries.StoredType {
     }
 }
 
-private extension HRVSeries.AnalysisLimitation {
+extension HRVSeries.AnalysisLimitation {
     var message: LocalizedStringKey {
         switch self {
         case .unverifiedOriginalMeasureAndSummary:

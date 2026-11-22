@@ -226,7 +226,7 @@ private struct ActivityAmount: View {
     }
 }
 
-private extension ActivityTrackingVariable {
+extension ActivityTrackingVariable {
     var title: LocalizedStringKey {
         switch self {
         case .workoutDuration: "Workout duration"

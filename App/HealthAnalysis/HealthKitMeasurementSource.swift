@@ -10,7 +10,8 @@ struct HealthKitMeasurementSource: HealthMeasurementSource {
     func requestReadAccess() async throws {
         guard let store else { throw HealthMeasurementReadFailure.unavailable }
         do {
-            try await store.requestAuthorization(toShare: [], read: [Self.restingHeartRate])
+            let readTypes = HealthKitWorkoutStream.readTypes.union([Self.restingHeartRate])
+            try await store.requestAuthorization(toShare: [], read: readTypes)
         } catch {
             throw availabilityFailure(for: error) ?? error
         }
@@ -35,8 +36,12 @@ struct HealthKitMeasurementSource: HealthMeasurementSource {
             let anchor = try NSKeyedArchiver.archivedData(withRootObject: changes.newAnchor, requiringSecureCoding: true)
             let added = (fullRead?.addedSamples ?? []) + changes.addedSamples
             let deleted = (fullRead?.deletedObjects ?? []) + changes.deletedObjects
+            let workouts = try await HealthKitWorkoutStream.readChanges(
+                after: anchors, includingPreviouslySaved: includingPreviouslySaved, in: store
+            )
             return [
                 .init(queryID: Self.queryID, anchor: anchor, added: added.map(measurement), deleted: deleted.map(\.uuid)),
+                workouts,
             ]
         } catch {
             throw availabilityFailure(for: error) ?? error

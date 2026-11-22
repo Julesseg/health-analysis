@@ -1,7 +1,7 @@
 import HealthAnalysisCore
 import Testing
 
-@Test func newApplicationHasNoDataOrAnalyses() {
+@MainActor @Test func newApplicationHasNoDataOrAnalyses() {
     let overview = HealthAnalysisApplication().overview
 
     #expect(!overview.hasReadableMeasurements)

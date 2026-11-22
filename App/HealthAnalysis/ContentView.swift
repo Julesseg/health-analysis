@@ -110,22 +110,9 @@ struct ContentView: View {
     private func sheetContent(_ sheet: PresentedSheet) -> some View {
         switch sheet {
         case .log:
-            Group {
-                if !overview.hasTrackingVariables {
-                    ContentUnavailableView(
-                        "No tracking variables",
-                        systemImage: "square.and.pencil"
-                    )
-                }
-            }
-            .navigationTitle("Log")
-            .navigationBarTitleDisplayMode(.inline)
+            ManualLogView(log: application.manualLog)
         case .settings:
-            Form {
-                Text("No settings available yet")
-            }
-            .navigationTitle("Settings")
-            .navigationBarTitleDisplayMode(.inline)
+            ManualTrackingSettingsView(log: application.manualLog)
         }
     }
 }

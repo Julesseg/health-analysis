@@ -3,6 +3,13 @@ import Foundation
 public struct CompletedAnalysis: Codable, Sendable {
     public let result: AnalysisResult
     public let updatedAt: Date
+    public let discovery: DiscoverySelection?
+
+    init(result: AnalysisResult, updatedAt: Date, discovery: DiscoverySelection? = nil) {
+        self.result = result
+        self.updatedAt = updatedAt
+        self.discovery = discovery
+    }
 }
 
 public enum AnalysisRefreshFailure: Equatable, Sendable {

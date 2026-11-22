@@ -17,7 +17,7 @@ struct ContentView: View {
     var body: some View {
         TabView {
             Tab("Insights", systemImage: "lightbulb") {
-                destination("Insights") { insights }
+                destination("Insights") { InsightsView(application: application) }
             }
             Tab("Explore", systemImage: "magnifyingglass") {
                 destination("Explore") { ExploreView(application: application) }
@@ -57,18 +57,6 @@ struct ContentView: View {
                         }
                     }
                 }
-        }
-    }
-
-    private var insights: some View {
-        List {
-            SavedAnalysisListSection(application: application, followingOnly: true)
-            if !overview.hasDiscoveries {
-                Section("Discovered for you") {
-                    Text("No discoveries yet")
-                }
-            }
-            LatestHealthMeasurementsSection(history: application.healthMeasurements)
         }
     }
 

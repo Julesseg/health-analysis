@@ -237,8 +237,61 @@ extension HealthAnalysisApplication {
             outputs: outputHistory.outputs, inputs: inputs, manualLog: manualLog,
             window: configuration.behaviorWindow, history: configuration.history, asOf: asOf, calendar: calendar
         )
-        let modeledInputs = inputs.enumerated().map { index, input in
-            let variable = input.variable
+        return AnalysisResult.assess(
+            configuration: configuration, dataset: dataset, inputs: inputs.map(\.variable), output: output,
+            calendar: calendar, practicalDifference: practicalDifference,
+            lastReadAt: outputHistory.healthReadAt, lastReadFailure: outputHistory.healthReadFailure
+        )
+    }
+
+    @MainActor private func healthOutputs(
+        metric: HealthMeasurement.Metric, sourceID: String?, asOf: Date, calendar: Calendar
+    ) throws(AnalysisRunFailure) -> AnalysisOutputHistory {
+        let lastReadAt = healthMeasurements.lastSuccessfulReadAt
+        let lastReadFailure: HealthMeasurementReadFailure?
+        switch healthMeasurements.readState {
+        case .failed(let failure):
+            guard lastReadAt != nil else { throw .healthHistoryUnavailable(failure) }
+            lastReadFailure = failure
+        case .loading:
+            guard lastReadAt != nil else { throw .healthHistoryLoading }
+            lastReadFailure = nil
+        case .idle, .loaded:
+            lastReadFailure = nil
+        }
+
+        let outputs = availableHealthOutputs(metric, asOf: asOf, calendar: calendar)
+        let outputSourceID = sourceID ?? healthMeasurements.preferredSource(for: metric)?.bundleIdentifier
+        let sources = Set(outputs.compactMap { $0.source?.bundleIdentifier })
+        guard outputSourceID != nil || sources.count <= 1 else { throw .chooseOutputSource }
+        let selectedOutputs = outputs.filter { outputSourceID == nil || $0.source?.bundleIdentifier == outputSourceID }
+
+        return AnalysisOutputHistory(outputs: selectedOutputs, healthReadAt: lastReadAt, healthReadFailure: lastReadFailure)
+    }
+
+    @MainActor func availableHealthOutputs(
+        _ metric: HealthMeasurement.Metric, asOf: Date, calendar: Calendar
+    ) -> [TemporalAnalysisDataset.Output] {
+        if metric == .sleepAnalysis {
+            let episodes = healthMeasurements.deriveSleepEpisodes(
+                from: healthMeasurements.history.filter { $0.metric == .sleepAnalysis && $0.endDate <= asOf }
+            )
+            return TemporalAnalysisDataset.sleepDurationOutputs(episodes, asOf: asOf, calendar: calendar)
+        } else {
+            return TemporalAnalysisDataset.restingHeartRateOutputs(
+                healthMeasurements.history, asOf: asOf, calendar: calendar
+            )
+        }
+    }
+}
+
+extension AnalysisResult {
+    static func assess(
+        configuration: AnalysisConfiguration, dataset: TemporalAnalysisDataset, inputs: [AnalysisVariable],
+        output: AnalysisVariable? = nil, calendar: Calendar, practicalDifference: Double,
+        lastReadAt: Date?, lastReadFailure: HealthMeasurementReadFailure? = nil, exploratory: Bool = false
+    ) -> Self {
+        let modeledInputs = inputs.enumerated().map { index, variable in
             return AnalysisModeledInput(
                 series: variable.id, name: variable.name, unit: variable.unit,
                 role: index < configuration.inputs.count ? .input : .adjustment,
@@ -261,51 +314,23 @@ extension HealthAnalysisApplication {
         return AnalysisResult(
             configuration: configuration,
             outputSource: dataset.outputSource,
-            healthHistoryReadAt: outputHistory.healthReadAt,
-            lastHealthReadFailure: outputHistory.healthReadFailure,
+            healthHistoryReadAt: lastReadAt,
+            lastHealthReadFailure: lastReadFailure,
             observations: dataset.observations,
             coverage: dataset.coverage,
             model: assessment.model,
             modeledInputs: modeledInputs,
             estimates: assessment.estimates,
             interaction: assessment.interaction,
-            evidence: assessment.evidence,
+            evidence: exploratory && assessment.evidence.grade != .insufficient
+                ? AnalysisEvidence(
+                    grade: .low, reasons: assessment.evidence.reasons,
+                    defaultDayCount: assessment.evidence.defaultDayCount,
+                    dependenceLagDays: assessment.evidence.dependenceLagDays
+                )
+                : assessment.evidence,
             outputVariable: output
         )
     }
 
-    @MainActor private func healthOutputs(
-        metric: HealthMeasurement.Metric, sourceID: String?, asOf: Date, calendar: Calendar
-    ) throws(AnalysisRunFailure) -> AnalysisOutputHistory {
-        let lastReadAt = healthMeasurements.lastSuccessfulReadAt
-        let lastReadFailure: HealthMeasurementReadFailure?
-        switch healthMeasurements.readState {
-        case .failed(let failure):
-            guard lastReadAt != nil else { throw .healthHistoryUnavailable(failure) }
-            lastReadFailure = failure
-        case .loading:
-            guard lastReadAt != nil else { throw .healthHistoryLoading }
-            lastReadFailure = nil
-        case .idle, .loaded:
-            lastReadFailure = nil
-        }
-
-        let outputs: [TemporalAnalysisDataset.Output]
-        if metric == .sleepAnalysis {
-            let episodes = healthMeasurements.deriveSleepEpisodes(
-                from: healthMeasurements.history.filter { $0.metric == .sleepAnalysis && $0.endDate <= asOf }
-            )
-            outputs = TemporalAnalysisDataset.sleepDurationOutputs(episodes, asOf: asOf, calendar: calendar)
-        } else {
-            outputs = TemporalAnalysisDataset.restingHeartRateOutputs(
-                healthMeasurements.history, asOf: asOf, calendar: calendar
-            )
-        }
-        let outputSourceID = sourceID ?? healthMeasurements.preferredSource(for: metric)?.bundleIdentifier
-        let sources = Set(outputs.compactMap { $0.source?.bundleIdentifier })
-        guard outputSourceID != nil || sources.count <= 1 else { throw .chooseOutputSource }
-        let selectedOutputs = outputs.filter { outputSourceID == nil || $0.source?.bundleIdentifier == outputSourceID }
-
-        return AnalysisOutputHistory(outputs: selectedOutputs, healthReadAt: lastReadAt, healthReadFailure: lastReadFailure)
-    }
 }

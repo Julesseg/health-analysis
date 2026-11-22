@@ -2,7 +2,7 @@ import XCTest
 
 final class ExploreInteractionUITests: XCTestCase {
     @MainActor
-    func testComparesLabeledConditionsAfterSelectingThreeInputs() {
+    func testComparesLabeledConditionsAfterSelectingThreeInputs() throws {
         let app = analyzeInteraction(fixture: "planted")
         let finding = app.staticTexts["The estimated association is more positive at the higher condition."]
         XCTAssertTrue(finding.waitForExistence(timeout: 5))
@@ -10,10 +10,10 @@ final class ExploreInteractionUITests: XCTestCase {
         let higher = app.descendants(matching: .any)["explore.interaction.higher"].firstMatch
         XCTAssertTrue(reveal(lower, in: app))
         XCTAssertTrue(lower.label.contains("1 L"))
-        XCTAssertTrue(lower.label.contains("2 bpm"))
+        XCTAssertEqual(try conditionEstimate(in: lower), 2, accuracy: 0.05)
         XCTAssertTrue(reveal(higher, in: app))
         XCTAssertTrue(higher.label.contains("3 L"))
-        XCTAssertTrue(higher.label.contains("8 bpm"))
+        XCTAssertEqual(try conditionEstimate(in: higher), 8, accuracy: 0.05)
         XCTAssertTrue(reveal(app.descendants(matching: .any)["explore.interaction.uncertainty"].firstMatch, in: app))
         XCTAssertTrue(reveal(app.staticTexts["With Fluids at 2 L."], in: app))
 
@@ -89,6 +89,13 @@ final class ExploreInteractionUITests: XCTestCase {
         XCTAssertTrue(reveal(analyze, in: app))
         analyze.tap()
         return app
+    }
+
+    @MainActor
+    private func conditionEstimate(in element: XCUIElement) throws -> Double {
+        let description = [element.label, element.value as? String].compactMap { $0 }.joined(separator: " ")
+        let range = try XCTUnwrap(description.range(of: #"[-+]?\d+(?:\.\d+)?(?= bpm)"#, options: .regularExpression))
+        return try XCTUnwrap(Double(description[range]))
     }
 
     @MainActor

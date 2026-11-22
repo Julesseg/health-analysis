@@ -37,6 +37,9 @@ struct ManualLogView: View {
                 }
                 .id(day)
             }
+            if !rows.isEmpty {
+                ManualLogReviewSection(log: log, day: day)
+            }
         }
         .onChange(of: date) { focusedQuantity = nil }
     }

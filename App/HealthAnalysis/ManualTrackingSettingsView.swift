@@ -9,11 +9,17 @@ struct ManualTrackingSettingsView: View {
             Section("Tracking variables") {
                 if log.isStoreAvailable {
                     ForEach(log.quantities) { quantity in
-                        LabeledContent {
-                            Text(verbatim: quantity.unit)
+                        NavigationLink {
+                            QuantityDefaultsView(log: log, quantity: quantity)
                         } label: {
-                            Text(verbatim: quantity.name)
+                            LabeledContent {
+                                Text(verbatim: quantity.unit)
+                            } label: {
+                                Text(verbatim: quantity.name)
+                            }
                         }
+                        .accessibilityLabel(Text(verbatim: quantity.name))
+                        .accessibilityValue(Text(verbatim: quantity.unit))
                     }
                     NavigationLink("Add quantity") {
                         CreateTrackingQuantityView(log: log)

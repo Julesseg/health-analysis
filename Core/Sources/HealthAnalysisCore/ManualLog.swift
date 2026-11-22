@@ -40,15 +40,22 @@ public struct DailyQuantity: Identifiable, Sendable {
     public let recordedValue: Decimal?
     public let text: String
     public let status: Status
+    public let origin: ManualValueOrigin
 
     public var id: TrackingQuantity.ID { quantity.id }
-    public var value: Decimal { recordedValue ?? quantity.defaultValue }
+    public let value: Decimal
 }
 
 @MainActor @Observable
 public final class ManualLog {
     public enum CreationError: Error {
         case invalidQuantity
+        case persistenceFailed
+    }
+
+    public enum ReviewError: Error {
+        case noFields
+        case unresolvedEdits
         case persistenceFailed
     }
 
@@ -66,6 +73,8 @@ public final class ManualLog {
     private struct Snapshot: Codable, Sendable {
         var quantities: [TrackingQuantity] = []
         var entries: [Entry: Decimal] = [:]
+        var defaultHistories: [TrackingQuantity.ID: ManualDefaultHistory<Decimal>]?
+        var reviews: [ManualLogDay: ReviewedDay<Decimal>]?
 
         static func load(from url: URL) throws -> Self {
             do {
@@ -109,32 +118,108 @@ public final class ManualLog {
         return quantity
     }
 
+    public func quantityDefaults(_ id: TrackingQuantity.ID) -> [ManualDefaultVersion<Decimal>] {
+        guard let quantity = quantities.first(where: { $0.id == id }) else { return [] }
+        return defaultHistory(for: quantity).versions
+    }
+
+    public func setQuantityDefault(
+        _ id: TrackingQuantity.ID, value: Decimal, effectiveOn: ManualLogDay,
+        scope: ManualDefaultScope = .effectiveDate
+    ) throws(DefaultError) {
+        guard var updated = snapshot else { throw .persistenceFailed }
+        guard let quantity = updated.quantities.first(where: { $0.id == id }) else { throw .unknownQuantity }
+        guard !value.isNaN else { throw .invalidValue }
+
+        var history = defaultHistory(for: quantity)
+        try history.set(ManualDefaultVersion(effectiveOn: effectiveOn, value: value), scope: scope)
+        updated.defaultHistories = updated.defaultHistories ?? [:]
+        updated.defaultHistories?[id] = history
+
+        do {
+            try persist(updated)
+        } catch {
+            throw .persistenceFailed
+        }
+    }
+
+    private func defaultHistory(for quantity: TrackingQuantity) -> ManualDefaultHistory<Decimal> {
+        snapshot?.defaultHistories?[quantity.id] ?? ManualDefaultHistory(
+            initial: ManualDefaultVersion(effectiveOn: quantity.startsOn, value: quantity.defaultValue)
+        )
+    }
+
     public func dailyQuantities(on day: ManualLogDay, locale: Locale) -> [DailyQuantity] {
-        quantities.filter { $0.startsOn <= day }.map { quantity in
+        quantities.compactMap { quantity in
             dailyQuantity(quantity, on: day, locale: locale)
         }
     }
 
     public func dailyQuantity(_ id: TrackingQuantity.ID, on day: ManualLogDay, locale: Locale) -> DailyQuantity? {
-        guard let quantity = quantities.first(where: { $0.id == id }), day >= quantity.startsOn else { return nil }
+        guard let quantity = quantities.first(where: { $0.id == id }) else { return nil }
         return dailyQuantity(quantity, on: day, locale: locale)
     }
 
-    private func dailyQuantity(_ quantity: TrackingQuantity, on day: ManualLogDay, locale: Locale) -> DailyQuantity {
+    private func dailyQuantity(_ quantity: TrackingQuantity, on day: ManualLogDay, locale: Locale) -> DailyQuantity? {
+        guard let field = reviewField(for: quantity, on: day) else { return nil }
         let entry = Entry(day: day, quantityID: quantity.id)
-        let recordedValue = snapshot?.entries[entry]
+        let recordedValue = field.origin == .observation ? field.value : nil
         let edit = edits[entry]
         let text = edit.flatMap { $0.status != .saved || $0.locale == locale ? $0.text : nil }
         return DailyQuantity(
             quantity: quantity,
             recordedValue: recordedValue,
-            text: text ?? QuantityNumber.format(recordedValue ?? quantity.defaultValue, locale: locale),
-            status: edit?.status ?? (recordedValue == nil ? .assumedDefault : .saved)
+            text: text ?? QuantityNumber.format(field.value, locale: locale),
+            status: edit?.status ?? (recordedValue == nil ? .assumedDefault : .saved),
+            origin: field.origin,
+            value: field.value
+        )
+    }
+
+    public func review(on day: ManualLogDay) -> DayReview? {
+        snapshot?.reviews?[day]?.status(for: reviewFields(on: day), hasUnresolvedEdits: hasUnresolvedEdits(on: day))
+    }
+
+    public func canConfirmDay(_ day: ManualLogDay) -> Bool {
+        !hasUnresolvedEdits(on: day) && quantities.contains { reviewField(for: $0, on: day) != nil }
+    }
+
+    public func confirmDay(_ day: ManualLogDay) throws(ReviewError) {
+        guard var updated = snapshot else { throw .persistenceFailed }
+        let fields = reviewFields(on: day)
+        guard !fields.isEmpty else { throw .noFields }
+        guard !hasUnresolvedEdits(on: day) else { throw .unresolvedEdits }
+        var reviews = updated.reviews ?? [:]
+        reviews[day] = ReviewedDay(reviewedAt: .now, fields: fields)
+        updated.reviews = reviews
+
+        do {
+            try persist(updated)
+        } catch {
+            throw .persistenceFailed
+        }
+    }
+
+    private func hasUnresolvedEdits(on day: ManualLogDay) -> Bool {
+        edits.contains { $0.key.day == day && $0.value.status != .saved }
+    }
+
+    private func reviewFields(on day: ManualLogDay) -> [UUID: ReviewField<Decimal>] {
+        Dictionary(uniqueKeysWithValues: quantities.compactMap { quantity in
+            reviewField(for: quantity, on: day).map { (quantity.id, $0) }
+        })
+    }
+
+    private func reviewField(for quantity: TrackingQuantity, on day: ManualLogDay) -> ReviewField<Decimal>? {
+        ReviewField.resolve(
+            observation: snapshot?.entries[Entry(day: day, quantityID: quantity.id)],
+            previousReview: snapshot?.reviews?[day]?.fields[quantity.id],
+            effectiveDefault: defaultHistory(for: quantity).effective(on: day)
         )
     }
 
     public func editQuantity(_ id: TrackingQuantity.ID, on day: ManualLogDay, text: String, locale: Locale) {
-        guard let quantity = quantities.first(where: { $0.id == id }), day >= quantity.startsOn,
+        guard let quantity = quantities.first(where: { $0.id == id }), reviewField(for: quantity, on: day) != nil,
             var updated = snapshot else { return }
         let entry = Entry(day: day, quantityID: id)
         guard let value = QuantityNumber.parse(text, locale: locale) else {

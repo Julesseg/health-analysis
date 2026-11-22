@@ -107,7 +107,9 @@ struct ExploreResultView: View {
 
     private var measurementsLink: some View {
         NavigationLink("Inspect Health measurements") {
-            HealthMeasurementHistoryView(history: application.healthMeasurements)
+            HealthMeasurementHistoryView(
+                history: application.healthMeasurements, presentation: .restingHeartRate
+            )
         }
     }
 

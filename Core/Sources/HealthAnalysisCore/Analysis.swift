@@ -231,7 +231,7 @@ extension HealthAnalysisApplication {
     @MainActor public func analyze(
         _ configuration: AnalysisConfiguration, asOf: Date = .now
     ) throws(AnalysisRunFailure) -> AnalysisResult {
-        try prepareAnalysis(configuration, asOf: asOf).assess()
+        try prepareAnalysis(configuration, asOf: asOf)()
     }
 
     @MainActor func prepareAnalysis(
@@ -266,11 +266,16 @@ extension HealthAnalysisApplication {
             window: configuration.behaviorWindow, history: configuration.history, asOf: asOf, calendar: calendar,
             categoryInputs: category.inputContrasts
         )
-        return PreparedAnalysis(
-            configuration: configuration, dataset: dataset, inputs: inputs.map(\.variable), output: output,
-            calendar: calendar, practicalDifference: practicalDifference,
-            lastReadAt: outputHistory.healthReadAt, lastReadFailure: outputHistory.healthReadFailure, category: category
-        )
+        let variables = inputs.map(\.variable)
+        let readAt = outputHistory.healthReadAt
+        let readFailure = outputHistory.healthReadFailure
+        return { [calendar] in
+            AnalysisResult.assess(
+                configuration: configuration, dataset: dataset, inputs: variables, output: output,
+                calendar: calendar, practicalDifference: practicalDifference,
+                lastReadAt: readAt, lastReadFailure: readFailure, category: category
+            )
+        }
     }
 
     @MainActor func validatedAnalysisSeries(
@@ -364,24 +369,7 @@ extension HealthAnalysisApplication {
     }
 }
 
-struct PreparedAnalysis: Sendable {
-    let configuration: AnalysisConfiguration
-    let dataset: TemporalAnalysisDataset
-    let inputs: [AnalysisVariable]
-    let output: AnalysisVariable?
-    let calendar: Calendar
-    let practicalDifference: Double
-    let lastReadAt: Date?
-    let lastReadFailure: HealthMeasurementReadFailure?
-
-    func assess() -> AnalysisResult {
-        AnalysisResult.assess(
-            configuration: configuration, dataset: dataset, inputs: inputs, output: output,
-            calendar: calendar, practicalDifference: practicalDifference,
-            lastReadAt: lastReadAt, lastReadFailure: lastReadFailure
-        )
-    }
-}
+typealias PreparedAnalysis = @Sendable () -> AnalysisResult
 
 extension AnalysisResult {
     static func assess(

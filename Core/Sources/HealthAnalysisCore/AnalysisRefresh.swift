@@ -34,9 +34,9 @@ public struct AnalysisRefreshState: Sendable {
 }
 
 actor AnalysisFitter {
-    func assess(_ analysis: PreparedAnalysis) -> AnalysisResult? {
+    func assess(_ analysis: @escaping PreparedAnalysis) -> AnalysisResult? {
         guard !Task.isCancelled else { return nil }
-        return analysis.assess()
+        return analysis()
     }
 }
 
@@ -73,11 +73,7 @@ extension HealthAnalysisApplication {
         _ configuration: AnalysisConfiguration, asOf: Date
     ) -> Result<CompletedAnalysis, AnalysisRunFailure> {
         do {
-            let result = try analyze(configuration, asOf: asOf)
-            if let failure = result.lastHealthReadFailure {
-                return .failure(.healthHistoryUnavailable(failure))
-            }
-            return .success(CompletedAnalysis(result: result, updatedAt: .now))
+            return completedRefresh(from: try analyze(configuration, asOf: asOf))
         } catch {
             return .failure(error)
         }
@@ -136,9 +132,14 @@ extension HealthAnalysisApplication {
             guard let result = await analysisFitter.assess(prepared), !Task.isCancelled,
                   healthMeasurements.reconciliationVersion == version, healthMeasurements.readState == .loaded,
                   manualLog.analysisRevision == logRevision else { return nil }
-            return .success(CompletedAnalysis(result: result, updatedAt: .now))
+            return completedRefresh(from: result)
         } catch {
             return .failure(error)
         }
+    }
+
+    private func completedRefresh(from result: AnalysisResult) -> Result<CompletedAnalysis, AnalysisRunFailure> {
+        if let failure = result.lastHealthReadFailure { return .failure(.healthHistoryUnavailable(failure)) }
+        return .success(CompletedAnalysis(result: result, updatedAt: .now))
     }
 }

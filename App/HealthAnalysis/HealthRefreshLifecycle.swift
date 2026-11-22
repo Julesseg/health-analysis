@@ -5,6 +5,7 @@ import UIKit
 @MainActor
 final class HealthRefreshLifecycle: NSObject, UIApplicationDelegate {
     private nonisolated static let pendingKey = "pendingHealthKitCheck"
+    private static let reconciledKey = "reconciledHealthKitCheck"
     private var isForeground = false
     private var pendingForegroundCheck = false
     private var pendingObserverCheck = false
@@ -12,7 +13,7 @@ final class HealthRefreshLifecycle: NSObject, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         HealthAnalysisApp.configuration.observedSource?.observeChanges { [weak self] changed in
-            UserDefaults.standard.set(true, forKey: Self.pendingKey)
+            UserDefaults.standard.set(UUID().uuidString, forKey: Self.pendingKey)
             Task { @MainActor in
                 if changed { self?.scheduleCheck(observer: true) }
             }
@@ -26,7 +27,8 @@ final class HealthRefreshLifecycle: NSObject, UIApplicationDelegate {
         switch phase {
         case .active where !isForeground:
             isForeground = true
-            let pending = UserDefaults.standard.bool(forKey: Self.pendingKey)
+            let pending = UserDefaults.standard.string(forKey: Self.pendingKey)
+                != UserDefaults.standard.string(forKey: Self.reconciledKey)
             let application = configuration.application
             if pending || application.healthMeasurements.readState != .idle || application.firstUse.step == .complete
                 || configuration.observedSource == nil {
@@ -53,6 +55,7 @@ final class HealthRefreshLifecycle: NSObject, UIApplicationDelegate {
             let history = HealthAnalysisApp.configuration.application.healthMeasurements
             while isForeground, pendingForegroundCheck, !Task.isCancelled {
                 let observer = pendingObserverCheck
+                let pendingDelivery = UserDefaults.standard.string(forKey: Self.pendingKey)
                 pendingForegroundCheck = false
                 pendingObserverCheck = false
                 if observer {
@@ -61,7 +64,7 @@ final class HealthRefreshLifecycle: NSObject, UIApplicationDelegate {
                     await history.refresh()
                 }
                 if !pendingObserverCheck, history.readState == .loaded, !Task.isCancelled {
-                    UserDefaults.standard.removeObject(forKey: Self.pendingKey)
+                    UserDefaults.standard.set(pendingDelivery, forKey: Self.reconciledKey)
                 }
             }
             checkTask = nil

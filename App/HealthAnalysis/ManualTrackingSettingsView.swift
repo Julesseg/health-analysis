@@ -24,6 +24,7 @@ struct ManualTrackingSettingsView: View {
                     NavigationLink("Add quantity") {
                         CreateTrackingQuantityView(log: log)
                     }
+                    TypedTrackingSettings(log: log)
                 } else {
                     Text("Couldn’t open the daily log")
                 }

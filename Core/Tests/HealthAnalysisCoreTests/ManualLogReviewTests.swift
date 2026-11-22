@@ -99,6 +99,47 @@ struct ManualLogReviewTests {
         #expect(log.dailyQuantity(quantity.id, on: date, locale: locale)?.origin == .observation)
     }
 
+    @Test func dayReviewIncludesTypedValuesAndBlocksTheirUnresolvedEdits() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("manual-log.json")
+        let log = HealthAnalysisApplication(manualLogStoreURL: url).manualLog
+        let date = day(19)
+        let count = try log.createTypedVariable(name: "Walks", kind: .count, defaultValue: .count(2), startsOn: date)
+
+        #expect(log.canConfirmDay(date))
+        if log.canConfirmDay(date) { try log.confirmDay(date) }
+        #expect(log.review(on: date)?.isCurrent == true)
+        #expect(throws: ManualLog.DefaultError.olderHistoryRequiresOptIn) {
+            try log.setTypedDefault(count.id, value: .count(1), effectiveOn: day(17))
+        }
+        #expect(log.dailyTypedEntry(count.id, on: day(18)) == nil)
+        try log.setTypedDefault(count.id, value: .count(1), effectiveOn: day(17), scope: .olderHistory)
+        try log.setTypedDefault(count.id, value: .count(3), effectiveOn: date)
+        let backfilled = HealthAnalysisApplication(manualLogStoreURL: url).manualLog
+        #expect(backfilled.dailyTypedEntry(count.id, on: day(18))?.value == .count(1))
+        #expect(backfilled.dailyTypedEntry(count.id, on: date)?.value == .count(2))
+        #expect(backfilled.dailyTypedEntry(count.id, on: date)?.origin == .assumedDefault(effectiveOn: date))
+        #expect(backfilled.dailyTypedEntry(count.id, on: date)?.recordedValue == nil)
+        #expect(backfilled.dailyTypedEntry(count.id, on: day(20))?.value == .count(3))
+        #expect(backfilled.review(on: date)?.isCurrent == true)
+
+        let quantity = try log.createQuantity(name: "Caffeine", unit: "mg", defaultValue: 25, startsOn: date)
+        log.editQuantity(quantity.id, on: date, text: "0", locale: locale)
+        log.editTypedEntry(count.id, on: date, value: .count(-1))
+        #expect(!log.canConfirmDay(date))
+        #expect(throws: ManualLog.ReviewError.unresolvedEdits) { try log.confirmDay(date) }
+
+        log.editTypedEntry(count.id, on: date, value: .count(0))
+        try log.confirmDay(date)
+        let reopened = HealthAnalysisApplication(manualLogStoreURL: url).manualLog
+        #expect(reopened.review(on: date)?.isCurrent == true)
+        #expect(reopened.dailyTypedEntry(count.id, on: date)?.recordedValue == .count(0))
+        #expect(reopened.dailyTypedEntry(count.id, on: date)?.origin == .observation)
+        reopened.editTypedEntry(count.id, on: date, value: .count(1))
+        #expect(reopened.review(on: date)?.isCurrent == false)
+    }
+
     @Test func failedWritesLeaveReviewAndObservationUnchangedUntilRetry() throws {
         let files = FileManager.default
         let directory = files.temporaryDirectory.appendingPathComponent(UUID().uuidString)

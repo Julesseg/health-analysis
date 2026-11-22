@@ -12,7 +12,7 @@ struct ManualLogView: View {
         Group {
             if !log.isStoreAvailable {
                 ContentUnavailableView("Couldn’t open the daily log", systemImage: "exclamationmark.circle")
-            } else if log.quantities.isEmpty {
+            } else if log.quantities.isEmpty && log.typedVariables.isEmpty {
                 ContentUnavailableView("No tracking variables", systemImage: "square.and.pencil")
             } else {
                 dailyForm(on: ManualLogDay(date, timeZone: timeZone))
@@ -24,16 +24,22 @@ struct ManualLogView: View {
 
     private func dailyForm(on day: ManualLogDay) -> some View {
         let rows = log.dailyQuantities(on: day, locale: locale)
+        let typedRows = log.dailyTypedEntries(on: day)
         return Form {
             Section {
                 ManualLogDatePicker(title: "Date", date: $date, latestDate: .now)
             }
             Section {
-                if rows.isEmpty {
+                if rows.isEmpty && typedRows.isEmpty {
                     Text("No tracking variables for this date")
                 }
-                ForEach(rows) { row in
-                    quantityField(row, on: day)
+                Group {
+                    ForEach(rows) { row in
+                        quantityField(row, on: day)
+                    }
+                    ForEach(typedRows) { row in
+                        DailyTypedEntryField(log: log, row: row)
+                    }
                 }
                 .id(day)
             }

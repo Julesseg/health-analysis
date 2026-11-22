@@ -29,11 +29,19 @@ struct ReviewField<Value: Codable & Equatable & Sendable>: Codable, Equatable, S
     }
 }
 
-struct ReviewedDay<Value: Codable & Equatable & Sendable>: Codable, Sendable {
+struct ReviewedDay: Codable, Sendable {
     let reviewedAt: Date
-    let fields: [UUID: ReviewField<Value>]
+    let fields: [UUID: ReviewField<Decimal>]
+    let typedFields: [UUID: ReviewField<ManualTrackingValue>]?
 
-    func status(for currentFields: [UUID: ReviewField<Value>], hasUnresolvedEdits: Bool) -> DayReview {
-        DayReview(reviewedAt: reviewedAt, isCurrent: !hasUnresolvedEdits && currentFields == fields)
+    func status(
+        for currentFields: [UUID: ReviewField<Decimal>],
+        typed currentTypedFields: [UUID: ReviewField<ManualTrackingValue>],
+        hasUnresolvedEdits: Bool
+    ) -> DayReview {
+        DayReview(
+            reviewedAt: reviewedAt,
+            isCurrent: !hasUnresolvedEdits && currentFields == fields && currentTypedFields == (typedFields ?? [:])
+        )
     }
 }

@@ -45,6 +45,10 @@ struct LinearAssociationFit {
 
     var varianceInflation: [Double] { design.varianceInflation }
 
+    func coefficient(contrast: [Double]) -> Double {
+        dot(design.observationWeights(for: contrast), centeredOutput)
+    }
+
     // Weights in the original units, one per supplied design column.
     func estimate(contrast: [Double]) -> (difference: Double, halfWidth: Double, lagDays: Int)? {
         guard contrast.count == design.basis.count, hasResidualVariation else { return nil }

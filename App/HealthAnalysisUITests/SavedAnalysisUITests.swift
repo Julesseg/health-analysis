@@ -11,7 +11,7 @@ final class SavedAnalysisUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.staticTexts["No followed analyses yet"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["No discoveries yet"].exists)
+        XCTAssertTrue(app.staticTexts["discovery.empty"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["No readable measurements"].exists)
         XCTAssertLessThan(app.staticTexts["Following"].frame.minY, app.staticTexts["Discovered for you"].frame.minY)
         XCTAssertLessThan(app.staticTexts["Discovered for you"].frame.minY, app.staticTexts["Latest measurements"].frame.minY)

@@ -333,8 +333,8 @@ private let estimateNumber = FloatingPointFormatStyle<Double>.number.precision(.
 
 private let countPercent = FloatingPointFormatStyle<Double>.Percent.percent.precision(.fractionLength(0...2))
 
-private func estimateLabel(
-    _ estimate: AnalysisEstimate, input: AnalysisModeledInput, isSleepDuration: Bool, output: AnalysisVariable?
+func estimateLabel(
+    _ estimate: AnalysisEstimate, input: AnalysisModeledInput, isSleepDuration: Bool, output: AnalysisVariable? = nil
 ) -> Text {
     let inputThreshold = input.kind?.ratingThreshold
     let outputThreshold = output?.kind.ratingThreshold

@@ -12,6 +12,7 @@ public struct HealthAnalysisApplication: Sendable {
     public let manualLog: ManualLog
     public let savedAnalyses: SavedAnalyses
     public let firstUse: FirstUseSetup
+    public let discovery = DiscoveryActivity()
 
     public init(
         healthSource: (any HealthMeasurementSource)? = nil,
@@ -31,7 +32,7 @@ public struct HealthAnalysisApplication: Sendable {
             hasReadableMeasurements: healthMeasurements.hasReadableRecords,
             hasTrackingVariables: !manualLog.quantities.isEmpty || !manualLog.typedVariables.isEmpty,
             hasFollowedAnalyses: !savedAnalyses.following.isEmpty,
-            hasDiscoveries: false
+            hasDiscoveries: discovery.report?.findings.isEmpty == false
         )
     }
 }

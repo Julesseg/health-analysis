@@ -224,7 +224,6 @@ extension HealthAnalysisApplication {
         let series = try validatedAnalysisSeries(for: configuration)
         let inputs = series.inputs
         let output = series.output?.variable
-        let ratingOutputThreshold = output?.kind.ratingThreshold
 
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = configuration.timeZone
@@ -247,41 +246,10 @@ extension HealthAnalysisApplication {
             inputs: inputs, manualLog: manualLog,
             window: configuration.behaviorWindow, history: configuration.history, asOf: asOf, calendar: calendar
         )
-        let modeledInputs = inputs.enumerated().map { index, input in
-            let variable = input.variable
-            return AnalysisModeledInput(
-                series: variable.id, name: variable.name, unit: variable.unit,
-                role: index < configuration.inputs.count ? .input : .adjustment,
-                defaultDayCount: dataset.observations.count { $0.inputs[index].origin != .observation },
-                kind: variable.kind
-            )
-        }
-        let assessment: NumericAnalysis
-        if output?.kind == .tracked(.count) {
-            assessment = CountAnalysis.assess(
-                dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar
-            )
-        } else {
-            assessment = NumericAnalysis.assess(
-                dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar,
-                behaviorWindow: configuration.behaviorWindow, practicalDifference: practicalDifference,
-                interaction: configuration.interaction, ratingOutputThreshold: ratingOutputThreshold
-            )
-        }
-        return AnalysisResult(
-            configuration: configuration,
-            outputSource: dataset.outputSource,
-            healthHistoryReadAt: outputHistory.healthReadAt,
-            lastHealthReadFailure: outputHistory.healthReadFailure,
-            observations: dataset.observations,
-            coverage: dataset.coverage,
-            model: assessment.model,
-            modeledInputs: modeledInputs,
-            estimates: assessment.estimates,
-            interaction: assessment.interaction,
-            evidence: assessment.evidence,
-            outputVariable: output,
-            inspection: dataset.inspection
+        return AnalysisResult.assess(
+            configuration: configuration, dataset: dataset, inputs: inputs.map(\.variable), output: output,
+            calendar: calendar, practicalDifference: practicalDifference,
+            lastReadAt: outputHistory.healthReadAt, lastReadFailure: outputHistory.healthReadFailure
         )
     }
 
@@ -369,4 +337,55 @@ extension HealthAnalysisApplication {
             return []
         }
     }
+}
+
+extension AnalysisResult {
+    static func assess(
+        configuration: AnalysisConfiguration, dataset: TemporalAnalysisDataset, inputs: [AnalysisVariable],
+        output: AnalysisVariable? = nil, calendar: Calendar, practicalDifference: Double,
+        lastReadAt: Date?, lastReadFailure: HealthMeasurementReadFailure? = nil, exploratory: Bool = false
+    ) -> Self {
+        let modeledInputs = inputs.enumerated().map { index, variable in
+            return AnalysisModeledInput(
+                series: variable.id, name: variable.name, unit: variable.unit,
+                role: index < configuration.inputs.count ? .input : .adjustment,
+                defaultDayCount: dataset.observations.count { $0.inputs[index].origin != .observation },
+                kind: variable.kind
+            )
+        }
+        let assessment: NumericAnalysis
+        if output?.kind == .tracked(.count) {
+            assessment = CountAnalysis.assess(
+                dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar
+            )
+        } else {
+            assessment = NumericAnalysis.assess(
+                dataset.observations, inputs: modeledInputs, coverage: dataset.coverage, calendar: calendar,
+                behaviorWindow: configuration.behaviorWindow, practicalDifference: practicalDifference,
+                interaction: configuration.interaction, ratingOutputThreshold: output?.kind.ratingThreshold
+            )
+        }
+        return AnalysisResult(
+            configuration: configuration,
+            outputSource: dataset.outputSource,
+            healthHistoryReadAt: lastReadAt,
+            lastHealthReadFailure: lastReadFailure,
+            observations: dataset.observations,
+            coverage: dataset.coverage,
+            model: assessment.model,
+            modeledInputs: modeledInputs,
+            estimates: assessment.estimates,
+            interaction: assessment.interaction,
+            evidence: exploratory && assessment.evidence.grade != .insufficient
+                ? AnalysisEvidence(
+                    grade: .low, reasons: assessment.evidence.reasons,
+                    defaultDayCount: assessment.evidence.defaultDayCount,
+                    dependenceLagDays: assessment.evidence.dependenceLagDays
+                )
+                : assessment.evidence,
+            outputVariable: output,
+            inspection: dataset.inspection
+        )
+    }
+
 }

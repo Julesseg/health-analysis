@@ -24,7 +24,9 @@ struct ContentView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             Tab("Insights", systemImage: "lightbulb", value: Destination.insights) {
-                destination("Insights") { insights }
+                destination("Insights") {
+                    InsightsView(application: application) { selectedTab = .explore }
+                }
             }
             Tab("Explore", systemImage: "magnifyingglass", value: Destination.explore) {
                 destination("Explore") { ExploreView(application: application) }
@@ -64,25 +66,6 @@ struct ContentView: View {
                         }
                     }
                 }
-        }
-    }
-
-    private var insights: some View {
-        List {
-            if application.firstUse.step != .complete {
-                Section {
-                    NavigationLink("Get started") {
-                        FirstUseView(application: application) { selectedTab = .explore }
-                    }
-                }
-            }
-            SavedAnalysisListSection(application: application, followingOnly: true)
-            if !overview.hasDiscoveries {
-                Section("Discovered for you") {
-                    Text("No discoveries yet")
-                }
-            }
-            LatestHealthMeasurementsSection(history: application.healthMeasurements)
         }
     }
 

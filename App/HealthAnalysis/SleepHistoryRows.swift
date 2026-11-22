@@ -14,19 +14,20 @@ extension HealthMetricPresentation {
 
 struct SleepHistoryRows: View {
     let episodes: [SleepEpisode]
+    @Environment(\.locale) private var locale
 
     var body: some View {
         ForEach(episodes) { episode in
             let date = dateFormat(in: episode.timeZone)
             let time = date.hour().minute()
             VStack(alignment: .leading, spacing: 4) {
-                Text("Wake date: \(episode.wakeTime, format: date)")
+                Text("Wake date: \(episode.wakeTime.formatted(date))")
                     .font(.headline)
                     .accessibilityIdentifier("sleep.wakeDate")
                 Text(Duration.seconds(episode.duration), format: .units(allowed: [.hours, .minutes, .seconds], width: .wide))
                 Group {
-                    Text("Sleep started: \(episode.startDate, format: time)")
-                    Text("Wake time: \(episode.wakeTime, format: time)")
+                    Text("Sleep started: \(episode.startDate.formatted(time))")
+                    Text("Wake time: \(episode.wakeTime.formatted(time))")
                     Text(episode.source.name)
                     switch episode.timeZoneEvidence {
                     case .sampleMetadata(let identifier, _):
@@ -42,7 +43,7 @@ struct SleepHistoryRows: View {
     }
 
     private func dateFormat(in timeZone: TimeZone) -> Date.FormatStyle {
-        var format = Date.FormatStyle.dateTime.year().month(.abbreviated).day()
+        var format = Date.FormatStyle.dateTime.year().month(.abbreviated).day().locale(locale)
         format.timeZone = timeZone
         return format
     }

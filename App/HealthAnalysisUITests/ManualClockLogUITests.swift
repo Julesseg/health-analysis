@@ -39,7 +39,8 @@ final class ManualClockLogUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Day reviewed"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Assumed default"].exists)
 
-        approximate.tap()
+        let switchControl = approximate.switches.firstMatch
+        (switchControl.exists ? switchControl : approximate).tap()
         XCTAssertEqual(approximate.value as? String, "1")
         XCTAssertTrue(app.staticTexts["Saved"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Review needed"].exists)

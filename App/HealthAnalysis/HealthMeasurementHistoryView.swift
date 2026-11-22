@@ -5,6 +5,7 @@ struct HealthMeasurementHistoryView: View {
     let history: HealthMeasurementHistory
     let presentation: HealthMetricPresentation
     @Environment(\.calendar) private var calendar
+    @Environment(\.locale) private var locale
     @State private var preferenceSaveFailed = false
     private var metric: HealthMeasurement.Metric { presentation.metric }
 
@@ -69,10 +70,10 @@ struct HealthMeasurementHistoryView: View {
                     .accessibilityValue(Text(coverage.daysWithoutMeasurements, format: .number))
                     .accessibilityIdentifier("health.coverage.daysWithoutMeasurements")
                     LabeledContent(presentation.firstDateTitle) {
-                        Text(coverage.firstMeasurement, format: dateFormat(in: coverage.firstMeasurementTimeZone))
+                        Text(verbatim: coverage.firstMeasurement.formatted(dateFormat(in: coverage.firstMeasurementTimeZone)))
                     }
                     LabeledContent(presentation.latestDateTitle) {
-                        Text(coverage.latestMeasurement, format: dateFormat(in: coverage.latestMeasurementTimeZone))
+                        Text(verbatim: coverage.latestMeasurement.formatted(dateFormat(in: coverage.latestMeasurementTimeZone)))
                     }
                 }
                 Section("History") {
@@ -104,7 +105,9 @@ struct HealthMeasurementHistoryView: View {
     }
 
     private func dateFormat(in timeZone: TimeZone?) -> Date.FormatStyle {
-        var format = Date.FormatStyle.dateTime.year().month(.abbreviated).day()
+        var format = Date.FormatStyle.dateTime.year().month(.abbreviated).day().locale(locale)
+        format.calendar = calendar
+        format.timeZone = calendar.timeZone
         if let timeZone { format.timeZone = timeZone }
         return format
     }

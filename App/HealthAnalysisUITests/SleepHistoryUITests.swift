@@ -28,10 +28,8 @@ final class SleepHistoryUITests: XCTestCase {
         show(gap, in: app)
         XCTAssertEqual(gap.value as? String, "1")
 
-        let march31 = app.staticTexts.matching(identifier: "sleep.wakeDate")
-            .containing(NSPredicate(format: "label CONTAINS %@", "Mar 31, 2026")).firstMatch
-        let march29 = app.staticTexts.matching(identifier: "sleep.wakeDate")
-            .containing(NSPredicate(format: "label CONTAINS %@", "Mar 29, 2026")).firstMatch
+        let march31 = wakeDate("Mar 31, 2026", in: app)
+        let march29 = wakeDate("Mar 29, 2026", in: app)
         show(march31, in: app)
         show(app.staticTexts["8 hours"], in: app)
         XCTAssertTrue(app.staticTexts["Fixture Watch"].firstMatch.exists)
@@ -46,6 +44,13 @@ final class SleepHistoryUITests: XCTestCase {
         show(app.staticTexts["6 hours"], in: app)
         XCTAssertTrue(march31.exists)
         XCTAssertFalse(app.staticTexts["8 hours"].exists)
+    }
+
+    @MainActor
+    private func wakeDate(_ date: String, in app: XCUIApplication) -> XCUIElement {
+        app.staticTexts.matching(
+            NSPredicate(format: "identifier == %@ AND label CONTAINS %@", "sleep.wakeDate", date)
+        ).firstMatch
     }
 
     @MainActor

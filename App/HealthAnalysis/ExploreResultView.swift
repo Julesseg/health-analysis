@@ -46,7 +46,9 @@ struct ExploreResultView<Status: View>: View {
                         Text("With \(other.name) at \(reference.value, format: .number) \(other.unit).")
                             .foregroundStyle(.secondary)
                     }
-                    LabeledContent("Dependence-adjusted interval") {
+                    let intervalTitle: LocalizedStringKey = estimate.scale == .proportionalCountChange
+                        ? "Approximate 95% uncertainty interval" : "Dependence-adjusted interval"
+                    LabeledContent(intervalTitle) {
                         Text(intervalLabel(estimate, isSleepDuration: isSleepDuration))
                     }
                     .accessibilityIdentifier(index == 0 ? "explore.uncertainty" : "explore.uncertainty.\(index)")
@@ -387,9 +389,9 @@ private func estimateLabel(_ estimate: AnalysisEstimate, input: AnalysisModeledI
     let countInput = input.kind == .tracked(.count)
     if estimate.scale == .proportionalCountChange {
         if countInput {
-            return Text("\(estimate.difference, format: countPercent) in expected daily count per additional event")
+            return Text("\(estimate.difference, format: countPercent) change in expected daily count per additional event")
         }
-        return Text("\(estimate.difference, format: countPercent) in expected daily count per \(estimate.inputIncrement, format: .number) \(input.unit) increase")
+        return Text("\(estimate.difference, format: countPercent) change in expected daily count per \(estimate.inputIncrement, format: .number) \(input.unit) increase")
     }
     if isSleepDuration {
         if countInput {

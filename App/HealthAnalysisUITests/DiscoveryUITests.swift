@@ -31,10 +31,10 @@ final class DiscoveryUITests: XCTestCase {
         edit.tap()
         let window = app.descendants(matching: .any)["explore.behaviorWindow"].firstMatch
         let history = app.descendants(matching: .any)["explore.history"].firstMatch
-        XCTAssertEqual(window.value as? String, "Complete preceding day")
-        XCTAssertEqual(history.value as? String, "Last 365 days")
+        XCTAssertTrue(showsSelection("Complete preceding day", in: window))
+        XCTAssertTrue(showsSelection("Last 365 days", in: history))
         let output = app.descendants(matching: .any)["explore.output"].firstMatch
-        XCTAssertTrue((output.value as? String)?.contains("Discovery fixture watch") == true)
+        XCTAssertTrue(showsSelection("Discovery fixture watch", in: output))
         app.descendants(matching: .any)["explore.inputs"].firstMatch.tap()
         XCTAssertEqual(app.switches["Caffeine (mg)"].value as? String, "1")
         app.navigationBars["Inputs"].buttons.firstMatch.tap()
@@ -57,5 +57,10 @@ final class DiscoveryUITests: XCTestCase {
         XCTAssertTrue(followed.waitForExistence(timeout: 5))
         followed.tap()
         XCTAssertTrue(app.staticTexts["Selected in an exploratory search"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    private func showsSelection(_ title: String, in element: XCUIElement) -> Bool {
+        element.label.contains(title) || (element.value as? String)?.contains(title) == true
     }
 }

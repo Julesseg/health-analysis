@@ -36,10 +36,11 @@ final class ExploreAnalysisUITests: XCTestCase {
         analyze.tap()
         XCTAssertTrue(app.staticTexts["Higher caffeine amounts were associated with higher resting heart rate."]
             .waitForExistence(timeout: 5))
+        let interval = app.descendants(matching: .any)["explore.uncertainty"].firstMatch
+        XCTAssertTrue(interval.exists)
         let chart = app.descendants(matching: .any)["explore.estimateChart"].firstMatch
         for _ in 0..<3 where !chart.isHittable { app.swipeUp() }
         XCTAssertTrue(chart.isHittable)
-        XCTAssertTrue(app.staticTexts["Approximate 95% uncertainty interval"].exists)
         let coverage = app.buttons["Usable dates and gaps"]
         for _ in 0..<4 where !coverage.isHittable { app.swipeUp() }
         XCTAssertTrue(coverage.isHittable)

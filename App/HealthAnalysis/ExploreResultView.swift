@@ -44,6 +44,7 @@ struct ExploreResultView: View {
                 LabeledContent("Approximate 95% uncertainty interval") {
                     Text(intervalLabel(estimate))
                 }
+                .accessibilityIdentifier("explore.uncertainty")
                 EstimateChart(estimate: estimate)
                 if estimate.finding == .nearZero {
                     Text("The full interval is within 1 bpm of zero per 100 mg of caffeine.")

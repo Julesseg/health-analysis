@@ -7,6 +7,7 @@ struct ExploreResultView<Status: View>: View {
     let result: AnalysisResult
     @ViewBuilder let status: () -> Status
 
+    private var configuration: AnalysisConfiguration { result.configuration }
     private var isSleepDuration: Bool { result.configuration.output.isSleepDuration }
 
     var body: some View {
@@ -19,7 +20,14 @@ struct ExploreResultView<Status: View>: View {
 
     @ViewBuilder
     private func findings(_ result: AnalysisResult) -> some View {
-        if result.estimates.isEmpty {
+        if let pair = configuration.interaction,
+           let focal = result.modeledInputs.first(where: { $0.series == pair.focal }),
+           let moderator = result.modeledInputs.first(where: { $0.series == pair.moderator }) {
+            InteractionResultSection(
+                focal: focal, moderator: moderator, estimate: result.interaction, isSleepDuration: isSleepDuration
+            )
+        }
+        if result.estimates.isEmpty && configuration.interaction == nil {
             Section {
                 Text("There isn’t enough evidence to estimate this association.")
                     .font(.headline)
@@ -32,6 +40,11 @@ struct ExploreResultView<Status: View>: View {
                         .font(.headline)
                     EstimateDifference(estimate: estimate, input: input, isSleepDuration: isSleepDuration)
                         .monospacedDigit()
+                    if let reference = estimate.reference,
+                       let other = result.modeledInputs.first(where: { $0.series == reference.input }) {
+                        Text("With \(other.name) at \(reference.value, format: .number) \(other.unit).")
+                            .foregroundStyle(.secondary)
+                    }
                     LabeledContent("Dependence-adjusted interval") {
                         Text(intervalLabel(estimate, isSleepDuration: isSleepDuration))
                     }
@@ -73,6 +86,12 @@ struct ExploreResultView<Status: View>: View {
                 ForEach(result.modeledInputs.filter { reason.affectedInputs.contains($0.series) }) { input in
                     Text("\(input.name) (\(input.unit))")
                 }
+                if case .poorlyRepresentedInteraction(let support) = reason {
+                    InteractionSupportRows(support: support)
+                }
+            }
+            if let comparison = result.interaction {
+                InteractionSupportRows(support: comparison.support)
             }
             if let days = result.evidence.dependenceLagDays {
                 Text("The interval allows for dependence across up to \(days) calendar days.")
@@ -354,6 +373,7 @@ private extension AnalysisModel {
         switch self {
         case .caffeineLinearV1: "Single-input linear association"
         case .numericLinearV1: "Numeric linear regression"
+        case .numericInteractionV1: "Numeric linear regression with an interaction"
         }
     }
 }
@@ -381,6 +401,7 @@ private extension AnalysisEvidence.Reason {
         case .collinearInputs: "These inputs vary together too closely to estimate their separate associations."
         case .defaultOnlyInputs: "These inputs only have defaults on paired days."
         case .lowVariationInputs: "These inputs vary too little on paired days."
+        case .poorlyRepresentedInteraction: "Too few fully recorded windows support the lower and higher combinations."
         }
     }
 

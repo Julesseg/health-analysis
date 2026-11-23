@@ -48,7 +48,8 @@ struct NumericAnalysis {
         _ observations: [AnalysisObservation], inputs: [AnalysisModeledInput],
         coverage: AnalysisCoverage, calendar: Calendar,
         behaviorWindow: AnalysisBehaviorWindow = .precedingDay, practicalDifference: Double = 1,
-        interaction: AnalysisInteraction? = nil, ratingOutputThreshold: Int? = nil, outputIsClock: Bool = false
+        interaction: AnalysisInteraction? = nil, ratingOutputThreshold: Int? = nil, outputIsClock: Bool = false,
+        interactionReference: AnalysisInteractionEstimate? = nil
     ) -> Self {
         let usesClock = outputIsClock || inputs.contains { $0.kind == .tracked(.timeOfDay) }
         let usesRatings = ratingOutputThreshold != nil || inputs.contains { $0.kind?.ratingThreshold != nil }
@@ -120,7 +121,9 @@ struct NumericAnalysis {
                   let moderator = inputs.firstIndex(where: { $0.series == interaction.moderator }) else {
                 return result(.insufficient, [.uncertaintyUnavailable])
             }
-            switch NumericInteractionDesign.prepare(inputs: inputs, focal: focal, moderator: moderator, rows: observations) {
+            switch NumericInteractionDesign.prepare(
+                inputs: inputs, focal: focal, moderator: moderator, rows: observations, reference: interactionReference
+            ) {
             case .supported(let design):
                 interactionDesign = design
                 columns.append(design.productColumn)

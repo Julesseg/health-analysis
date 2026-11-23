@@ -27,7 +27,7 @@ struct HealthAnalysisApp: App {
             return Configuration(application: fixture)
         }
         if let fixture = ClockAnalysisUIFixture.applicationForLaunch() {
-            return fixture
+            return Configuration(application: fixture)
         }
         if let fixture = CountAnalysisUIFixture.applicationForLaunch() {
             return Configuration(application: fixture)
@@ -72,6 +72,9 @@ struct HealthAnalysisApp: App {
                 .onChange(of: scenePhase, initial: true) { _, phase in
                     lifecycle.scenePhaseChanged(phase)
                 }
+                #if DEBUG
+                .task { await DiscoveryUIFixture.prepareSavedDiscovery(in: Self.configuration.application) }
+                #endif
         }
     }
 }

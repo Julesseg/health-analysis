@@ -54,17 +54,19 @@ jobs:
           python3 - <<'PY'
           import json, os, subprocess
 
-          devices = json.loads(subprocess.check_output(
-              ["xcrun", "simctl", "list", "devices", "available", "--json"]
-          ))["devices"]
+          inventory = json.loads(subprocess.check_output(
+              ["xcrun", "simctl", "list", "--json"]
+          ))
           candidates = []
-          for runtime, simulators in devices.items():
-              if not runtime.startswith("com.apple.CoreSimulator.SimRuntime.iOS-"):
+          for runtime in inventory["runtimes"]:
+              identifier = runtime["identifier"]
+              if not runtime["isAvailable"] or not identifier.startswith("com.apple.CoreSimulator.SimRuntime.iOS-"):
                   continue
-              version = tuple(map(int, runtime.split(".iOS-")[1].split("-")))
+              version = tuple(map(int, runtime["version"].split(".")))
               if version >= (27, 0):
+                  simulators = inventory["devices"].get(identifier, [])
                   candidates.extend((version, sim["name"], sim["udid"]) for sim in simulators
-                                    if sim["name"].startswith("iPhone"))
+                                    if sim["isAvailable"] and sim["name"].startswith("iPhone"))
           if not candidates:
               raise SystemExit("No available iPhone simulator with iOS 27 or later.")
           version, name, udid = max(candidates)

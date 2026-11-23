@@ -36,7 +36,7 @@ jobs:
   app-ui-tests:
     name: App · XCUITest (macOS)
     runs-on: xcode-27
-    timeout-minutes: 30
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@v4
 

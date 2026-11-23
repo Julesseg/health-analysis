@@ -117,16 +117,19 @@ struct InteractionResultSection: View {
     }
 
     private func chart(_ estimate: AnalysisInteractionEstimate) -> some View {
-        Chart {
-            RuleMark(x: .value("Zero difference", 0.0))
-                .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                .foregroundStyle(.secondary)
-            marks(estimate.lowerCondition, level: .lower)
-            marks(estimate.higherCondition, level: .higher)
+        VStack {
+            Chart {
+                RuleMark(x: .value("Zero difference", 0.0))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    .foregroundStyle(.secondary)
+                marks(estimate.lowerCondition, level: .lower)
+                marks(estimate.higherCondition, level: .higher)
+            }
+            .chartYScale(domain: [Level.lower.label, Level.higher.label])
+            .chartXAxisLabel(axisLabel, position: .bottom, alignment: .center)
+            .frame(height: chartHeight)
+            .accessibilityHidden(true)
         }
-        .chartYScale(domain: [Level.lower.label, Level.higher.label])
-        .chartXAxisLabel(axisLabel, position: .bottom, alignment: .center)
-        .frame(height: chartHeight)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("Adjusted condition estimates for \(focal.name) across \(moderator.name)"))
         .accessibilityValue(Text(finding(estimate.finding)))

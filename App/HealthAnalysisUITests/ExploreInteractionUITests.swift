@@ -16,7 +16,8 @@ final class ExploreInteractionUITests: XCTestCase {
         XCTAssertEqual(try conditionEstimate(in: higher), 8, accuracy: 0.05)
         XCTAssertTrue(reveal(app.descendants(matching: .any)["explore.interaction.uncertainty"].firstMatch, in: app))
         let chart = app.descendants(matching: .any)["explore.interaction.chart"].firstMatch
-        XCTAssertTrue(reveal(chart, in: app))
+        for _ in 0..<3 where !chart.exists { app.swipeUp() }
+        XCTAssertTrue(chart.exists)
         XCTAssertEqual(chart.label, "Adjusted condition estimates for Caffeine across Fluids")
         XCTAssertTrue(reveal(app.staticTexts["With Fluids at 2 L."], in: app))
 

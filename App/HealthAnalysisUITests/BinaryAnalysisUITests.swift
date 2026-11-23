@@ -29,7 +29,11 @@ final class BinaryAnalysisUITests: XCTestCase {
         XCTAssertTrue(shift.waitForExistence(timeout: 5))
         shift.tapExploreSwitch()
         app.navigationBars["Account for"].buttons.firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["Interactions with yes/no variables are unavailable."].exists)
+        let limitation = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "Interactions with yes/no variables are unavailable.")
+        ).firstMatch
+        for _ in 0..<3 where !limitation.isHittable { app.swipeUp() }
+        XCTAssertTrue(limitation.isHittable)
         XCTAssertFalse(app.descendants(matching: .any)["explore.interaction"].firstMatch.exists)
 
         let analyze = app.buttons["Analyze"]

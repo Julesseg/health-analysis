@@ -51,7 +51,7 @@ final class HealthMeasurementUITests: XCTestCase {
 
         app.tabBars.buttons["Insights"].tap()
         XCTAssertTrue(app.staticTexts["Latest measurements"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["62 beats per minute"].exists)
+        showHistory(in: app, measurement: "62 beats per minute")
         XCTAssertFalse(app.staticTexts["58 beats per minute"].exists)
     }
 

@@ -2,7 +2,7 @@
 
 The release workflow builds a **signed, installable `.ipa`** for every PR and
 publishes it to a GitHub Pages site, so you can install any PR's build on your
-iPhone straight from Safari, on GitHub's hosted `macos-15-intel` runner — no
+iPhone straight from Safari, on GitHub's hosted `xcode-27` runner — no
 self-hosted Mac required.
 
 Setup (Apple Developer console, repo secrets, Pages) is documented in the
@@ -13,7 +13,7 @@ The pipeline lives at [`.github/workflows/release.yml`](../.github/workflows/rel
 
 ```
 PR opened/updated
-   └─ build  (macos-15-intel)   archive + export an ad-hoc–signed app.ipa
+   └─ build  (xcode-27)   archive + export an ad-hoc–signed app.ipa
         └─ deploy (ubuntu) upsert this PR's slot, prune to 5, push build-history, deploy Pages
              └─ notify     optional ntfy ping with the install link
 ```
@@ -51,4 +51,4 @@ stays green — the installable build simply doesn't run.
   it read-modify-writes the shared `build-history` branch.
 - **Versioning:** the OTA manifest uses the short commit SHA as the bundle
   version, so reinstalling the same PR after a new push registers as an update.
-- **Xcode:** the build uses the runner's latest-stable Xcode, matching `ci.yml`.
+- **Xcode:** the build and UI-test jobs use stable Xcode 27.0 or later.

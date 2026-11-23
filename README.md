@@ -14,11 +14,11 @@ data collection and analysis are implemented.
   displays as Health Analysis and uses bundle ID `com.julesseguin.healthanalysis`.
   The UI test target is `HealthAnalysisUITests`.
 - The app targets iPhone on iOS 26 or later for native Liquid Glass. Build
-  with Xcode 26 or later in Swift 6 language mode. The Core package uses
+  with Xcode 27 or later in Swift 6 language mode. The Core package uses
   Swift tools 6.0 and CI runs it with Swift 6.0.3 on Linux.
 - CI runs on pull requests and pushes to `master`. It checks Core, the issue
-  dispatcher, and native launch and navigation on an iPhone simulator using
-  the stable Xcode available on the macOS runner.
+  dispatcher, and native UI journeys on an iPhone simulator running iOS 27 or
+  later.
 
 ```sh
 swift test --package-path Core

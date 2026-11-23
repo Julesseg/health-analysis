@@ -86,6 +86,39 @@ struct HRVImportTests {
         #expect(corrected.analysisLimitation == .unverifiedOriginalMeasureAndSummary)
     }
 
+    @Test func syncVersionsReconcileFreshUUIDsWithoutMergingSourcesOrRestoringSupersededSamples() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appending(path: "history.json")
+        let bridge = HealthMeasurement.Source(name: "Livity", bundleIdentifier: "fixture.bridge")
+        let watch = HealthMeasurement.Source(name: "Watch", bundleIdentifier: "fixture.watch")
+        let v1 = HealthMeasurement.HRVProvenance(quantityCount: 1, syncIdentifier: "night", syncVersion: 1)
+        let v2 = HealthMeasurement.HRVProvenance(quantityCount: 1, syncIdentifier: "night", syncVersion: 2)
+        let original = hrv(id: 1, type: .sdnn, day: 0, source: bridge, provenance: v1)
+        let replacement = hrv(id: 2, type: .sdnn, day: 1, source: bridge, provenance: v2)
+        let replay = hrv(id: 9, type: .sdnn, day: 1, source: bridge, provenance: v2)
+        let differentSource = hrv(id: 3, type: .sdnn, day: 0, source: watch, provenance: v1)
+        let differentType = hrv(id: 4, type: .rmssd, day: 0, source: bridge, provenance: v1)
+        let source = FixtureSource { anchors in
+            switch anchors["sdnn"] {
+            case nil:
+                [.init(queryID: "sdnn", anchor: Data([1]), added: [original, differentSource, differentType])]
+            case Data([1]):
+                [.init(queryID: "sdnn", anchor: Data([2]), added: [replay, replacement])]
+            default:
+                [.init(queryID: "sdnn", anchor: Data([3]), added: [original, replay], deleted: [replacement.id])]
+            }
+        }
+        let app = HealthAnalysisApplication(healthSource: source, healthHistoryStoreURL: url)
+        await app.healthMeasurements.refresh()
+        await app.healthMeasurements.refresh()
+        #expect(Set(app.healthMeasurements.history.map(\.id)) == [replacement.id, differentSource.id, differentType.id])
+
+        let reopened = HealthAnalysisApplication(healthSource: source, healthHistoryStoreURL: url)
+        await reopened.healthMeasurements.refresh()
+        #expect(Set(reopened.healthMeasurements.history.map(\.id)) == [differentSource.id, differentType.id])
+    }
+
     private func hrv(
         id: Int, type: HRVSeries.StoredType, day: Int, source: HealthMeasurement.Source,
         revision: HealthMeasurement.SourceRevision? = nil,

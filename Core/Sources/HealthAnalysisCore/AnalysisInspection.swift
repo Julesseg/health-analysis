@@ -26,6 +26,7 @@ public struct AnalysisInspection: Codable, Sendable {
         public internal(set) var trackingValue: ManualTrackingValue? = nil
         public internal(set) var excludedCategoryInputs: [ExcludedCategoryInput]? = nil
         public internal(set) var sleepTimeZoneEvidence: SleepEpisode.TimeZoneEvidence? = nil
+        public internal(set) var importedRecord: AnalysisImportedRecord? = nil
     }
 
     public let unpairedOutputs: [OutputWithoutPair]
@@ -42,6 +43,7 @@ public struct AnalysisOutputEvidence: Identifiable, Sendable {
     public let trackingValue: ManualTrackingValue?
     public let paired: Bool
     public let sleepTimeZoneEvidence: SleepEpisode.TimeZoneEvidence?
+    public internal(set) var importedRecord: AnalysisImportedRecord? = nil
     public internal(set) var excludedByCategory: Bool = false
 
     public var clockPrecision: ManualClockPrecision? {
@@ -62,6 +64,7 @@ public struct AnalysisInputEvidence: Sendable {
         public let outputAnchor: Date
         public let sleepTimeZoneEvidence: SleepEpisode.TimeZoneEvidence?
         public let input: AnalysisObservation.Input
+        public internal(set) var importedOutput: AnalysisImportedRecord? = nil
 
         public var entries: [AnalysisObservation.Input.Day] {
             input.days.isEmpty
@@ -98,7 +101,7 @@ extension AnalysisResult {
             AnalysisOutputEvidence(
                 date: $0.outputDate, anchor: $0.outputAnchor, value: $0.outputValue, source: outputSource,
                 origin: $0.outputOrigin, trackingValue: $0.outputTrackingValue, paired: true,
-                sleepTimeZoneEvidence: $0.sleepTimeZoneEvidence
+                sleepTimeZoneEvidence: $0.sleepTimeZoneEvidence, importedRecord: $0.importedOutput
             )
         }
         let unpaired = (inspection?.unpairedOutputs ?? []).map {
@@ -106,7 +109,7 @@ extension AnalysisResult {
                 date: $0.date, anchor: $0.anchor, value: $0.value, source: $0.source,
                 origin: $0.origin, trackingValue: $0.trackingValue, paired: false,
                 sleepTimeZoneEvidence: $0.sleepTimeZoneEvidence,
-                excludedByCategory: $0.excludedCategoryInputs != nil
+                importedRecord: $0.importedRecord, excludedByCategory: $0.excludedCategoryInputs != nil
             )
         }
         return (paired + unpaired).sorted { $0.date < $1.date }
@@ -118,7 +121,7 @@ extension AnalysisResult {
             return .init(
                 outputDate: row.outputDate, outputValue: row.outputValue,
                 outputOrigin: row.outputOrigin, outputTrackingValue: row.outputTrackingValue,
-                outputAnchor: row.outputAnchor, sleepTimeZoneEvidence: row.sleepTimeZoneEvidence, input: input
+                outputAnchor: row.outputAnchor, sleepTimeZoneEvidence: row.sleepTimeZoneEvidence, input: input, importedOutput: row.importedOutput
             )
         })
     }

@@ -3,7 +3,6 @@ import SwiftUI
 
 struct InsightsView: View {
     let application: HealthAnalysisApplication
-    @Binding var disabledSeries: Set<AnalysisSeriesID>
     let openExplore: () -> Void
     @Environment(\.timeZone) private var timeZone
 
@@ -41,6 +40,10 @@ struct InsightsView: View {
                 .foregroundStyle(.secondary)
                 .accessibilityIdentifier("discovery.unavailable")
         }
+        if application.discoveryIsStale && activity.unavailableStatus == nil {
+            Text("This search used earlier data or selections.")
+                .foregroundStyle(.secondary)
+        }
         if let report = activity.report {
             if report.findings.isEmpty && activity.unavailableStatus == nil && !activity.isSearching {
                 Text(report.status.message(familySize: report.candidates.count))
@@ -67,9 +70,7 @@ struct InsightsView: View {
         } else if activity.report?.candidates.isEmpty == false {
             Button("Search again") {
                 Task {
-                    await application.refreshDiscoveries(
-                        timeZone: timeZone, enabledSeries: Set(application.discoverySeries).subtracting(disabledSeries)
-                    )
+                    await application.refreshDiscoveries(timeZone: timeZone)
                 }
             }
                 .disabled(activity.isSearching)
@@ -78,26 +79,34 @@ struct InsightsView: View {
 
     private var discoveryVariables: some View {
         Form {
-            Section {
-                ForEach(application.discoverySeries, id: \.self) { series in
-                    Toggle(isOn: Binding {
-                        !disabledSeries.contains(series)
-                    } set: { enabled in
-                        if enabled {
-                            disabledSeries.remove(series)
-                        } else {
-                            disabledSeries.insert(series)
-                        }
-                    }) {
-                        application.analysisSeriesTitle(series)
-                    }
+            Section("Inputs") {
+                ForEach(application.discoveryInputSeries, id: \.self) { series in
+                    discoveryToggle(series)
                 }
-            } footer: {
-                Text("Choose the variables to include in automatic discovery.")
+            }
+            Section("Outputs") {
+                ForEach(application.discoveryOutputSeries, id: \.self) { series in
+                    discoveryToggle(series)
+                }
+            }
+            Section("Search scope") {
+                Text("Discovery tests up to four enabled daily quantities against resting heart rate and sleep duration over 1, 7, and 30 days.")
+                Text("Use Explore for counts, yes/no values, ratings, categories, clock times, workout and running measurements, Health inputs, and daily-log outputs.")
+                Text("HRV analysis requires verification of the original measurement and summary.")
             }
         }
         .navigationTitle("Discovery variables")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func discoveryToggle(_ series: AnalysisSeriesID) -> some View {
+        Toggle(isOn: Binding {
+            !application.discovery.disabledSeries.contains(series)
+        } set: { enabled in
+            application.discovery.setEnabled(enabled, for: series)
+        }) {
+            application.analysisSeriesTitle(series)
+        }
     }
 }
 

@@ -121,6 +121,34 @@ struct ManualLogTests {
         #expect(reopened.manualLog.dailyQuantities(on: firstDay, locale: french).first?.recordedValue == nil)
     }
 
+    @Test func movingTheLegacyLogPreservesEntriesAndReviewsAcrossReopen() throws {
+        let directory = try temporaryDirectory()
+        let files = FileManager.default
+        defer { try? files.removeItem(at: directory) }
+        let legacy = directory.appendingPathComponent("manual-log.json")
+        let localDirectory = directory.appendingPathComponent("ManualLog")
+        let local = localDirectory.appendingPathComponent("manual-log.json")
+        let original = HealthAnalysisApplication(manualLogStoreURL: legacy)
+        let quantity = try original.manualLog.createQuantity(
+            name: "Adjustment", unit: "mg", defaultValue: 0, startsOn: previousDay
+        )
+        original.manualLog.editQuantity(quantity.id, on: previousDay, text: "-7", locale: french)
+        try original.manualLog.confirmDay(previousDay)
+        try Data().write(to: localDirectory)
+
+        let migrated = HealthAnalysisApplication(manualLogStoreURL: local, legacyManualLogStoreURL: legacy)
+        #expect(migrated.manualLog.dailyQuantity(quantity.id, on: previousDay, locale: french)?.recordedValue == -7)
+        #expect(files.fileExists(atPath: legacy.path))
+        try files.removeItem(at: localDirectory)
+        migrated.manualLog.editQuantity(quantity.id, on: firstDay, text: "8", locale: french)
+
+        #expect(!files.fileExists(atPath: legacy.path))
+        let reopened = HealthAnalysisApplication(manualLogStoreURL: local, legacyManualLogStoreURL: legacy)
+        #expect(reopened.manualLog.dailyQuantity(quantity.id, on: firstDay, locale: french)?.recordedValue == 8)
+        #expect(reopened.manualLog.dailyQuantity(quantity.id, on: previousDay, locale: french)?.recordedValue == -7)
+        #expect(reopened.manualLog.review(on: previousDay) != nil)
+    }
+
     private func temporaryDirectory() throws -> URL {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)

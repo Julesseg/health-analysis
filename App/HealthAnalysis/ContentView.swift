@@ -3,7 +3,6 @@ import SwiftUI
 
 struct ContentView: View {
     let application: HealthAnalysisApplication
-    @AppStorage("disabledDiscoverySeries") private var storedDisabledSeries = Data()
     @Environment(\.timeZone) private var timeZone
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab: Destination = .insights
@@ -24,17 +23,8 @@ struct ContentView: View {
 
     private var overview: HealthAnalysisApplication.Overview { application.overview }
 
-    private var disabledSeries: Binding<Set<AnalysisSeriesID>> {
-        Binding {
-            (try? JSONDecoder().decode(Set<AnalysisSeriesID>.self, from: storedDisabledSeries)) ?? []
-        } set: { series in
-            if let encoded = try? JSONEncoder().encode(series) { storedDisabledSeries = encoded }
-        }
-    }
-
     private struct InsightsRequest: Equatable {
-        let historyVersion: Int
-        let enabledSeries: Set<AnalysisSeriesID>
+        let discovery: HealthAnalysisApplication.DiscoveryRequest
         let timeZone: TimeZone
         let followedIDs: [SavedAnalysis.ID]
         let isBackground: Bool
@@ -42,15 +32,14 @@ struct ContentView: View {
 
     var body: some View {
         let request = InsightsRequest(
-            historyVersion: application.healthMeasurements.reconciliationVersion,
-            enabledSeries: Set(application.discoverySeries).subtracting(disabledSeries.wrappedValue),
+            discovery: application.discoveryRequest,
             timeZone: timeZone, followedIDs: application.savedAnalyses.following.map(\.id),
             isBackground: scenePhase == .background
         )
         TabView(selection: $selectedTab) {
             Tab("Insights", systemImage: "lightbulb", value: Destination.insights) {
                 destination("Insights") {
-                    InsightsView(application: application, disabledSeries: disabledSeries) { selectedTab = .explore }
+                    InsightsView(application: application) { selectedTab = .explore }
                 }
             }
             Tab("Explore", systemImage: "magnifyingglass", value: Destination.explore) {
@@ -62,7 +51,7 @@ struct ContentView: View {
         }
         .task(id: request) {
             guard !request.isBackground else { return }
-            await application.refreshReconciledHealthInsights(timeZone: request.timeZone, enabledSeries: request.enabledSeries)
+            await application.refreshReconciledHealthInsights(timeZone: request.timeZone)
         }
         .sheet(item: $presentedSheet) { sheet in
             NavigationStack {

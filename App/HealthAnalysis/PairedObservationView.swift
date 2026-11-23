@@ -14,6 +14,15 @@ struct PairedObservationView: View {
                     valueRow(name: output.name, categories: output.categories, value: value, date: observation.outputDate, origin: origin)
                 }
             }
+            if observation.importedOutput != nil || result.outputVariable?.quantityUnit != nil {
+                Section("Output") {
+                    LabeledContent { result.analysisOutputValue(observation.outputValue) } label: {
+                        result.analysisOutputTitle
+                    }
+                    AnalysisOutputProvenanceRows(result: result, origin: observation.outputOrigin, trackingValue: nil)
+                    ImportedRecordRows(record: observation.importedOutput, format: dayFormat)
+                }
+            }
             if let evidence = observation.sleepTimeZoneEvidence {
                 Section("Output") {
                     LabeledContent { result.analysisOutputValue(observation.outputValue, trackingValue: nil) } label: {
@@ -24,9 +33,23 @@ struct PairedObservationView: View {
             }
             Section("Inputs and adjustments") {
                 ForEach(observation.inputs, id: \.series) { value in
-                    if let input = result.modeledInputs.first(where: { $0.series == value.series }),
-                       let tracked = value.trackingValue {
-                        valueRow(name: input.name, categories: input.categories, value: tracked, date: value.date, origin: value.origin)
+                    if let input = result.modeledInputs.first(where: { $0.series == value.series }) {
+                        if let tracked = value.trackingValue {
+                            valueRow(name: input.name, categories: input.categories, value: tracked, date: value.date, origin: value.origin)
+                        } else {
+                            let displayedValue = input.displayedValue(value.value, trackingValue: nil)
+                            LabeledContent(input.name) { displayedValue }
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel(Text(verbatim: input.name))
+                                .accessibilityValue(displayedValue)
+                                .accessibilityIdentifier("explore.pairedValue")
+                            ForEach(value.days, id: \.date) { day in
+                                if let record = day.importedRecord {
+                                    LabeledContent("Source", value: record.source.name)
+                                    ImportedRecordRows(record: record, format: dayFormat)
+                                }
+                            }
+                        }
                     }
                 }
             }

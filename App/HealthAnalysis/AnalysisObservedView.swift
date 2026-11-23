@@ -162,7 +162,12 @@ struct AnalysisInputEvidenceView: View {
                         LabeledContent("Approximate entries", value: (evidence.approximateCount ?? 0).formatted())
                     }
                 }
-                LabeledContent("Source") { Text("Daily log") }
+                if let source = entries.first?.importedRecord?.source {
+                    LabeledContent("Source", value: source.name)
+                    LabeledContent("Source identifier", value: source.bundleIdentifier)
+                } else if input.series.isDailyLog {
+                    LabeledContent("Source") { Text("Daily log") }
+                }
             }
             if !entries.isEmpty {
                 Section("Paired values") {
@@ -208,6 +213,7 @@ struct AnalysisInputEvidenceView: View {
                 }
                 AnalysisOutputProvenanceRows(result: result, origin: pair.outputOrigin, trackingValue: pair.outputTrackingValue)
                 SleepTimingProvenanceRows(anchor: pair.outputAnchor, evidence: pair.sleepTimeZoneEvidence)
+                ImportedRecordRows(record: pair.importedOutput, format: result.analysisDateFormat)
             }
             Section("Input window") {
                 LabeledContent(input.name) {
@@ -237,8 +243,12 @@ struct AnalysisInputEvidenceView: View {
                 }
             }
             AnalysisClockPrecisionRow(precision: entry.clockPrecision)
-            NavigationLink("Open daily log") {
-                ManualLogView(log: log, initialDay: ManualLogDay(entry.date, timeZone: result.configuration.timeZone))
+            if let record = entry.importedRecord {
+                ImportedRecordRows(record: record, format: result.analysisDateFormat)
+            } else if input.series.isDailyLog {
+                NavigationLink("Open daily log") {
+                    ManualLogView(log: log, initialDay: ManualLogDay(entry.date, timeZone: result.configuration.timeZone))
+                }
             }
         } header: {
             Text(entry.date, format: result.analysisDateFormat)
@@ -312,5 +322,18 @@ private struct ObservedAnalysisAxis {
     private static func categoryID(_ value: ManualTrackingValue?) -> TrackingCategory.ID? {
         if case .category(let id)? = value { return id }
         return nil
+    }
+}
+
+struct ImportedRecordRows: View {
+    let record: AnalysisImportedRecord?
+    let format: Date.FormatStyle
+
+    var body: some View {
+        if let record {
+            LabeledContent("Recording began") { Text(record.start, format: format.hour().minute()) }
+            LabeledContent("Recording ended") { Text(record.end, format: format.hour().minute()) }
+            SleepTimingProvenanceRows(anchor: record.end, evidence: record.sleepTimeZoneEvidence)
+        }
     }
 }

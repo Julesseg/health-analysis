@@ -1,7 +1,21 @@
 import HealthAnalysisCore
 import SwiftUI
 
+extension AnalysisSeriesID {
+    var isDailyLog: Bool {
+        switch self {
+        case .manualQuantity, .manualTyped: true
+        default: false
+        }
+    }
+}
+
 extension AnalysisVariable {
+    var quantityUnit: String? {
+        if case .quantity(let unit) = kind { return unit }
+        return nil
+    }
+
     var analysisChoiceLabel: Text {
         kind.choiceLabel(name: name)
     }

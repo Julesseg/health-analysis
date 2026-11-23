@@ -12,19 +12,22 @@ public struct HealthAnalysisApplication: Sendable {
     public let manualLog: ManualLog
     public let savedAnalyses: SavedAnalyses
     public let firstUse: FirstUseSetup
-    public let discovery = DiscoveryActivity()
+    public let discovery: DiscoveryActivity
     let analysisFitter = AnalysisFitter()
 
     public init(
         healthSource: (any HealthMeasurementSource)? = nil,
         healthHistoryStoreURL: URL? = nil,
         manualLogStoreURL: URL? = nil,
+        legacyManualLogStoreURL: URL? = nil,
         savedAnalysesStoreURL: URL? = nil,
-        firstUseStoreURL: URL? = nil
+        firstUseStoreURL: URL? = nil,
+        discoveryPreferencesKey: String? = nil
     ) {
         healthMeasurements = HealthMeasurementHistory(source: healthSource, storeURL: healthHistoryStoreURL)
-        manualLog = ManualLog(storeURL: manualLogStoreURL)
+        manualLog = ManualLog(storeURL: manualLogStoreURL, legacyURL: legacyManualLogStoreURL)
         savedAnalyses = SavedAnalyses(storeURL: savedAnalysesStoreURL)
+        discovery = DiscoveryActivity(preferencesKey: discoveryPreferencesKey)
         firstUse = FirstUseSetup(health: healthMeasurements, storeURL: firstUseStoreURL)
     }
 

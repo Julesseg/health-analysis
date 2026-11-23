@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { dispatchReadyIssues } = require('./dispatch-ready-issues.cjs');
+const { dispatchReadyIssues, issuePreflight } = require('./dispatch-ready-issues.cjs');
 
 async function dispatchedIssues({ issues, blockers = {}, children = {} }) {
   const dispatched = [];
@@ -33,6 +33,7 @@ async function dispatchedIssues({ issues, blockers = {}, children = {} }) {
         actions: {
           async createWorkflowDispatch({ ref, inputs }) {
             assert.equal(ref, 'master');
+            assert.equal(inputs.origin, 'automatic');
             dispatched.push(Number(inputs.issue));
           },
           async listWorkflowRuns() {
@@ -78,4 +79,15 @@ test('skips an unblocked specification with native sub-issues', async () => {
   });
 
   assert.deepEqual(dispatched, [3]);
+});
+
+test('rechecks automatic readiness at spawn without restricting manual selection', () => {
+  const issue = { number: 4, state: 'open', labels: [] };
+  assert.equal(issuePreflight(issue, { origin: 'automatic', force: true }).skip, true);
+  assert.equal(issuePreflight(issue, { origin: 'manual', force: false }).skip, false);
+  issue.labels.push({ name: 'ready-for-agent' });
+  assert.equal(issuePreflight(issue, { origin: 'automatic', force: false }).skip, false);
+  issue.labels.push({ name: 'agent-dispatched' });
+  assert.equal(issuePreflight(issue, { origin: 'manual', force: false }).skip, true);
+  assert.equal(issuePreflight(issue, { origin: 'manual', force: true }).skip, false);
 });

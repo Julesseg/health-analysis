@@ -9,6 +9,7 @@ struct TemporalAnalysisDataset: Sendable {
         var source: HealthMeasurement.Source? = nil
         var origin: ManualValueOrigin? = nil
         var trackingValue: ManualTrackingValue? = nil
+        var importedRecord: AnalysisImportedRecord? = nil
         var sleepTimeZoneEvidence: SleepEpisode.TimeZoneEvidence? = nil
     }
 
@@ -24,7 +25,8 @@ struct TemporalAnalysisDataset: Sendable {
             let date = calendar.startOfDay(for: record.startDate)
             return Output(
                 date: date, anchor: record.startDate, behaviorCutoff: date,
-                value: record.value, source: record.source
+                value: record.value, source: record.source,
+                importedRecord: .init(source: record.source, start: record.startDate, end: record.endDate)
             )
         }
     }
@@ -42,7 +44,11 @@ struct TemporalAnalysisDataset: Sendable {
             guard let timing else {
                 return Output(
                     date: date, anchor: episode.wakeTime, behaviorCutoff: min(date, onsetDayInAnalysisZone),
-                    value: episode.duration / 3600, source: episode.source
+                    value: episode.duration / 3600, source: episode.source,
+                    importedRecord: .init(
+                        source: episode.source, start: episode.startDate, end: episode.wakeTime,
+                        sleepTimeZoneEvidence: episode.timeZoneEvidence
+                    )
                 )
             }
 
@@ -62,6 +68,21 @@ struct TemporalAnalysisDataset: Sendable {
                 date: date, anchor: anchor,
                 behaviorCutoff: min(date, onsetDayInAnalysisZone, calendar.startOfDay(for: localOnsetLabel)),
                 value: Double(hour * 60 + minute), source: episode.source, sleepTimeZoneEvidence: evidence
+            )
+        }
+    }
+
+    static func activityOutputs(
+        _ workouts: [HealthWorkout], variable: ActivityTrackingVariable, calendar: Calendar
+    ) -> [Output] {
+        DailyActivityHistory(workouts: workouts, variable: variable, calendar: calendar).days.compactMap { day in
+            guard case .observed(let amount) = day.value, let source = day.workouts.first?.source,
+                  let start = day.workouts.map(\.startDate).min(), let end = day.workouts.map(\.endDate).max()
+            else { return nil }
+            return .init(
+                date: day.date, anchor: end, behaviorCutoff: calendar.startOfDay(for: start),
+                value: amount / (variable == .runningDistance ? 1_000 : 60), source: source,
+                importedRecord: .init(source: source, start: start, end: end)
             )
         }
     }
@@ -123,7 +144,9 @@ struct TemporalAnalysisDataset: Sendable {
     let inspection: AnalysisInspection
 
     @MainActor init(
-        outputs: [Output], selectedSourceIdentifier: String? = nil, inputs: [ManualAnalysisSeries], manualLog: ManualLog,
+        outputs: [Output], selectedSourceIdentifier: String? = nil, inputs: [AnalysisSeriesID],
+        manualInputs: [AnalysisSeriesID: ManualAnalysisSeries],
+        importedInputs: [AnalysisSeriesID: [Date: AnalysisObservation.Input.Day]], manualLog: ManualLog,
         window: AnalysisBehaviorWindow, history: AnalysisPeriod, asOf: Date, calendar: Calendar,
         categoryInputs: [AnalysisSeriesID: AnalysisCategoryContrast] = [:], after cutoff: Date? = nil
     ) {
@@ -132,16 +155,20 @@ struct TemporalAnalysisDataset: Sendable {
             window: window, history: history, asOf: asOf, calendar: calendar, after: cutoff
         )
         var dailyInputs: [AnalysisSeriesID: [Date: AnalysisObservation.Input.Day?]] = [:]
-        let catalog = Dictionary(uniqueKeysWithValues: inputs.map { ($0.variable.id, $0) })
-        self.init(plan: plan, inputs: inputs.map(\.variable.id), calendar: calendar) { id, row in
-            if let contrast = categoryInputs[id], let series = catalog[id] {
+        self.init(plan: plan, inputs: inputs, calendar: calendar) { id, row in
+            if let contrast = categoryInputs[id], let series = manualInputs[id] {
                 return Self.categoryInputWindow(
                     series, contrast: contrast, dates: row.behaviorDates, manualLog: manualLog, timeZone: calendar.timeZone
                 )
             }
             return Self.summarizeInput(id, dates: row.behaviorDates) { date in
                 if let cached = dailyInputs[id]?[date] { return cached }
-                let input = catalog[id].flatMap {
+                if let imported = importedInputs[id] {
+                    guard let input = imported[date] else { return nil }
+                    if let cutoff, let record = input.importedRecord, record.start <= cutoff { return nil }
+                    return input
+                }
+                let input = manualInputs[id].flatMap {
                     Self.inputDay(date, for: $0, manualLog: manualLog, timeZone: calendar.timeZone)
                 }
                 let eligible = cutoff == nil || input?.origin == .observation ? input : nil
@@ -196,8 +223,14 @@ struct TemporalAnalysisDataset: Sendable {
         }
         let total = days.reduce(0) { $0 + $1.value }
         guard total.isFinite else { return InputWindow(value: nil, missingDates: []) }
+        let value: Double
+        if case .health(.restingHeartRate, _) = id {
+            value = total / Double(days.count)
+        } else {
+            value = total
+        }
         let input = AnalysisObservation.Input(
-            series: id, date: first.date, value: total,
+            series: id, date: first.date, value: value,
             origin: days.first { $0.origin != .observation }?.origin ?? .observation, days: days
         )
         return InputWindow(value: input, missingDates: [])
@@ -223,14 +256,14 @@ struct TemporalAnalysisDataset: Sendable {
                     date: row.output.date, anchor: row.output.anchor, value: row.output.value,
                     source: row.output.source, missingInputs: missing, origin: row.output.origin,
                     trackingValue: row.output.trackingValue, excludedCategoryInputs: excluded.isEmpty ? nil : excluded,
-                    sleepTimeZoneEvidence: row.output.sleepTimeZoneEvidence
+                    sleepTimeZoneEvidence: row.output.sleepTimeZoneEvidence, importedRecord: row.output.importedRecord
                 ))
                 return nil
             }
             return AnalysisObservation(
                 outputDate: row.output.date, outputAnchor: row.output.anchor, outputValue: row.output.value, inputs: pairedInputs,
                 outputOrigin: row.output.origin, outputTrackingValue: row.output.trackingValue,
-                sleepTimeZoneEvidence: row.output.sleepTimeZoneEvidence
+                sleepTimeZoneEvidence: row.output.sleepTimeZoneEvidence, importedOutput: row.output.importedRecord
             )
         }
         coverage = AnalysisCoverage(observations: observations, outputDates: plan.outputDates, calendar: calendar)

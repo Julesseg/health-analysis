@@ -22,7 +22,7 @@ source of truth.
 
 ## Scope rules
 
-- Only issues labeled `ready-for-agent` are selected automatically.
+- Automatic dispatch requires `ready-for-agent` at selection and again when the queued runner starts.
 - Use native GitHub blocking relationships. An issue passes the dependency
   check when every blocker is closed.
 - An issue with any native sub-issue is a parent and is skipped.

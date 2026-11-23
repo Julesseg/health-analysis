@@ -37,7 +37,10 @@ enum HealthKitHRVStream {
             hrvProvenance: .init(
                 quantityCount: sample.count,
                 syncIdentifier: metadata?[HKMetadataKeySyncIdentifier] as? String,
-                syncVersion: (metadata?[HKMetadataKeySyncVersion] as? NSNumber)?.intValue,
+                syncVersion: (metadata?[HKMetadataKeySyncVersion] as? NSNumber).flatMap { version in
+                    let integer = version.intValue
+                    return version == NSNumber(value: integer) ? integer : nil
+                },
                 deviceManufacturer: sample.device?.manufacturer,
                 deviceModel: sample.device?.model
             )

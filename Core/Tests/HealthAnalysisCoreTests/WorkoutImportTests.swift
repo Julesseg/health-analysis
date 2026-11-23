@@ -98,6 +98,76 @@ struct WorkoutImportTests {
         #expect(Set(replay.healthMeasurements.workouts.map(\.id)) == [watch.id, corrected.id])
     }
 
+    @Test func runningHistoryIsEditableInPresetsAndKeepsSourcesAndWorkoutTimingWhenPaired() async throws {
+        let bridge = HealthMeasurement.Source(name: "Bridge", bundleIdentifier: "fixture.bridge")
+        let run = workout(on: 2, minute: 1_425, activeSeconds: 1_600, distanceMeters: 5_000)
+        let alternate = workout(on: 2, minute: 1_425, distanceMeters: 9_000, source: bridge)
+        let missingDistance = workout(on: 4)
+        let records = (3...5).map { day in
+            let date = Date(timeIntervalSince1970: Double(day * 86_400 + 10_800))
+            return HealthMeasurement(
+                id: UUID(), metric: .restingHeartRate, value: 60, unit: .beatsPerMinute,
+                startDate: date, endDate: date, source: bridge
+            )
+        }
+        let source = WorkoutFixtureSource { anchors in
+            switch anchors["activity"] {
+            case nil:
+                [.init(queryID: "activity", anchor: Data([1]), added: records, workouts: [run, alternate, missingDistance])]
+            case Data([1]):
+                [.init(queryID: "activity", anchor: Data([2]), added: [], deleted: [run.id])]
+            default:
+                throw HealthMeasurementReadFailure.protectedData
+            }
+        }
+        let app = HealthAnalysisApplication(healthSource: source)
+        await app.healthMeasurements.refresh()
+        let zone = calendar.timeZone
+        let cutoff = Date(timeIntervalSince1970: 6 * 86_400)
+        let distance = AnalysisSeriesID.activity(.runningDistance)
+        let resting = AnalysisSeriesID.health(metric: .restingHeartRate)
+        #expect(throws: AnalysisRunFailure.chooseInputSource(distance)) {
+            try app.analyze(.init(output: resting, inputs: [distance], timeZone: zone), asOf: cutoff)
+        }
+        try app.healthMeasurements.setPreferredWorkoutSource(run.source.bundleIdentifier, for: .runningDistance)
+        let presets = app.analysisPresets(timeZone: zone, asOf: cutoff)
+        let preset = try #require(presets.first { $0.output == resting && $0.inputs == [distance] })
+        var edited = preset
+        edited.history = .last90Days
+        let forward = try app.analyze(edited, asOf: cutoff)
+        let value = try #require(forward.observations.first?.inputs.first?.days.first)
+        #expect(forward.observations.count == 1)
+        #expect(value.value == 5)
+        #expect(value.importedRecord?.source == run.source)
+        #expect(value.importedRecord?.start == run.startDate)
+        #expect(value.importedRecord?.end == run.endDate)
+        #expect(forward.coverage.outputDaysWithoutCompleteInput == 2)
+
+        let quantity = try app.manualLog.createQuantity(
+            name: "Stress score", unit: "units", defaultValue: 10, startsOn: ManualLogDay(Date(timeIntervalSince1970: 0), timeZone: zone)
+        )
+        let manual = AnalysisSeriesID.manualQuantity(quantity.id)
+        let reverse = try app.analyze(.init(output: distance, inputs: [manual], timeZone: zone), asOf: cutoff)
+        #expect(reverse.observations.first?.outputAnchor == run.endDate)
+        #expect(reverse.observations.first?.inputs.first?.date == Date(timeIntervalSince1970: 86_400))
+        #expect(reverse.outputEvidence.first?.importedRecord?.start == run.startDate)
+
+        let trackedOutput = AnalysisConfiguration(output: manual, inputs: [distance], timeZone: zone)
+        let question = try app.savedAnalyses.save(trackedOutput)
+        try app.savedAnalyses.setPinned(true, for: question.id)
+        await app.refreshReconciledHealthInsights(asOf: cutoff, timeZone: zone)
+        #expect(app.savedAnalyses.state(for: question.id).completed?.result.observations.count == 1)
+        await app.healthMeasurements.refresh()
+        await app.refreshReconciledHealthInsights(asOf: cutoff, timeZone: zone)
+        let corrected = try #require(app.savedAnalyses.state(for: question.id).completed)
+        #expect(corrected.result.observations.isEmpty)
+
+        await app.healthMeasurements.refresh()
+        await app.refreshReconciledHealthInsights(asOf: cutoff, timeZone: zone)
+        #expect(app.savedAnalyses.state(for: question.id).completed?.updatedAt == corrected.updatedAt)
+        #expect(app.savedAnalyses.state(for: question.id).failure == .analysis(.healthHistoryUnavailable(.protectedData)))
+    }
+
     private let calendar = Calendar(identifier: .gregorian).settingUTC
 
     private func workout(

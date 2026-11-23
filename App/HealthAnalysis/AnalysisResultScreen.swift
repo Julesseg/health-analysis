@@ -205,7 +205,7 @@ struct AnalysisResultScreen: View {
 private extension AnalysisRefreshFailure {
     var showsHealthHistoryLink: Bool {
         switch self {
-        case .analysis(.healthHistoryUnavailable), .analysis(.healthHistoryLoading), .analysis(.chooseOutputSource): true
+        case .analysis(.healthHistoryUnavailable), .analysis(.healthHistoryLoading), .analysis(.chooseOutputSource), .analysis(.chooseInputSource): true
         default: false
         }
     }
@@ -232,7 +232,8 @@ private extension AnalysisRefreshFailure {
             case .ratingWindowUnavailable: "Rating analyses use the complete preceding day."
             case .ratingInteractionUnavailable: "Interactions with ratings are unavailable."
             case .manualLogUnavailable: "Couldn’t open the daily log."
-            case .chooseOutputSource: "Choose a preferred source for this output in Health measurements."
+            case .chooseOutputSource: "Choose a source in Explore or set a preferred source in Data."
+            case .chooseInputSource: "Choose a source for the input in Explore or set a preferred source in Data."
             case .healthHistoryUnavailable(let failure): failure.message
             case .healthHistoryLoading: "Health measurements are still being checked. Try again when the check finishes."
             }

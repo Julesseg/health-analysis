@@ -1,13 +1,19 @@
 import Foundation
 
 enum DiscoveryBlockEvidence {
-    private static let blockCount = 5
+    static let blockCount = 5
     private static let blockDays = DiscoverySearch.historyDays / blockCount
     private static let washoutDays = 7
 
+    struct Assessment {
+        let mean: Double
+        let pValue: Double
+        let directionsAgree: Bool
+    }
+
     static func assess(
         _ result: AnalysisResult, startOfHistory: Date, calendar: Calendar
-    ) -> (mean: Double, pValue: Double)? {
+    ) -> Assessment? {
         let interaction = result.configuration.interaction
         let inputCount = result.modeledInputs.count
         let columnCount = inputCount + (interaction == nil ? 0 : 1)
@@ -43,7 +49,10 @@ enum DiscoveryBlockEvidence {
         let x = abs(mean) / hypotenuse
         let tail = pow(2 * standardError / hypotenuse, 2) / (1 + x)
         // Two-sided Student t tail for the four degrees of freedom of this fixed design.
-        return (mean, tail * tail * (x + 2) / 2)
+        return Assessment(
+            mean: mean, pValue: tail * tail * (x + 2) / 2,
+            directionsAgree: estimates.allSatisfy { $0 != 0 && $0.sign == mean.sign }
+        )
     }
 
     private static func coefficient(

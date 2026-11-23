@@ -6,6 +6,17 @@ struct AnalysisOutputHistory {
     var healthReadFailure: HealthMeasurementReadFailure? = nil
     var selectedSourceIdentifier: String? = nil
 
+    func inputDays(calendar: Calendar) -> [Date: AnalysisObservation.Input.Day] {
+        var days: [Date: AnalysisObservation.Input.Day] = [:]
+        for output in outputs {
+            guard days[output.date] == nil, let record = output.importedRecord,
+                  let interval = calendar.dateInterval(of: .day, for: output.date),
+                  record.end <= interval.end else { continue }
+            days[output.date] = .init(date: output.date, value: output.value, origin: .observation, importedRecord: record)
+        }
+        return days
+    }
+
     @MainActor static func stored(
         _ series: ManualAnalysisSeries, in log: ManualLog, asOf: Date, calendar: Calendar,
         categoryEvent: TrackingCategory.ID? = nil

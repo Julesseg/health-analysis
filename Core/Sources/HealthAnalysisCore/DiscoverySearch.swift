@@ -4,7 +4,7 @@ struct DiscoverySearch: Sendable {
     static let maximumInputs = 4
     static let historyDays = 365
     private static let maximumFindings = 5
-    private static let familyThreshold = 0.05
+    static let familyThreshold = 0.05
 
     struct OutputPlan: Sendable {
         let output: AnalysisSeriesID

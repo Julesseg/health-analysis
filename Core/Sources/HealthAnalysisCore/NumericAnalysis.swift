@@ -25,7 +25,9 @@ public struct AnalysisModeledInput: Codable, Identifiable, Sendable {
 
     public internal(set) var kind: AnalysisVariable.Kind? = nil
 
+    public internal(set) var isCaffeineQuantity: Bool? = nil
     var isMilligramQuantity: Bool { unit.lowercased() == "mg" }
+
     var inputIncrement: Double {
         if kind == .tracked(.timeOfDay) { return 60 }
         return isMilligramQuantity ? 100 : 1
@@ -49,11 +51,12 @@ struct NumericAnalysis {
         coverage: AnalysisCoverage, calendar: Calendar,
         behaviorWindow: AnalysisBehaviorWindow = .precedingDay, practicalDifference: Double = 1,
         interaction: AnalysisInteraction? = nil, ratingOutputThreshold: Int? = nil, outputIsClock: Bool = false,
-        interactionReference: AnalysisInteractionEstimate? = nil
+        interactionReference: AnalysisInteractionEstimate? = nil, usesCaffeineModel: Bool = false,
+        hasManualQuantityOutput: Bool = false
     ) -> Self {
         let usesClock = outputIsClock || inputs.contains { $0.kind == .tracked(.timeOfDay) }
         let usesRatings = ratingOutputThreshold != nil || inputs.contains { $0.kind?.ratingThreshold != nil }
-        if !usesClock, !usesRatings, interaction == nil, inputs.count == 1, inputs.first?.isMilligramQuantity == true {
+        if usesCaffeineModel, !usesClock, !usesRatings, interaction == nil, inputs.count == 1, inputs.first?.isCaffeineQuantity == true {
             let legacy = NumericAssociation.assess(
                 observations, coverage: coverage, calendar: calendar,
                 behaviorWindow: behaviorWindow, practicalDifference: practicalDifference
@@ -103,6 +106,13 @@ struct NumericAnalysis {
             }
         } else {
             outputs = observations.map(\.outputValue)
+            if hasManualQuantityOutput {
+                let recorded = observations.filter { $0.outputOrigin == .observation }.map(\.outputValue)
+                guard !recorded.isEmpty else { return result(.insufficient, [.defaultOnlyOutput]) }
+                guard let minimum = recorded.min(), let maximum = recorded.max(), maximum > minimum else {
+                    return result(.insufficient, [.lowVariationOutput])
+                }
+            }
         }
         guard var columns = inputColumns(observations, inputs: inputs) else {
             return result(.insufficient, [.uncertaintyUnavailable])

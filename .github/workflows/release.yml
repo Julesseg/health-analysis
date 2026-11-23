@@ -219,12 +219,19 @@ jobs:
       # start empty.
       - name: Seed site from build-history
         run: |
+          set -euo pipefail
           SITE=/tmp/site
-          rm -rf "$SITE"; mkdir -p "$SITE"
-          if git fetch origin build-history; then
-            git archive origin/build-history | tar -x -C "$SITE"
+          rm -rf "$SITE"
+          mkdir -p "$SITE"
+          if git ls-remote --exit-code --heads origin refs/heads/build-history >/dev/null; then
+            git fetch origin refs/heads/build-history
+            git archive FETCH_HEAD | tar -x -C "$SITE"
             echo "Seeded from existing build-history branch."
           else
+            status=$?
+            if [ "$status" -ne 2 ]; then
+              exit "$status"
+            fi
             echo "No build-history branch yet — starting fresh."
           fi
 

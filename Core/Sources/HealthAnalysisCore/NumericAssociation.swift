@@ -51,6 +51,7 @@ public struct AnalysisEvidence: Codable, Sendable {
         case insufficient
         case low
         case moderate
+        case high
     }
 
     public enum Reason: Codable, Hashable, Sendable {
@@ -67,6 +68,7 @@ public struct AnalysisEvidence: Codable, Sendable {
         case wideInterval
         case indeterminateInterval
         case adequateCoverageAndPrecision
+        case confirmedLaterAssociation
         case defaultOnlyOutput
         case lowVariationOutput
         case sparseObservedCountOutput

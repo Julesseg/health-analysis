@@ -240,6 +240,18 @@ struct ExploreAnalysisTests {
         #expect(result.observations.map(\.outputValue) == [8])
         #expect(result.observations.map { $0.inputs[0].date } == [firstInput])
         #expect(result.observations.map { $0.inputs[0].value } == [120])
+
+        let reverse = try app.analyze(.init(
+            output: .manualQuantity(caffeine.id), inputs: [.health(metric: .sleepAnalysis)], timeZone: utc
+        ), asOf: instant("2025-04-03T00:00:00Z"))
+        let paired = try #require(reverse.observations.first)
+        let duration = try #require(paired.inputs.first?.days.first)
+        #expect(paired.outputDate == instant("2025-04-02T00:00:00Z"))
+        #expect(duration.date == instant("2025-04-01T00:00:00Z"))
+        #expect(duration.value == 8)
+        #expect(duration.importedRecord?.start == start)
+        #expect(duration.importedRecord?.end == wake)
+        #expect(duration.importedRecord?.sleepTimeZoneEvidence?.identifier == "Pacific/Kiritimati")
     }
 
     @Test func unfinishedSleepRecordsCannotReviseAnEarlierAnalysis() async throws {
@@ -504,6 +516,52 @@ struct ExploreAnalysisTests {
     }
 
     private let utc = TimeZone(secondsFromGMT: 0)!
+
+    @Test func signedQuantitiesAndSelectedHealthSeriesCanSwitchRoles() async throws {
+        let first = instant("2025-01-01T00:00:00Z")
+        func date(_ day: Int) -> Date { first.addingTimeInterval(Double(day) * 86_400) }
+        let preferred = HealthMeasurement.Source(name: "Watch", bundleIdentifier: "fixture.watch")
+        let alternate = HealthMeasurement.Source(name: "Bridge", bundleIdentifier: "fixture.bridge")
+        let records = (0..<55).flatMap { day in
+            [HealthMeasurement(
+                id: UUID(), metric: .restingHeartRate, value: Double(60 + day % 13), unit: .beatsPerMinute,
+                startDate: date(day).addingTimeInterval(3_600), endDate: day == 20 ? date(21).addingTimeInterval(60) : date(day).addingTimeInterval(7_200),
+                source: preferred
+            ), HealthMeasurement(
+                id: UUID(), metric: .restingHeartRate, value: 90, unit: .beatsPerMinute,
+                startDate: date(day), endDate: date(day), source: alternate
+            )]
+        }
+        let app = HealthAnalysisApplication(healthSource: AnalysisHealthSource(records: records))
+        await app.healthMeasurements.refresh()
+        let quantity = try app.manualLog.createQuantity(
+            name: "Adjustment", unit: "mg", defaultValue: 0, startsOn: ManualLogDay(first, timeZone: utc)
+        )
+        for day in 0..<55 {
+            app.manualLog.editQuantity(
+                quantity.id, on: ManualLogDay(date(day), timeZone: utc),
+                text: String(-60 + 5 * (day % 13)), locale: Locale(identifier: "en_US_POSIX")
+            )
+        }
+        let manual = AnalysisSeriesID.manualQuantity(quantity.id)
+        let health = AnalysisSeriesID.health(metric: .restingHeartRate, sourceBundleIdentifier: preferred.bundleIdentifier)
+        let forward = try app.analyze(.init(output: health, inputs: [manual], timeZone: utc), asOf: date(55))
+        #expect(forward.model == .numericLinearV1)
+        #expect(forward.observations.first?.inputs.first?.value == -60)
+        #expect(forward.estimates.first?.inputIncrement == 100)
+
+        let reverse = try app.analyze(.init(output: manual, inputs: [health], timeZone: utc), asOf: date(55))
+        #expect(reverse.outputVariable?.name == "Adjustment")
+        #expect(reverse.observations.first?.outputValue == -55)
+        #expect(reverse.observations.first?.inputs.first?.value == 60)
+        #expect(reverse.coverage.outputDatesWithoutCompleteInput.contains(date(21)))
+
+        let week = try app.analyze(
+            .init(output: manual, inputs: [health], behaviorWindow: .precedingWeek, timeZone: utc), asOf: date(55)
+        )
+        #expect(week.observations.first?.outputDate == date(7))
+        #expect(week.observations.first?.inputs.first?.value == 63)
+    }
 
     private func analyze(
         days: [(amount: Int?, bpm: Double?)], defaultAmount: Decimal = 0, changeDefaultAfterDays: Int? = nil,

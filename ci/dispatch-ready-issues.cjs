@@ -141,7 +141,7 @@ async function dispatchReadyIssues({ github, context, core }) {
     await github.rest.actions.createWorkflowDispatch({
       owner, repo, workflow_id: WORKFLOW_FILE,
       ref: context.payload.repository.default_branch,
-      inputs: { issue: String(issue.number) },
+      inputs: { issue: String(issue.number), origin: 'automatic' },
     });
     await github.rest.issues.createComment({
       owner, repo, issue_number: issue.number,
@@ -157,4 +157,17 @@ async function dispatchReadyIssues({ github, context, core }) {
   }
 }
 
-module.exports = { dispatchReadyIssues, issueDispatchScope };
+function issuePreflight(issue, { origin, force }) {
+  const hasLabel = name => issue.labels.some(label => label.name === name);
+  if (origin === 'automatic' && !hasLabel('ready-for-agent')) {
+    return { skip: true, message: `#${issue.number} no longer has the ready-for-agent label.` };
+  }
+  const stale = issue.state === 'closed'
+    ? `#${issue.number} is already closed ("${issue.state_reason}")`
+    : hasLabel('agent-dispatched') ? `#${issue.number} is already claimed by a running session` : null;
+  if (!stale) return { skip: false };
+  if (force) return { skip: false, message: `${stale}; spawning anyway because force was set.` };
+  return { skip: true, message: `${stale}. Re-run with force to override.` };
+}
+
+module.exports = { dispatchReadyIssues, issueDispatchScope, issuePreflight };

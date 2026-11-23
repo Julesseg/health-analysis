@@ -39,19 +39,25 @@ struct ExploreView: View {
         } ?? [:])
     }
 
-    private var variables: [AnalysisVariable] { application.analysisVariables }
+    private var variables: [AnalysisVariable] {
+        let catalog = application.analysisVariables
+        let listed = Set(catalog.map(\.id))
+        return catalog + Set(inputs + adjustments).subtracting(listed)
+            .compactMap(application.analysisVariable(for:))
+            .sorted { $0.name < $1.name }
+    }
 
     private var inputChoices: [AnalysisVariable] {
-        variables.filter { $0.supportsInput && $0.id != output }
+        variables.filter { $0.supportsInput && $0.id.seriesDefinition != output?.seriesDefinition }
     }
 
     private var adjustmentChoices: [AnalysisVariable] {
-        inputChoices.filter { !inputs.contains($0.id) }
+        inputChoices.filter { option in !inputs.contains { $0.seriesDefinition == option.id.seriesDefinition } }
     }
 
-    private var selectedKinds: [AnalysisVariable.Kind] {
+    private var capabilities: AnalysisCapabilities {
         let selected = inputs + adjustments + [output].compactMap { $0 }
-        return variables.filter { selected.contains($0.id) }.map(\.kind)
+        return AnalysisCapabilities(variables: selected.compactMap(application.analysisVariable(for:)))
     }
 
     private var categoryOutput: AnalysisVariable? {
@@ -64,26 +70,17 @@ struct ExploreView: View {
         }
     }
 
-    private var usesCategories: Bool { categoryOutput != nil || !categoryInputs.isEmpty }
-    private var usesCounts: Bool { selectedKinds.contains(.tracked(.count)) }
-    private var usesYesNo: Bool { selectedKinds.contains(.tracked(.yesNo)) }
-    private var usesClocks: Bool {
-        if case .sleepTiming? = output { return true }
-        return selectedKinds.contains(.tracked(.timeOfDay))
-    }
-    private var usesRatings: Bool { selectedKinds.contains { $0.ratingThreshold != nil } }
-    private var hasUnsupportedCategoryCombination: Bool { usesCategories && usesYesNo }
-    private var allowsLongerWindowsAndInteractions: Bool { !(usesCounts || usesYesNo || usesRatings || usesCategories || usesClocks) }
+    private var usesCategories: Bool { capabilities.limitations.contains(.category) }
 
     private var configuration: AnalysisConfiguration? {
-        guard let output, !inputs.isEmpty, !hasUnsupportedCategoryCombination else { return nil }
+        guard let output, !inputs.isEmpty, capabilities.supportsCombination else { return nil }
         var configuration = initialConfiguration ?? .init(output: output, inputs: inputs)
         configuration.output = output
         configuration.inputs = inputs
         configuration.adjustmentInputs = adjustments
-        configuration.behaviorWindow = allowsLongerWindowsAndInteractions ? behaviorWindow : .precedingDay
+        configuration.behaviorWindow = capabilities.allowsLongerWindows ? behaviorWindow : .precedingDay
         configuration.history = history
-        configuration.interaction = allowsLongerWindowsAndInteractions ? interaction : nil
+        configuration.interaction = capabilities.allowsInteractions ? interaction : nil
         configuration.timeZone = analysisTimeZone
         if usesCategories {
             var contrasts: [AnalysisSeriesID: AnalysisCategoryContrast] = [:]
@@ -126,7 +123,7 @@ struct ExploreView: View {
                     let outputs = variables.filter(\.supportsOutput)
                     ForEach(outputs) { choice in
                         switch choice.id {
-                        case .health, .sleepTiming:
+                        case .health, .sleepTiming, .activity:
                             application.analysisSeriesTitle(choice.id).tag(choice.id as AnalysisSeriesID?)
                         default:
                             choice.analysisChoiceLabel.tag(choice.id as AnalysisSeriesID?)
@@ -138,8 +135,8 @@ struct ExploreView: View {
                 }
                 .accessibilityIdentifier("explore.output")
                 .onChange(of: output) { _, selected in
-                    inputs.removeAll { $0 == selected }
-                    adjustments.removeAll { $0 == selected }
+                    inputs.removeAll { $0.seriesDefinition == selected?.seriesDefinition }
+                    adjustments.removeAll { $0.seriesDefinition == selected?.seriesDefinition }
                 }
 
                 if let categoryOutput {
@@ -159,13 +156,13 @@ struct ExploreView: View {
                             get: { inputs },
                             set: { selected in
                                 inputs = selected
-                                adjustments.removeAll { selected.contains($0) }
+                                adjustments.removeAll { adjustment in selected.contains { $0.seriesDefinition == adjustment.seriesDefinition } }
                                 if let pair = interaction,
                                    !selected.contains(pair.focal) || !selected.contains(pair.moderator) {
                                     interaction = nil
                                 }
                             }
-                        )
+                        ), sourceTitle: application.analysisSeriesTitle
                     )
                 } label: {
                     LabeledContent("Inputs") { selectionSummary(inputs) }
@@ -178,7 +175,7 @@ struct ExploreView: View {
                 NavigationLink {
                     ExploreInputSelection(
                         title: "Account for", choices: adjustmentChoices,
-                        selection: $adjustments, showsSuggestions: true
+                        selection: $adjustments, showsSuggestions: true, sourceTitle: application.analysisSeriesTitle
                     )
                 } label: {
                     LabeledContent("Account for") { selectionSummary(adjustments) }
@@ -187,7 +184,7 @@ struct ExploreView: View {
                 .accessibilityLabel("Account for")
                 .accessibilityValue(selectionSummary(adjustments))
                 .accessibilityIdentifier("explore.adjustments")
-                if inputs.count >= 2 && allowsLongerWindowsAndInteractions {
+                if inputs.count >= 2 && capabilities.allowsInteractions {
                     NavigationLink {
                         ExploreInteractionSelection(application: application, inputs: inputs, interaction: $interaction)
                     } label: {
@@ -198,14 +195,14 @@ struct ExploreView: View {
                     .accessibilityIdentifier("explore.interaction")
                 }
                 ExploreTemporalControls(
-                    behaviorWindow: $behaviorWindow, history: $history, allowsLongerWindows: allowsLongerWindowsAndInteractions
+                    behaviorWindow: $behaviorWindow, history: $history, allowsLongerWindows: capabilities.allowsLongerWindows
                 )
             } footer: {
                 VStack(alignment: .leading, spacing: 4) {
                     if inputChoices.isEmpty {
                         Text("Add a daily tracking variable in Settings to choose an input.")
                     }
-                    if hasUnsupportedCategoryCombination {
+                    if !capabilities.supportsCombination {
                         Text("Choose category variables or yes/no variables for this analysis.")
                     }
                     if usesCategories {
@@ -215,18 +212,19 @@ struct ExploreView: View {
                             Text("The model estimates the odds of the selected output category versus all other categories.")
                         }
                     }
-                    if usesClocks {
+                    if capabilities.limitations.contains(.clock) {
                         Text("Clock analyses use the complete preceding day. The model compares times within a shared part of the day.")
                         Text("Interactions with clock times are unavailable.")
-                    } else if usesYesNo {
+                    }
+                    if capabilities.limitations.contains(.yesNo) {
                         Text("Yes/no analyses use the complete preceding day.")
                         Text("Interactions with yes/no variables are unavailable.")
                     }
-                    if usesRatings {
+                    if capabilities.limitations.contains(.rating) {
                         Text("Rating analyses compare levels on either side of a fixed threshold using the complete preceding day.")
                         Text("Interactions with ratings are unavailable.")
                     }
-                    if usesCounts {
+                    if capabilities.limitations.contains(.count) {
                         Text("Count analyses use the complete preceding day.")
                         Text("Interactions with counts are unavailable.")
                     }
@@ -309,6 +307,7 @@ private struct ExploreInputSelection: View {
     let choices: [AnalysisVariable]
     @Binding var selection: [AnalysisSeriesID]
     var showsSuggestions = false
+    let sourceTitle: (AnalysisSeriesID) -> Text
 
     var body: some View {
         Form {
@@ -320,6 +319,7 @@ private struct ExploreInputSelection: View {
                             get: { selection.contains(series) },
                             set: { selected in
                                 if selected && !selection.contains(series) {
+                                    selection.removeAll { $0.seriesDefinition == series.seriesDefinition }
                                     selection.append(series)
                                 } else if !selected {
                                     selection.removeAll { $0 == series }
@@ -327,14 +327,18 @@ private struct ExploreInputSelection: View {
                             }
                         )
                     ) {
-                        choice.analysisChoiceLabel
+                        if choice.id.sourceIdentifier != nil {
+                            sourceTitle(choice.id)
+                        } else {
+                            choice.analysisChoiceLabel
+                        }
                     }
                 }
             } header: {
                 if showsSuggestions { Text("Suggested adjustments") }
             } footer: {
                 if showsSuggestions {
-                    Text("Choose other logged variables to account for in this analysis.")
+                    Text("Choose other variables to account for in this analysis.")
                 }
             }
         }

@@ -17,6 +17,11 @@ on:
         description: "Issue number to implement"
         required: true
         type: string
+      origin:
+        description: "Dispatch origin"
+        type: choice
+        options: [manual, automatic]
+        default: manual
       force:
         description: "Spawn even if the issue is closed or already claimed"
         required: false
@@ -48,10 +53,11 @@ jobs:
         # hand-typed input is data and never JavaScript.
         env:
           ISSUE: ${{ inputs.issue }}
+          ORIGIN: ${{ inputs.origin }}
           FORCE: ${{ inputs.force }}
         with:
           script: |
-            const { issueDispatchScope } = require('./ci/dispatch-ready-issues.cjs');
+            const { issueDispatchScope, issuePreflight } = require('./ci/dispatch-ready-issues.cjs');
             const number = Number(process.env.ISSUE);
             const { data: issue } = await github.rest.issues.get({
               ...context.repo, issue_number: number,
@@ -64,22 +70,15 @@ jobs:
               return;
             }
 
-            let stale = null;
-            if (issue.state === 'closed') {
-              stale = `#${number} is already closed ("${issue.state_reason}")`;
-            } else if (issue.labels.some(l => l.name === 'agent-dispatched')) {
-              // A session applies that label as its first act, so it means one
-              // is already on this issue — see docs/agents/auto-dispatch.md.
-              stale = `#${number} is already claimed by a running session`;
+            const { skip, message } = issuePreflight(issue, {
+              origin: process.env.ORIGIN, force: process.env.FORCE === 'true',
+            });
+            if (skip) {
+              core.setOutput('skip', 'true');
+              core.notice(`Not spawning: ${message}`);
+            } else if (message) {
+              core.warning(message);
             }
-
-            if (!stale) return;
-            if (process.env.FORCE === 'true') {
-              core.warning(`${stale}; spawning anyway because force was set.`);
-              return;
-            }
-            core.setOutput('skip', 'true');
-            core.notice(`Not spawning: ${stale}. Re-run with force to override.`);
 
       - name: Spawn Paseo session
         if: steps.preflight.outputs.skip != 'true'

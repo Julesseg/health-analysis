@@ -26,10 +26,27 @@ public final class HealthMeasurementHistory {
         public let daysWithoutMeasurements: Int
     }
 
+    private struct HRVSyncIdentity: Codable, Hashable {
+        let metric: HealthMeasurement.Metric
+        let source: String
+        let identifier: String
+
+        init?(_ record: HealthMeasurement) {
+            guard record.unit == .milliseconds,
+                  HRVSeries.StoredType.allCases.contains(where: { $0.metric == record.metric }),
+                  let identifier = record.hrvProvenance?.syncIdentifier, !identifier.isEmpty,
+                  record.hrvProvenance?.syncVersion != nil else { return nil }
+            self.metric = record.metric
+            self.source = record.source.bundleIdentifier
+            self.identifier = identifier
+        }
+    }
+
     private struct Snapshot: Codable, Sendable {
         var records: [HealthMeasurement] = []
         var anchors: [String: Data] = [:]
         var deletedRecordIDs: Set<UUID> = []
+        var deletedHRVVersions: [HRVSyncIdentity: Int]?
         var preferredSources: [String: HealthMeasurement.Source] = [:]
         var lastSuccessfulReadAt: Date?
         var sleepFallbackTimeZoneIdentifier: String?
@@ -234,6 +251,16 @@ public final class HealthMeasurementHistory {
                     touchedIDs.insert(record.id)
                 }
             }
+            var deletedHRVVersions = updated.deletedHRVVersions ?? [:]
+            for id in touchedIDs where updated.deletedRecordIDs.contains(id) {
+                guard let record = previous[id], let identity = HRVSyncIdentity(record),
+                      let version = record.hrvProvenance?.syncVersion else { continue }
+                deletedHRVVersions[identity] = max(deletedHRVVersions[identity] ?? version, version)
+            }
+            updated.deletedHRVVersions = deletedHRVVersions
+            let superseded = supersededHRVRecords(in: imported.values, deletedVersions: deletedHRVVersions)
+            for id in superseded { imported.removeValue(forKey: id) }
+            touchedIDs.formUnion(superseded)
             updated.records = imported.values.sorted {
                 let left = ($0.startDate, $0.endDate)
                 let right = ($1.startDate, $1.endDate)
@@ -252,6 +279,22 @@ public final class HealthMeasurementHistory {
                     analysisChanges[.health(metric: record.metric, sourceBundleIdentifier: source)] = checkedAt
                     if preferredSource(for: record.metric).map({ $0.bundleIdentifier == source }) ?? true {
                         analysisChanges[.health(metric: record.metric)] = checkedAt
+                    }
+                }
+            }
+            if updated.workouts != workouts {
+                let previousWorkouts = Dictionary(uniqueKeysWithValues: workouts.map { ($0.id, $0) })
+                let importedWorkouts = Dictionary(uniqueKeysWithValues: (updated.workouts ?? []).map { ($0.id, $0) })
+                for id in Set(previousWorkouts.keys).union(importedWorkouts.keys) where previousWorkouts[id] != importedWorkouts[id] {
+                    for workout in [previousWorkouts[id], importedWorkouts[id]].compactMap({ $0 }) {
+                        for variable in ActivityTrackingVariable.allCases where variable.includes(workout) {
+                            let metric = variable.preferenceKey
+                            let source = workout.source.bundleIdentifier
+                            analysisChanges[.health(metric: metric, sourceBundleIdentifier: source)] = checkedAt
+                            if preferredWorkoutSource(for: variable).map({ $0.bundleIdentifier == source }) ?? true {
+                                analysisChanges[.health(metric: metric)] = checkedAt
+                            }
+                        }
                     }
                 }
             }
@@ -284,6 +327,29 @@ public final class HealthMeasurementHistory {
             changes[.health(metric: record.metric)] = checkedAt
             changes[.health(metric: record.metric, sourceBundleIdentifier: record.source.bundleIdentifier)] = checkedAt
         }
+    }
+
+    private func supersededHRVRecords(
+        in records: Dictionary<UUID, HealthMeasurement>.Values, deletedVersions: [HRVSyncIdentity: Int]
+    ) -> Set<UUID> {
+        var winners: [HRVSyncIdentity: (version: Int, id: UUID)] = [:]
+        var superseded: Set<UUID> = []
+        for record in records {
+            guard let identity = HRVSyncIdentity(record), let version = record.hrvProvenance?.syncVersion else { continue }
+            if let deleted = deletedVersions[identity], version <= deleted {
+                superseded.insert(record.id)
+                continue
+            }
+            if let winner = winners[identity] {
+                if winner.version > version || (winner.version == version && winner.id.uuidString < record.id.uuidString) {
+                    superseded.insert(record.id)
+                    continue
+                }
+                superseded.insert(winner.id)
+            }
+            winners[identity] = (version, record.id)
+        }
+        return superseded
     }
 
     private func reconciledWorkouts(_ changes: [HealthMeasurementChanges], deletedIDs: Set<UUID>) -> [HealthWorkout] {

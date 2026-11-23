@@ -40,15 +40,18 @@ struct HealthAnalysisApp: App {
         }
         #endif
         let health = healthConfiguration()
+        let logStore = ManualLogStoreLocation.location
         let application = HealthAnalysisApplication(
             healthSource: health.source,
             healthHistoryStoreURL: health.storeURL,
-            manualLogStoreURL: ManualLogStoreLocation.url,
+            manualLogStoreURL: logStore.url,
+            legacyManualLogStoreURL: logStore.legacy,
             savedAnalysesStoreURL: URL.applicationSupportDirectory
                 .appending(path: "SavedAnalyses", directoryHint: .isDirectory)
                 .appending(path: "questions.json", directoryHint: .notDirectory),
             firstUseStoreURL: URL.applicationSupportDirectory
-                .appending(path: "first-use-complete", directoryHint: .notDirectory)
+                .appending(path: "first-use-complete", directoryHint: .notDirectory),
+            discoveryPreferencesKey: "disabledDiscoverySeries"
         )
         let source = health.source as? HealthKitMeasurementSource
         return Configuration(application: application, observedSource: source, checksOnActivation: source != nil)

@@ -1,6 +1,6 @@
 import Foundation
 
-public enum ActivityTrackingVariable: String, CaseIterable, Identifiable, Sendable {
+public enum ActivityTrackingVariable: String, CaseIterable, Codable, Identifiable, Sendable {
     case workoutDuration
     case runningDuration
     case runningDistance
@@ -14,6 +14,14 @@ public enum ActivityTrackingVariable: String, CaseIterable, Identifiable, Sendab
 
     public var unit: Unit {
         self == .runningDistance ? .meters : .seconds
+    }
+
+    var analysisName: String {
+        switch self {
+        case .workoutDuration: "Workout duration"
+        case .runningDuration: "Running duration"
+        case .runningDistance: "Running distance"
+        }
     }
 
     func includes(_ workout: HealthWorkout) -> Bool {
@@ -142,7 +150,7 @@ extension HealthMeasurementHistory {
     }
 }
 
-private extension ActivityTrackingVariable {
+extension ActivityTrackingVariable {
     var preferenceKey: HealthMeasurement.Metric {
         HealthMeasurement.Metric(rawValue: "workout.\(rawValue)")
     }

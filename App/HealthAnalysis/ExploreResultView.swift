@@ -49,7 +49,8 @@ struct ExploreResultView<Status: View>: View {
     private var findings: some View {
         if let pair = result.interactionInputs {
             InteractionResultSection(
-                focal: pair.focal, moderator: pair.moderator, estimate: result.interaction, isSleepDuration: isSleepDuration
+                focal: pair.focal, moderator: pair.moderator, estimate: result.interaction,
+                isSleepDuration: isSleepDuration, output: result.outputVariable
             )
         }
         if result.estimates.isEmpty {
@@ -99,7 +100,7 @@ struct ExploreResultView<Status: View>: View {
                     let intervalTitle: LocalizedStringKey = estimate.scale == .difference
                         ? "Dependence-adjusted interval" : "Approximate 95% uncertainty interval"
                     LabeledContent(intervalTitle) {
-                        Text(intervalLabel(estimate, isSleepDuration: isSleepDuration))
+                        Text(intervalLabel(estimate, isSleepDuration: isSleepDuration, unit: result.outputVariable?.quantityUnit ?? "bpm"))
                     }
                     .accessibilityIdentifier(index == 0 ? "explore.uncertainty" : "explore.uncertainty.\(index)")
                     EstimateChart(
@@ -293,6 +294,7 @@ private struct EstimateChart: View {
         if estimate.scale == .proportionalCountChange { return "Change in expected daily count" }
         if estimate.scale == .ratingThresholdProbabilityDifference { return "Difference in probability (percentage points)" }
         if estimate.scale == .proportionalCategoryOddsChange { return "Change in odds of the selected category" }
+        if let output, let unit = output.quantityUnit { return "Difference in \(output.name) (\(unit))" }
         return isSleepDuration ? "Difference in sleep duration (minutes)" : "Difference in resting heart rate (bpm)"
     }
 
@@ -352,7 +354,7 @@ private struct EstimateChart: View {
     }
 
     private var estimateAccessibilityValue: Text {
-        let interval = intervalLabel(estimate, isSleepDuration: isSleepDuration)
+        let interval = intervalLabel(estimate, isSleepDuration: isSleepDuration, unit: output?.quantityUnit ?? "bpm")
         if let categoryEffect {
             return Text("\(direction) \(categoryEffect). Dependence-adjusted interval \(interval).")
         }
@@ -391,7 +393,7 @@ func estimateLabel(
         } else if isSleepDuration {
             effect = Text("\(estimate.difference * 60, format: estimateNumber) minutes")
         } else {
-            effect = Text("\(estimate.difference, format: estimateNumber) bpm")
+            effect = Text("\(estimate.difference, format: estimateNumber) \(output?.quantityUnit ?? "bpm")")
         }
         if let inputThreshold {
             return Text("\(effect) for \(input.name) at \(inputThreshold, format: .number) or above vs. below \(inputThreshold, format: .number)")
@@ -442,7 +444,7 @@ func estimateLabel(
         if isSleepDuration {
             return Text("\(estimate.difference * 60, format: estimateNumber) minutes per hour later")
         }
-        return Text("\(estimate.difference, format: estimateNumber) bpm per hour later")
+        return Text("\(estimate.difference, format: estimateNumber) \(output?.quantityUnit ?? "bpm") per hour later")
     }
     if isSleepDuration {
         if yesNoInput {
@@ -454,12 +456,12 @@ func estimateLabel(
         return Text("\(estimate.difference * 60, format: estimateNumber) minutes per \(estimate.inputIncrement, format: .number) \(input.unit) increase")
     }
     if yesNoInput {
-        return Text("\(estimate.difference, format: estimateNumber) bpm for Yes versus No")
+        return Text("\(estimate.difference, format: estimateNumber) \(output?.quantityUnit ?? "bpm") for Yes versus No")
     }
     if countInput {
-        return Text("\(estimate.difference, format: estimateNumber) bpm per additional event")
+        return Text("\(estimate.difference, format: estimateNumber) \(output?.quantityUnit ?? "bpm") per additional event")
     }
-    return Text("\(estimate.difference, format: estimateNumber) bpm per \(estimate.inputIncrement, format: .number) \(input.unit) increase")
+    return Text("\(estimate.difference, format: estimateNumber) \(output?.quantityUnit ?? "bpm") per \(estimate.inputIncrement, format: .number) \(input.unit) increase")
 }
 
 private func categoryEffectLabel(
@@ -494,7 +496,7 @@ private func categoryEffectLabel(
     if isSleepDuration {
         return Text("\(estimate.difference * 60, format: estimateNumber) minutes for \(contrast.comparison) compared with \(contrast.reference)")
     }
-    return Text("\(estimate.difference, format: estimateNumber) bpm for \(contrast.comparison) compared with \(contrast.reference)")
+    return Text("\(estimate.difference, format: estimateNumber) \(output?.quantityUnit ?? "bpm") for \(contrast.comparison) compared with \(contrast.reference)")
 }
 
 private func estimateDirection(
@@ -521,11 +523,13 @@ private func estimateDirection(
             if output?.kind == .tracked(.timeOfDay) { return Text("The model estimates a later output time for \(contrast.comparison).") }
             if output?.kind == .tracked(.count) { return Text("The estimated daily count was higher for \(contrast.comparison).") }
             if isSleepDuration { return Text("\(contrast.comparison) was associated with longer sleep.") }
+            if let output, output.quantityUnit != nil { return Text("\(contrast.comparison) was associated with higher values for \(output.name).") }
             return Text("\(contrast.comparison) was associated with higher resting heart rate.")
         case .lower:
             if output?.kind == .tracked(.timeOfDay) { return Text("The model estimates an earlier output time for \(contrast.comparison).") }
             if output?.kind == .tracked(.count) { return Text("The estimated daily count was lower for \(contrast.comparison).") }
             if isSleepDuration { return Text("\(contrast.comparison) was associated with shorter sleep.") }
+            if let output, output.quantityUnit != nil { return Text("\(contrast.comparison) was associated with lower values for \(output.name).") }
             return Text("\(contrast.comparison) was associated with lower resting heart rate.")
         case .nearZero, .uncertain:
             break
@@ -534,7 +538,7 @@ private func estimateDirection(
     return Text(estimate.finding.description(isSleepDuration: isSleepDuration, output: output, input: input))
 }
 
-func intervalLabel(_ estimate: AnalysisEstimate, isSleepDuration: Bool) -> String {
+func intervalLabel(_ estimate: AnalysisEstimate, isSleepDuration: Bool, unit: String = "bpm") -> String {
     if estimate.scale.isProbabilityDifference {
         return String(localized: "\(estimate.interval.lowerBound * 100, format: estimateNumber) to \(estimate.interval.upperBound * 100, format: estimateNumber) percentage points")
     }
@@ -544,14 +548,14 @@ func intervalLabel(_ estimate: AnalysisEstimate, isSleepDuration: Bool) -> Strin
     if estimate.scale != .difference {
         return String(localized: "\(estimate.interval.lowerBound, format: countPercent) to \(estimate.interval.upperBound, format: countPercent)")
     }
-    return numericAssociationIntervalLabel(estimate.interval, isSleepDuration: isSleepDuration)
+    return numericAssociationIntervalLabel(estimate.interval, isSleepDuration: isSleepDuration, unit: unit)
 }
 
-func numericAssociationIntervalLabel(_ interval: ClosedRange<Double>, isSleepDuration: Bool) -> String {
+func numericAssociationIntervalLabel(_ interval: ClosedRange<Double>, isSleepDuration: Bool, unit: String = "bpm") -> String {
     if isSleepDuration {
         return String(localized: "\(interval.lowerBound * 60, format: estimateNumber) to \(interval.upperBound * 60, format: estimateNumber) minutes")
     }
-    return String(localized: "\(interval.lowerBound, format: estimateNumber) to \(interval.upperBound, format: estimateNumber) bpm")
+    return String(localized: "\(interval.lowerBound, format: estimateNumber) to \(interval.upperBound, format: estimateNumber) \(unit)")
 }
 
 private extension AnalysisEstimate.Finding {
@@ -588,6 +592,10 @@ private extension AnalysisEstimate.Finding {
                     return self == .higher ? "Yes was associated with longer sleep than No."
                         : "Yes was associated with shorter sleep than No."
                 }
+                if let output, output.quantityUnit != nil {
+                    return self == .higher ? "Yes was associated with higher values for \(output.name) than No."
+                        : "Yes was associated with lower values for \(output.name) than No."
+                }
                 return self == .higher ? "Yes was associated with higher resting heart rate than No."
                     : "Yes was associated with lower resting heart rate than No."
             case .nearZero, .uncertain: break
@@ -597,6 +605,13 @@ private extension AnalysisEstimate.Finding {
             switch self {
             case .higher: return "Higher values were associated with a higher daily count for \(output.name)."
             case .lower: return "Higher values were associated with a lower daily count for \(output.name)."
+            case .nearZero, .uncertain: break
+            }
+        }
+        if let output, output.quantityUnit != nil {
+            switch self {
+            case .higher: return "Higher input values were associated with higher values for \(output.name)."
+            case .lower: return "Higher input values were associated with lower values for \(output.name)."
             case .nearZero, .uncertain: break
             }
         }
@@ -617,6 +632,7 @@ extension AnalysisEvidence.Grade {
         case .insufficient: "Insufficient"
         case .low: "Low"
         case .moderate: "Moderate"
+        case .high: "High"
         }
     }
 }
@@ -660,11 +676,12 @@ private extension AnalysisEvidence.Reason {
                 ? "The uncertainty interval spans more than 30 minutes for the reported increment."
                 : "The uncertainty interval spans more than 2 bpm for the reported increment."
         case .indeterminateInterval: "An interval includes no change and also allows an increase or decrease."
+        case .confirmedLaterAssociation: "The association persisted across five separate blocks of later recorded history."
         case .adequateCoverageAndPrecision: "The analysis has at least 90 paired days, good overlap, limited default use, and a narrow interval."
         case .defaultOnlyOutput:
             isYesNoOutput ? "Every paired yes/no output comes from a default." : "Every paired output value comes from a default."
         case .lowVariationOutput:
-            isYesNoOutput ? "Recorded output days all have the same yes/no value." : "Recorded output counts do not vary on paired days."
+            isYesNoOutput ? "Recorded output days all have the same yes/no value." : "Recorded output values do not vary on paired days."
         case .sparseObservedCountOutput: "Too few recorded output counts show repeated variation and nonzero counts."
         case .countModelUnavailable: "The count model could not estimate a stable association. Some input values may only occur with zero output counts."
         case .countModelLimitations: "The model assumes a constant proportional change for each reported comparison. Longer dependence, unmeasured variables, and default values can affect the estimate."

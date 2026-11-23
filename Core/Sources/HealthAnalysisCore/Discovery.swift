@@ -56,15 +56,15 @@ public struct DiscoveryReport: Sendable {
 extension HealthAnalysisApplication {
     public static let discoveryOutputMetrics: [HealthMeasurement.Metric] = [.restingHeartRate, .sleepAnalysis]
 
-    @MainActor public var discoverySeries: [AnalysisSeriesID] {
-        analysisVariables.filter { variable in
-            switch variable.id {
-            case .manualQuantity: variable.supportsInput
-            case .health(let metric, _): Self.discoveryOutputMetrics.contains(metric) && variable.supportsOutput
-            case .manualTyped, .sleepTiming: false
-            }
-        }.map(\.id)
+    @MainActor public var discoveryInputSeries: [AnalysisSeriesID] {
+        manualLog.quantities.map { .manualQuantity($0.id) }
     }
+
+    public var discoveryOutputSeries: [AnalysisSeriesID] {
+        Self.discoveryOutputMetrics.map { .health(metric: $0) }
+    }
+
+    @MainActor public var discoverySeries: [AnalysisSeriesID] { discoveryInputSeries + discoveryOutputSeries }
 
     @MainActor public func discover(
         asOf cutoff: Date = .now, timeZone: TimeZone = .current, enabledSeries: Set<AnalysisSeriesID>? = nil
@@ -77,7 +77,7 @@ extension HealthAnalysisApplication {
         }
 
         guard manualLog.isStoreAvailable else { return empty(.manualLogUnavailable) }
-        let enabled = enabledSeries ?? Set(discoverySeries)
+        let enabled = enabledSeries ?? discoveryRequest.enabledSeries
         let availableInputs = manualAnalysisSeries.filter { series in
             let variable = series.variable
             if case .manualQuantity = variable.id { return variable.supportsInput && enabled.contains(variable.id) }

@@ -203,6 +203,83 @@ struct DiscoveryTests {
         #expect(application.savedAnalyses.discoveryBaseline(for: question.id)?.discovery?.cutoff == fixture.cutoff)
     }
 
+    @Test(arguments: [0.04, 0.0, -0.04], ["Caffeine", "Daily adjustment"])
+    func highEvidenceRequiresAStableDisjointConfirmationYear(slope: Double, name: String) async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appending(path: "questions.json")
+        let fixture = DiscoveryHistory()
+        var noise = DiscoveryNoise(seed: 1581)
+        let behavior = noise.series(count: 761, dependence: 0.65)
+        let errors = noise.series(count: 762, dependence: 0.75)
+        let (app, _) = try await fixture.application(
+            days: 761, inputNames: [name], storeURL: url,
+            values: { [Int((210 + 44 * behavior[$0]).rounded())] },
+            output: { day, values in
+                let coefficient = day <= 395 ? 0.04 : slope
+                return 75 + coefficient * Double(values[day - 1][0] - 210) + 0.22 * errors[day]
+            }
+        )
+        let search = try #require(await app.discover(asOf: fixture.cutoff, timeZone: fixture.timeZone))
+        let found = try #require(search.findings.first { $0.configuration.behaviorWindow == .precedingDay })
+        let saved = try app.savedAnalyses.save(found.configuration, completed: found.completed)
+        await app.refreshSavedAnalysis(saved.id, asOf: fixture.date(750))
+        #expect(app.savedAnalyses.state(for: saved.id).completed?.reassessment?.result.evidence.grade != .high)
+
+        await app.refreshSavedAnalysis(saved.id, asOf: fixture.date(761))
+        let reopened = HealthAnalysisApplication(savedAnalysesStoreURL: url)
+        let current = try #require(reopened.savedAnalyses.state(for: saved.id).completed)
+        let later = try #require(current.reassessment)
+        #expect(current.result.evidence.grade != .high)
+        #expect(reopened.savedAnalyses.discoveryBaseline(for: saved.id)?.result.evidence.grade == .low)
+        if slope > 0 {
+            #expect(later.result.evidence.grade == .high)
+            let evidence = try #require(later.confirmation)
+            #expect(evidence.pValue <= evidence.threshold)
+            #expect(evidence.firstDay == fixture.date(396))
+            #expect(evidence.endBefore == fixture.date(761))
+        } else {
+            #expect(later.result.evidence.grade != .high)
+            #expect(later.confirmation == nil)
+        }
+    }
+
+    @Test(arguments: [0.0, 0.86])
+    func highEvidenceWithholdsConfidenceOnIndependentAndDependentNullFollowup(dependence: Double) async throws {
+        let fixture = DiscoveryHistory()
+        let source = DiscoveryChangeSource()
+        var noise = DiscoveryNoise(seed: 192_034)
+        let behavior = noise.series(count: 761, dependence: dependence)
+        let (app, _) = try await fixture.application(
+            days: 761, inputNames: ["Caffeine"], excluding: { $0 > 395 },
+            makeSource: { records in
+                await source.set(added: records)
+                return source
+            },
+            values: { [Int((240 + 48 * behavior[$0]).rounded())] },
+            output: { day, values in
+                70 + 0.04 * Double(values[day - 1][0] - 240) + Double(day % 7) / 10
+            }
+        )
+        let search = try #require(await app.discover(asOf: fixture.cutoff, timeZone: fixture.timeZone))
+        let found = try #require(search.findings.first { $0.configuration.behaviorWindow == .precedingDay })
+        let saved = try app.savedAnalyses.save(found.configuration, completed: found.completed)
+        let days = (396...760).filter { $0 % 17 >= 2 }
+        let ids = days.map { _ in UUID() }
+        for trial in 0..<24 {
+            var null = DiscoveryNoise(seed: UInt64(12_703 + trial))
+            let noise = null.series(count: 761, dependence: dependence)
+            await source.set(added: zip(days, ids).map { day, id in
+                fixture.measurement(day, bpm: 70 + 2 * noise[day], id: id)
+            })
+            await app.refreshSavedAnalysis(saved.id, asOf: fixture.date(761))
+            let later = try #require(app.savedAnalyses.state(for: saved.id).completed?.reassessment)
+            #expect(later.result.coverage.usableDates.count > 300)
+            #expect(later.result.estimates.count == 1)
+            #expect(later.result.evidence.grade != .high)
+        }
+    }
+
     @Test(arguments: [0.0, 0.86])
     func nullSearchWithCalendarGapsAndDependentCandidates(dependence: Double) async throws {
         let fixture = DiscoveryHistory()
@@ -376,6 +453,56 @@ struct DiscoveryTests {
 
         let empty = try #require(await HealthAnalysisApplication().discover(asOf: fixture.cutoff))
         #expect(empty.status == .noEnabledInputs)
+    }
+
+    @Test func discoveryPreferencesReopenWithTheSameEligibleRoles() throws {
+        let key = "discovery-test-\(UUID())"
+        defer { UserDefaults.standard.removeObject(forKey: key) }
+        let app = HealthAnalysisApplication(discoveryPreferencesKey: key)
+        let resting = AnalysisSeriesID.health(metric: .restingHeartRate)
+        let running = AnalysisSeriesID.activity(.runningDistance)
+        #expect(app.discoveryInputSeries.isEmpty)
+        #expect(app.discoveryOutputSeries.contains(resting))
+        #expect(!app.discoverySeries.contains(running))
+        let original = app.discoveryRequest
+        app.discovery.setEnabled(false, for: resting)
+        #expect(app.discoveryRequest != original)
+        let reopened = HealthAnalysisApplication(discoveryPreferencesKey: key)
+        #expect(reopened.discovery.disabledSeries == [resting])
+    }
+
+    @Test func sameDayCorrectionsReplaceDiscoveryIncludingDuringAnActiveSearch() async throws {
+        let fixture = DiscoveryHistory()
+        let (application, _) = try await fixture.application(
+            days: 395, inputNames: ["Caffeine"],
+            values: { [100 + $0 * 71 % 251] },
+            output: { day, values in 60 + 0.04 * Double(values[day - 1][0]) + Double(day * 13 % 17) / 20 }
+        )
+        let quantity = try #require(application.manualLog.quantities.first)
+        let day = ManualLogDay(fixture.date(394), timeZone: fixture.timeZone)
+        func latestAmount() -> Double? {
+            application.discovery.report?.findings.first {
+                $0.configuration.behaviorWindow == .precedingDay
+            }?.completed.result.observations.last?.inputs.first?.value
+        }
+
+        await application.refreshReconciledHealthInsights(asOf: fixture.cutoff, timeZone: fixture.timeZone)
+        #expect(latestAmount() == 213)
+        application.manualLog.editQuantity(quantity.id, on: day, text: "150", locale: fixture.locale)
+        await application.refreshReconciledHealthInsights(asOf: fixture.cutoff, timeZone: fixture.timeZone)
+        #expect(latestAmount() == 150)
+
+        var finished = false
+        let search = Task { @MainActor in
+            await application.refreshDiscoveries(asOf: fixture.cutoff, timeZone: fixture.timeZone)
+            finished = true
+        }
+        while !application.discovery.isSearching && !finished { await Task.yield() }
+        #expect(application.discovery.isSearching)
+        application.manualLog.editQuantity(quantity.id, on: day, text: "151", locale: fixture.locale)
+        await search.value
+        #expect(latestAmount() == 151)
+        #expect(!application.discovery.isSearching)
     }
 
     @Test func theMaximumFamilyIsBoundedDeterministicAndScreensTwoDependentNullOutputs() async throws {

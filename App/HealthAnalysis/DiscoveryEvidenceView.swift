@@ -36,6 +36,17 @@ struct DiscoveryEvidenceView: View {
                     evidenceDates(result, latestIdentifier: "discovery.later.latestPairedOutput")
                     contrastRows(result)
                     confidence(result)
+                    if let check = reassessment.confirmation {
+                        LabeledContent("Confirmation period") {
+                            Text("\(check.firstDay, format: result.analysisDateFormat) to before \(check.endBefore, format: result.analysisDateFormat)")
+                        }
+                        LabeledContent("Grouped p-value") {
+                            Text(check.pValue, format: .number.notation(.scientific).precision(.significantDigits(2...3)))
+                        }
+                        LabeledContent("Confirmation threshold") {
+                            Text(check.threshold, format: .number.precision(.significantDigits(2...3)))
+                        }
+                    }
                     if result.coverage.outputDayCount > 0 {
                         NavigationLink("Later usable dates and gaps") {
                             AnalysisCoverageView(result: result, application: application)

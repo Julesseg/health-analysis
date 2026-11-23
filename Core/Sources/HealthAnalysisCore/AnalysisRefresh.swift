@@ -59,7 +59,7 @@ extension HealthAnalysisApplication {
         _ configuration: AnalysisConfiguration, asOf: Date?, discoveryBaseline: CompletedAnalysis?
     ) async -> Result<CompletedAnalysis, AnalysisRunFailure>? {
         guard !Task.isCancelled else { return nil }
-        if case .manualTyped = configuration.output {
+        if configuration.healthDependencies.isEmpty {
             return completeAnalysis(usingReconciledHistory: configuration, asOf: asOf ?? .now)
         }
         guard let read = await healthMeasurements.refreshForAnalysis(), !Task.isCancelled,
@@ -85,15 +85,31 @@ extension HealthAnalysisApplication {
         _ configuration: AnalysisConfiguration, asOf: Date, discoveryBaseline: CompletedAnalysis?
     ) throws(AnalysisRunFailure) -> PreparedAnalysisRefresh {
         let ordinary = try prepareAnalysis(configuration, asOf: asOf)
-        let laterEvidence: (original: AnalysisResult, contrast: DiscoverySelection.Contrast, assess: PreparedAnalysis)?
+        let laterEvidence: (
+            original: AnalysisResult, selection: DiscoverySelection, assess: PreparedAnalysis,
+            period: DiscoveryReassessment.ConfirmationPeriod?, confirmation: PreparedAnalysis?
+        )?
         if let baseline = discoveryBaseline, let selection = baseline.discovery,
            baseline.result.configuration == configuration {
+            let legacyCaffeine = baseline.result.model == .caffeineLinearV1 ? configuration.inputs.first : nil
+            let period = DiscoveryReassessment.ConfirmationPeriod(
+                configuration: configuration, selection: selection, asOf: asOf
+            )
+            let confirmation: PreparedAnalysis?
+            if let period {
+                confirmation = try prepareAnalysis(
+                    configuration, asOf: period.asOf, after: selection.cutoff, legacyCaffeineInput: legacyCaffeine
+                )
+            } else {
+                confirmation = nil
+            }
             laterEvidence = (
-                baseline.result, selection.contrast,
+                baseline.result, selection,
                 try prepareAnalysis(
                     configuration, asOf: asOf, after: selection.cutoff,
-                    interactionReference: baseline.result.interaction
-                )
+                    interactionReference: baseline.result.interaction, legacyCaffeineInput: legacyCaffeine
+                ),
+                period, confirmation
             )
         } else {
             laterEvidence = nil
@@ -105,7 +121,10 @@ extension HealthAnalysisApplication {
             let reassessment = laterEvidence.flatMap { evidence -> DiscoveryReassessment? in
                 let later = evidence.assess()
                 guard later.model == evidence.original.model else { return nil }
-                return DiscoveryReassessment(result: later, original: evidence.original, contrast: evidence.contrast)
+                return DiscoveryReassessment(
+                    result: later, original: evidence.original, selection: evidence.selection,
+                    confirmationFit: evidence.confirmation?(), period: evidence.period
+                )
             }
             return .success(CompletedAnalysis(result: result, updatedAt: .now, reassessment: reassessment))
         }
@@ -131,7 +150,8 @@ extension HealthAnalysisApplication {
             for question in savedAnalyses.following {
                 guard !Task.isCancelled, healthMeasurements.reconciliationVersion == version,
                       healthMeasurements.readState == read else { return }
-                guard let output = question.configuration.output.healthHistorySeries,
+                let dependencies = question.configuration.healthDependencies
+                guard !dependencies.isEmpty,
                       savedAnalyses.isPinned(question.id),
                       savedAnalyses.question(id: question.id)?.configuration == question.configuration else { continue }
                 let state = savedAnalyses.state(for: question.id)
@@ -139,7 +159,7 @@ extension HealthAnalysisApplication {
                     let checkedAt = completed.discovery == nil
                         ? completed.updatedAt
                         : completed.result.healthHistoryReadAt ?? completed.updatedAt
-                    if !(healthMeasurements.analysisChangeDate(for: output).map { $0 > checkedAt } ?? false) {
+                    if !dependencies.contains(where: { healthMeasurements.analysisChangeDate(for: $0).map { $0 > checkedAt } ?? false }) {
                         continue
                     }
                 }
@@ -188,12 +208,8 @@ private extension HealthMeasurementHistory.ReadState {
     }
 }
 
-private extension AnalysisSeriesID {
-    var healthHistorySeries: AnalysisSeriesID? {
-        switch self {
-        case .health: self
-        case .sleepTiming(_, let source): .health(metric: .sleepAnalysis, sourceBundleIdentifier: source)
-        case .manualQuantity, .manualTyped: nil
-        }
+private extension AnalysisConfiguration {
+    var healthDependencies: Set<AnalysisSeriesID> {
+        Set(([output] + inputs + adjustmentInputs).compactMap(\.healthHistorySeries))
     }
 }

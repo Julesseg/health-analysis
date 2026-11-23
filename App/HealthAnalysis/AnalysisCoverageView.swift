@@ -18,6 +18,8 @@ struct AnalysisCoverageView: View {
                     Text("Each input uses complete local days before the output day began.")
                 } else if result.configuration.output.isSleepDuration || result.configuration.output.isSleepTiming {
                     Text("Each recorded wake date uses its longest completed sleep episode. Each input uses complete days before the episode began.")
+                } else if case .activity = result.configuration.output {
+                    Text("Workout days are labeled by local completion date. Inputs use complete local days before the first workout began.")
                 } else {
                     Text("Each input uses complete local days before the resting heart rate sample began.")
                 }
@@ -25,7 +27,7 @@ struct AnalysisCoverageView: View {
                     Text("Sleep times use the event’s local clock. Behavior stops at the earlier of the local onset date and the onset date in the analysis time zone.")
                 }
                 if result.configuration.behaviorWindow != .precedingDay {
-                    Text("Each quantity is totaled across the selected window.")
+                    Text("Resting heart rate is averaged across complete days. Other numeric inputs are totaled.")
                 }
                 if result.configuration.history != .fullHistory {
                     Text("History limits output dates. Earlier inputs can still complete a window.")
@@ -124,12 +126,12 @@ struct AnalysisCoverageView: View {
                 if result.coverage.usableDates.isEmpty {
                     Text("No paired days.")
                 }
-                if hasStoredCounts || includesYesNo || includesClock || result.categoryEvidence != nil {
+                if hasStoredCounts || includesYesNo || includesClock || result.categoryEvidence != nil || hasImportedInput || result.outputVariable?.quantityUnit != nil {
                     ForEach(result.observations) { observation in
                         NavigationLink {
                             PairedObservationView(
                                 result: result, observation: observation,
-                                countOnly: !includesYesNo && !includesClock && result.categoryEvidence == nil
+                                countOnly: hasStoredCounts && !includesYesNo && !includesClock && result.categoryEvidence == nil
                             )
                         } label: {
                             Text(observation.outputDate, format: result.analysisDateFormat)
@@ -156,12 +158,15 @@ struct AnalysisCoverageView: View {
         result.outputVariable?.kind == .tracked(.yesNo) || result.modeledInputs.contains { $0.kind == .tracked(.yesNo) }
     }
 
+    private var hasImportedInput: Bool { result.modeledInputs.contains { !$0.series.isDailyLog } }
+
     private var includesClock: Bool { result.isClockOutput || result.modeledInputs.contains(where: \.isClock) }
 
     private var pairedIdentifier: String {
         if includesClock { return "explore.pairedClock" }
         if result.categoryEvidence != nil { return "explore.pairedCategory" }
-        return includesYesNo ? "explore.pairedYesNo" : "explore.pairedCounts"
+        if includesYesNo { return "explore.pairedYesNo" }
+        return hasStoredCounts ? "explore.pairedCounts" : "explore.pairedValues"
     }
 
     private func recordedOutputCount(_ value: ManualTrackingValue) -> Int {
@@ -170,10 +175,7 @@ struct AnalysisCoverageView: View {
 
     private var selectedSourceIdentifier: String? {
         if let stored = result.inspection?.selectedOutputSourceIdentifier { return stored }
-        switch result.configuration.output {
-        case .health(_, let identifier), .sleepTiming(_, let identifier): return identifier
-        default: return nil
-        }
+        return result.configuration.output.sourceIdentifier
     }
 
     private func dateRange(_ first: Date, _ last: Date) -> Text {
@@ -207,6 +209,15 @@ struct AnalysisCoverageView: View {
         }
     }
 
+    private func missingInputLabel(_ input: AnalysisModeledInput, date: Date) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(input.name)
+            Text("No usable input on \(date, format: result.analysisDateFormat)")
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
     private func unpairedOutputDates(_ outputs: [AnalysisInspection.OutputWithoutPair]) -> some View {
         List {
             ForEach(outputs) { output in
@@ -214,6 +225,7 @@ struct AnalysisCoverageView: View {
                     LabeledContent("Output value") { result.analysisOutputValue(output.value, trackingValue: output.trackingValue) }
                     AnalysisOutputProvenanceRows(result: result, origin: output.origin, trackingValue: output.trackingValue)
                     SleepTimingProvenanceRows(anchor: output.anchor, evidence: output.sleepTimeZoneEvidence)
+                    ImportedRecordRows(record: output.importedRecord, format: result.analysisDateFormat)
                     if output.missingInputs.isEmpty && output.excludedCategoryInputs == nil {
                         Text("A complete input window could not be prepared for this measurement.")
                     }
@@ -224,20 +236,20 @@ struct AnalysisCoverageView: View {
                     }
                     ForEach(output.missingInputs) { missing in
                         if let input = result.modeledInputs.first(where: { $0.series == missing.series }) {
-                            NavigationLink {
-                                ManualLogView(
-                                    log: application.manualLog,
-                                    initialDay: ManualLogDay(missing.date, timeZone: result.configuration.timeZone)
-                                )
-                            } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(input.name)
-                                    Text("No usable input on \(missing.date, format: result.analysisDateFormat)")
-                                        .foregroundStyle(.secondary)
+                            if input.series.isDailyLog {
+                                NavigationLink {
+                                    ManualLogView(
+                                        log: application.manualLog,
+                                        initialDay: ManualLogDay(missing.date, timeZone: result.configuration.timeZone)
+                                    )
+                                } label: {
+                                    missingInputLabel(input, date: missing.date)
                                 }
-                                .accessibilityElement(children: .combine)
+                                .accessibilityIdentifier("explore.missingInput")
+                            } else {
+                                missingInputLabel(input, date: missing.date)
+                                    .accessibilityIdentifier("explore.missingInput")
                             }
-                            .accessibilityIdentifier("explore.missingInput")
                         }
                     }
                 } header: {
@@ -264,6 +276,8 @@ struct AnalysisOutputValuesView: View {
                 if result.isClockOutput {
                     AnalysisOutputProvenanceRows(result: result, origin: output.origin, trackingValue: output.trackingValue)
                     SleepTimingProvenanceRows(anchor: output.anchor, evidence: output.sleepTimeZoneEvidence)
+                } else if let record = output.importedRecord {
+                    ImportedRecordRows(record: record, format: result.analysisDateFormat)
                 } else {
                     Text(output.anchor, format: result.analysisDateFormat.hour().minute())
                 }
@@ -318,10 +332,7 @@ extension AnalysisResult {
         return format
     }
 
-    var isStoredAnalysisOutput: Bool {
-        if case .manualTyped = configuration.output { return true }
-        return false
-    }
+    var isStoredAnalysisOutput: Bool { configuration.output.isDailyLog }
 
     @MainActor var analysisOutputTitle: Text {
         if case .sleepTiming(let timing, _) = configuration.output { return Text(timing.title) }
@@ -339,6 +350,7 @@ extension AnalysisResult {
         if outputVariable?.kind == .tracked(.yesNo) { return analysisOutputTitle }
         if outputVariable?.kind == .tracked(.count) { return Text("\(analysisOutputTitle) (count)") }
         if let outputVariable, outputVariable.kind.ratingThreshold != nil { return outputVariable.analysisChoiceLabel }
+        if let outputVariable, outputVariable.quantityUnit != nil { return outputVariable.analysisChoiceLabel }
         return configuration.output.isSleepDuration ? Text("Sleep duration (hours)") : Text("\(analysisOutputTitle) (bpm)")
     }
 
@@ -353,7 +365,7 @@ extension AnalysisResult {
         let format = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(0...2))
         return configuration.output.isSleepDuration
             ? Text("\(value, format: format) h")
-            : Text("\(value, format: format) bpm")
+            : Text("\(value, format: format) \(outputVariable?.quantityUnit ?? "bpm")")
     }
 
 }

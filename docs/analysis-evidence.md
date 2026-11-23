@@ -1,6 +1,6 @@
 # Evidence for an analysis
 
-Every analysis must expose a confidence index using insufficient, low, moderate, and high evidence grades, with inspectable reasons. The grade summarizes evidence quality; the statistical method, grade criteria, and thresholds still need to be specified and validated.
+Every analysis must expose a confidence index using insufficient, low, moderate, and high evidence grades, with inspectable reasons. The grade summarizes evidence quality. High is available for the validated follow-up design described in [Automatic discovery](automatic-discovery.md#later-evidence). Each other design reports its available grade and reasons.
 
 ## Interpretation constraints
 

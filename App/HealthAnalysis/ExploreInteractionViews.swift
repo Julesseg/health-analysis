@@ -61,6 +61,7 @@ struct InteractionResultSection: View {
     let moderator: AnalysisModeledInput
     let estimate: AnalysisInteractionEstimate?
     let isSleepDuration: Bool
+    var output: AnalysisVariable? = nil
     @ScaledMetric private var chartHeight = 110.0
 
     private var scale: Double { isSleepDuration ? 60 : 1 }
@@ -162,19 +163,20 @@ struct InteractionResultSection: View {
     }
 
     private var axisLabel: LocalizedStringKey {
-        isSleepDuration ? "Difference in sleep duration (minutes)" : "Difference in resting heart rate (bpm)"
+        if let output, let unit = output.quantityUnit { return "Difference in \(output.name) (\(unit))" }
+        return isSleepDuration ? "Difference in sleep duration (minutes)" : "Difference in resting heart rate (bpm)"
     }
 
     private func difference(_ value: Double) -> Text {
         if isSleepDuration { Text("\(value * scale, format: interactionNumber) minutes") }
-        else { Text("\(value, format: interactionNumber) bpm") }
+        else { Text("\(value, format: interactionNumber) \(output?.quantityUnit ?? "bpm")") }
     }
 
     private func intervalLabel(_ interval: ClosedRange<Double>) -> String {
         if isSleepDuration {
             return String(localized: "\(interval.lowerBound * scale, format: interactionNumber) to \(interval.upperBound * scale, format: interactionNumber) minutes")
         }
-        return String(localized: "\(interval.lowerBound, format: interactionNumber) to \(interval.upperBound, format: interactionNumber) bpm")
+        return String(localized: "\(interval.lowerBound, format: interactionNumber) to \(interval.upperBound, format: interactionNumber) \(output?.quantityUnit ?? "bpm")")
     }
 }
 

@@ -83,24 +83,78 @@ public final class ManualLog {
         var typed: TypedLogSnapshot?
         var trackingSuggestions: [UUID: SuggestedTrackingVariable]?
 
-        static func load(from url: URL) throws -> Self {
+        static func read(from url: URL) throws -> Self? {
             do {
                 return try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
-            } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
-                return Self()
+            } catch let error as CocoaError {
+                if error.code == .fileReadNoSuchFile { return nil }
+                var isDirectory: ObjCBool = false
+                let parent = url.deletingLastPathComponent().path
+                if FileManager.default.fileExists(atPath: parent, isDirectory: &isDirectory), !isDirectory.boolValue {
+                    return nil
+                }
+                throw error
             }
+        }
+
+        static func load(from url: URL, legacyURL: URL?) throws -> Self {
+            if let stored = try read(from: url) {
+                Self.removeLegacy(at: legacyURL)
+                return stored
+            }
+            guard let legacyURL, let legacy = try read(from: legacyURL) else { return Self() }
+            #if os(iOS)
+            var excludedLegacy = legacyURL
+            var resources = URLResourceValues()
+            resources.isExcludedFromBackup = true
+            try? excludedLegacy.setResourceValues(resources)
+            #endif
+            if (try? legacy.write(to: url)) != nil {
+                Self.removeLegacy(at: legacyURL)
+            }
+            return legacy
+        }
+
+        static func removeLegacy(at url: URL?) {
+            guard let url, let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+                  attributes[.type] as? FileAttributeType == .typeRegular else { return }
+            try? FileManager.default.removeItem(at: url)
+        }
+
+        func write(to url: URL) throws {
+            var directory = url.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            var options: Data.WritingOptions = .atomic
+            #if os(iOS)
+            var resources = URLResourceValues()
+            resources.isExcludedFromBackup = true
+            try directory.setResourceValues(resources)
+            options.insert(.completeFileProtection)
+            #endif
+            try JSONEncoder().encode(self).write(to: url, options: options)
         }
     }
 
     private let storeURL: URL?
+    private let legacyURL: URL?
     private var snapshot: Snapshot?
-    @ObservationIgnored private(set) var analysisRevision = 0
+    private(set) var analysisRevision = 0
     private var edits: [Entry: Edit] = [:]
     private var typedEdits: [TypedLogEntryKey: TypedLogEdit] = [:]
 
-    nonisolated init(storeURL: URL?) {
+    nonisolated init(storeURL: URL?, legacyURL: URL?) {
         self.storeURL = storeURL
-        _snapshot = try? storeURL.map(Snapshot.load(from:)) ?? Snapshot()
+        let legacy = legacyURL == storeURL ? nil : legacyURL
+        self.legacyURL = legacy
+        _snapshot = try? storeURL.map { try Snapshot.load(from: $0, legacyURL: legacy) } ?? Snapshot()
+    }
+
+    public func reloadIfUnavailable() {
+        guard snapshot == nil, let storeURL, let loaded = try? Snapshot.load(from: storeURL, legacyURL: legacyURL) else {
+            return
+        }
+        snapshot = loaded
+        analysisRevision += 1
     }
 
     public var quantities: [TrackingQuantity] { snapshot?.quantities ?? [] }
@@ -414,8 +468,8 @@ public final class ManualLog {
 
     private func persist(_ updated: Snapshot) throws {
         if let storeURL {
-            try FileManager.default.createDirectory(at: storeURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try JSONEncoder().encode(updated).write(to: storeURL, options: .atomic)
+            try updated.write(to: storeURL)
+            Snapshot.removeLegacy(at: legacyURL)
         }
         snapshot = updated
         analysisRevision += 1

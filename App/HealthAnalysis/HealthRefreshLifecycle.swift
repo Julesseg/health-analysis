@@ -23,6 +23,7 @@ final class HealthRefreshLifecycle: NSObject, UIApplicationDelegate {
 
     func scenePhaseChanged(_ phase: ScenePhase) {
         let configuration = HealthAnalysisApp.configuration
+        if phase == .active { configuration.application.manualLog.reloadIfUnavailable() }
         guard configuration.checksOnActivation else { return }
         switch phase {
         case .active where !isForeground:
@@ -43,6 +44,7 @@ final class HealthRefreshLifecycle: NSObject, UIApplicationDelegate {
     }
 
     func applicationProtectedDataDidBecomeAvailable(_ application: UIApplication) {
+        HealthAnalysisApp.configuration.application.manualLog.reloadIfUnavailable()
         guard HealthAnalysisApp.configuration.checksOnActivation, checkTask == nil else { return }
         scheduleCheck()
     }

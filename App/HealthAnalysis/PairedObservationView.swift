@@ -38,16 +38,13 @@ struct PairedObservationView: View {
     private func valueRow(
         name: String, categories: [TrackingCategory], value: ManualTrackingValue, date: Date, origin: ManualValueOrigin
     ) -> some View {
-        VStack(alignment: .leading) {
-            LabeledContent(name) {
-                switch value {
-                case .count(let count), .rating(let count): Text(count, format: .number)
-                case .yesNo(let isYes): yesNoLabel(isYes)
-                case .category: categoryValueLabel(value, categories: categories)
-                case .timeOfDay(let time, _): analysisClockText(Double(time.hour * 60 + time.minute))
-                default: EmptyView()
-                }
-            }
+        let displayedValue = valueLabel(value, categories: categories)
+        return VStack(alignment: .leading) {
+            LabeledContent(name) { displayedValue }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(verbatim: name))
+                .accessibilityValue(displayedValue)
+                .accessibilityIdentifier("explore.pairedValue")
             Text(date, format: dayFormat)
             if case .timeOfDay(_, let precision) = value {
                 AnalysisClockPrecisionRow(precision: precision)
@@ -66,6 +63,15 @@ struct PairedObservationView: View {
                     Text("Assumed default")
                 }
             }
+        }
+    }
+
+    private func valueLabel(_ value: ManualTrackingValue, categories: [TrackingCategory]) -> Text {
+        switch value {
+        case .count(let count), .rating(let count): Text(count, format: .number)
+        case .yesNo(let isYes): yesNoLabel(isYes)
+        case .category: categoryValueLabel(value, categories: categories)
+        case .timeOfDay(let time, _): analysisClockText(Double(time.hour * 60 + time.minute))
         }
     }
 

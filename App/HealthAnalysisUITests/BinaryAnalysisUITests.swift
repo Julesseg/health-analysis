@@ -56,7 +56,9 @@ final class BinaryAnalysisUITests: XCTestCase {
         XCTAssertTrue(firstPair.isHittable)
         firstPair.tap()
         XCTAssertTrue(app.navigationBars["Paired values"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["No"].firstMatch.exists)
+        let outputValue = app.descendants(matching: .any).matching(identifier: "explore.pairedValue")
+            .matching(NSPredicate(format: "label == %@", "Headache")).firstMatch
+        XCTAssertEqual(outputValue.value as? String, "No")
         XCTAssertTrue(app.staticTexts["Explicit observation"].firstMatch.exists)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Assumed default effective")).firstMatch.exists)
         app.navigationBars["Paired values"].buttons.firstMatch.tap()

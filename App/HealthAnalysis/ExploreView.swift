@@ -201,33 +201,35 @@ struct ExploreView: View {
                     behaviorWindow: $behaviorWindow, history: $history, allowsLongerWindows: allowsLongerWindowsAndInteractions
                 )
             } footer: {
-                if inputChoices.isEmpty {
-                    Text("Add a daily tracking variable in Settings to choose an input.")
-                }
-                if hasUnsupportedCategoryCombination {
-                    Text("Choose category variables or yes/no variables for this analysis.")
-                }
-                if usesCategories {
-                    Text("Category analyses use the complete preceding day.")
-                    Text("Interactions with categories are unavailable.")
-                    if categoryOutput != nil {
-                        Text("The model estimates the odds of the selected output category versus all other categories.")
+                VStack(alignment: .leading, spacing: 4) {
+                    if inputChoices.isEmpty {
+                        Text("Add a daily tracking variable in Settings to choose an input.")
                     }
-                }
-                if usesClocks {
-                    Text("Clock analyses use the complete preceding day. The model compares times within a shared part of the day.")
-                    Text("Interactions with clock times are unavailable.")
-                } else if usesYesNo {
-                    Text("Yes/no analyses use the complete preceding day.")
-                    Text("Interactions with yes/no variables are unavailable.")
-                }
-                if usesRatings {
-                    Text("Rating analyses compare levels on either side of a fixed threshold using the complete preceding day.")
-                    Text("Interactions with ratings are unavailable.")
-                }
-                if usesCounts {
-                    Text("Count analyses use the complete preceding day.")
-                    Text("Interactions with counts are unavailable.")
+                    if hasUnsupportedCategoryCombination {
+                        Text("Choose category variables or yes/no variables for this analysis.")
+                    }
+                    if usesCategories {
+                        Text("Category analyses use the complete preceding day.")
+                        Text("Interactions with categories are unavailable.")
+                        if categoryOutput != nil {
+                            Text("The model estimates the odds of the selected output category versus all other categories.")
+                        }
+                    }
+                    if usesClocks {
+                        Text("Clock analyses use the complete preceding day. The model compares times within a shared part of the day.")
+                        Text("Interactions with clock times are unavailable.")
+                    } else if usesYesNo {
+                        Text("Yes/no analyses use the complete preceding day.")
+                        Text("Interactions with yes/no variables are unavailable.")
+                    }
+                    if usesRatings {
+                        Text("Rating analyses compare levels on either side of a fixed threshold using the complete preceding day.")
+                        Text("Interactions with ratings are unavailable.")
+                    }
+                    if usesCounts {
+                        Text("Count analyses use the complete preceding day.")
+                        Text("Interactions with counts are unavailable.")
+                    }
                 }
             }
 

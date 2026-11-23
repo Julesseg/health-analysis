@@ -177,13 +177,21 @@ final class ExploreAnalysisUITests: XCTestCase {
 extension XCUIElement {
     @MainActor
     func tapExploreSwitch() {
-        let expectedValue = (value as? String) == "1" ? "0" : "1"
-        let control = switches.firstMatch
-        let target = control.exists ? control : self
-        let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: target)
+        let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: self)
         XCTAssertEqual(XCTWaiter.wait(for: [hittable], timeout: 5), .completed)
-        target.press(forDuration: 0.15)
-        let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", expectedValue), object: self)
-        XCTAssertEqual(XCTWaiter.wait(for: [changed], timeout: 5), .completed, "Switch \(label) should change to \(expectedValue)")
+        let originalValue = value as? String
+        let expectedValue = originalValue == "1" ? "0" : "1"
+        let changed = NSPredicate(format: "value == %@", expectedValue)
+        func waitForChange() -> Bool {
+            let expectation = XCTNSPredicateExpectation(predicate: changed, object: self)
+            return XCTWaiter.wait(for: [expectation], timeout: 5) == .completed
+        }
+
+        coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        guard !waitForChange() else { return }
+        if (value as? String) == originalValue {
+            coordinate(withNormalizedOffset: CGVector(dx: 0.875, dy: 0.5)).press(forDuration: 0.15)
+        }
+        XCTAssertTrue(waitForChange(), "Switch \(label) should change to \(expectedValue)")
     }
 }

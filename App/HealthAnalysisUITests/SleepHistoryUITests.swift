@@ -36,9 +36,10 @@ final class SleepHistoryUITests: XCTestCase {
         show(march29, in: app)
         show(app.staticTexts["7 hours"], in: app)
 
+        app.navigationBars["Sleep"].buttons["Data"].tap()
+        app.buttons["Sleep"].tap()
         let refresh = app.buttons["Refresh Health measurements"]
-        for _ in 0..<6 where !refresh.isHittable { app.swipeDown() }
-        XCTAssertTrue(refresh.isHittable)
+        XCTAssertTrue(refresh.waitForExistence(timeout: 5))
         refresh.tap()
 
         show(app.staticTexts["6 hours"], in: app)

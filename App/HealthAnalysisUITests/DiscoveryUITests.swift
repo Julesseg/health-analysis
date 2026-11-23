@@ -2,6 +2,40 @@ import XCTest
 
 final class DiscoveryUITests: XCTestCase {
     @MainActor
+    func testForegroundHealthCheckRetriesProtectedDataAndRefreshesInsights() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launchEnvironment["HEALTH_ANALYSIS_DISCOVERY_UI_FIXTURE"] = "foreground-refresh"
+        app.launch()
+
+        let discovery = app.buttons["discovery.open"].firstMatch
+        let followed = app.buttons["savedAnalysis.open"].firstMatch
+        XCTAssertTrue(discovery.waitForExistence(timeout: 10))
+        followed.tap()
+        XCTAssertTrue(app.staticTexts["Higher values were associated with higher resting heart rate."]
+            .waitForExistence(timeout: 5))
+        app.navigationBars["Analysis result"].buttons.firstMatch.tap()
+
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        let unavailable = app.staticTexts["discovery.unavailable"]
+        XCTAssertTrue(unavailable.waitForExistence(timeout: 10))
+        XCTAssertEqual(unavailable.label, "Health data is protected. Unlock your iPhone and try again.")
+        XCTAssertTrue(discovery.exists)
+
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        let empty = app.staticTexts["discovery.empty"]
+        XCTAssertTrue(empty.waitForExistence(timeout: 10))
+        XCTAssertEqual(empty.label, "There are no readable outputs for discovery.")
+        XCTAssertFalse(unavailable.exists)
+        followed.tap()
+        XCTAssertTrue(app.staticTexts["There isn’t enough evidence to estimate this association."]
+            .waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testFindsOpensEditsAndPinsTheTestedQuestion() {
         continueAfterFailure = false
         let app = XCUIApplication()

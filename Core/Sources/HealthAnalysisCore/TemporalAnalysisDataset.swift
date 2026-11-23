@@ -1,6 +1,6 @@
 import Foundation
 
-struct TemporalAnalysisDataset {
+struct TemporalAnalysisDataset: Sendable {
     struct Output: Sendable {
         let date: Date
         let anchor: Date

@@ -60,7 +60,7 @@ public final class SavedAnalyses {
 
     private let storeURL: URL?
     private var snapshot: Snapshot?
-    private var refreshRequests: [SavedAnalysis.ID: UUID] = [:]
+    private var refreshRequests: [SavedAnalysis.ID: (id: UUID, automatic: Bool)] = [:]
     private var refreshFailures: [SavedAnalysis.ID: AnalysisRefreshFailure] = [:]
 
     nonisolated init(storeURL: URL?) {
@@ -137,7 +137,7 @@ public final class SavedAnalyses {
             completionChanged = false
         }
         try persist(updated)
-        if configurationChanged { refreshRequests[question.id] = nil }
+        if configurationChanged || completionChanged { refreshRequests[question.id] = nil }
         if configurationChanged || completionChanged { refreshFailures[question.id] = nil }
         return question
     }
@@ -154,9 +154,14 @@ public final class SavedAnalyses {
         try persist(updated)
     }
 
-    func beginRefresh(for id: SavedAnalysis.ID) -> UUID {
+    func beginAutomaticRefresh(for id: SavedAnalysis.ID) -> UUID? {
+        guard refreshRequests[id]?.automatic != false else { return nil }
+        return beginRefresh(for: id, automatic: true)
+    }
+
+    func beginRefresh(for id: SavedAnalysis.ID, automatic: Bool = false) -> UUID {
         let requestID = UUID()
-        refreshRequests[id] = requestID
+        refreshRequests[id] = (requestID, automatic)
         return requestID
     }
 
@@ -165,7 +170,7 @@ public final class SavedAnalyses {
         requestID: UUID,
         result: Result<CompletedAnalysis, AnalysisRunFailure>?
     ) {
-        guard refreshRequests[id] == requestID, var updated = snapshot else { return }
+        guard refreshRequests[id]?.id == requestID, var updated = snapshot else { return }
         defer { refreshRequests[id] = nil }
         switch result {
         case .success(let completed):

@@ -3,39 +3,11 @@ import SwiftUI
 
 struct InsightsView: View {
     let application: HealthAnalysisApplication
+    @Binding var disabledSeries: Set<AnalysisSeriesID>
     let openExplore: () -> Void
-    @AppStorage("disabledDiscoverySeries") private var storedDisabledSeries = Data()
     @Environment(\.timeZone) private var timeZone
-    @State private var searchAgain = 0
-    @State private var completedRequest: Request?
-
-    private struct Request: Equatable {
-        let enabled: Set<AnalysisSeriesID>
-        let timeZone: TimeZone
-        let lastHealthRead: Date?
-        let readState: HealthMeasurementHistory.ReadState
-        let preferredSources: [String?]
-        let searchAgain: Int
-    }
-
-    private var request: Request {
-        let history = application.healthMeasurements
-        return Request(
-            enabled: Set(application.discoverySeries).subtracting(disabledSeries), timeZone: timeZone,
-            lastHealthRead: history.lastSuccessfulReadAt, readState: history.readState,
-            preferredSources: HealthAnalysisApplication.discoveryOutputMetrics.map {
-                history.preferredSource(for: $0)?.bundleIdentifier
-            },
-            searchAgain: searchAgain
-        )
-    }
-
-    private var disabledSeries: Set<AnalysisSeriesID> {
-        (try? JSONDecoder().decode(Set<AnalysisSeriesID>.self, from: storedDisabledSeries)) ?? []
-    }
 
     var body: some View {
-        let request = request
         List {
             if application.firstUse.step != .complete {
                 Section {
@@ -55,11 +27,6 @@ struct InsightsView: View {
                 }
             }
             LatestHealthMeasurementsSection(history: application.healthMeasurements)
-        }
-        .task(id: request) {
-            guard request != completedRequest else { return }
-            await application.refreshDiscoveries(timeZone: request.timeZone, enabledSeries: request.enabled)
-            if !Task.isCancelled { completedRequest = request }
         }
     }
 
@@ -92,8 +59,19 @@ struct InsightsView: View {
         NavigationLink("Discovery variables") {
             discoveryVariables
         }
-        if activity.report?.candidates.isEmpty == false {
-            Button("Search again") { searchAgain += 1 }
+        if case .healthHistoryUnavailable = activity.unavailableStatus {
+            Button("Retry Health check") {
+                Task { await application.healthMeasurements.refresh() }
+            }
+            .disabled(application.healthMeasurements.readState == .loading)
+        } else if activity.report?.candidates.isEmpty == false {
+            Button("Search again") {
+                Task {
+                    await application.refreshDiscoveries(
+                        timeZone: timeZone, enabledSeries: Set(application.discoverySeries).subtracting(disabledSeries)
+                    )
+                }
+            }
                 .disabled(activity.isSearching)
         }
     }
@@ -105,13 +83,11 @@ struct InsightsView: View {
                     Toggle(isOn: Binding {
                         !disabledSeries.contains(series)
                     } set: { enabled in
-                        var next = disabledSeries
                         if enabled {
-                            next.remove(series)
+                            disabledSeries.remove(series)
                         } else {
-                            next.insert(series)
+                            disabledSeries.insert(series)
                         }
-                        if let encoded = try? JSONEncoder().encode(next) { storedDisabledSeries = encoded }
                     }) {
                         application.analysisSeriesTitle(series)
                     }

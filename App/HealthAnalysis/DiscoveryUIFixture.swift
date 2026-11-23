@@ -3,10 +3,11 @@ import Foundation
 import HealthAnalysisCore
 
 enum DiscoveryUIFixture {
+    private static var mode: String? { ProcessInfo.processInfo.environment["HEALTH_ANALYSIS_DISCOVERY_UI_FIXTURE"] }
+    static var checksOnActivation: Bool { mode == "foreground-refresh" }
+
     @MainActor static func applicationForLaunch() -> HealthAnalysisApplication? {
-        guard ProcessInfo.processInfo.environment["HEALTH_ANALYSIS_DISCOVERY_UI_FIXTURE"] == "1" || reassesses else {
-            return nil
-        }
+        guard mode == "1" || checksOnActivation || reassesses else { return nil }
         let calendar = Calendar.current
         let timeZone = calendar.timeZone
         let today = calendar.startOfDay(for: .now)
@@ -29,7 +30,9 @@ enum DiscoveryUIFixture {
                 )
             )
         }
-        let application = HealthAnalysisApplication(healthSource: Source(records: days.map(\.measurement)))
+        let application = HealthAnalysisApplication(healthSource: Source(
+            records: days.map(\.measurement), exercisesRefresh: checksOnActivation
+        ))
         let caffeine = try! application.manualLog.createQuantity(
             name: "Caffeine", unit: "mg", defaultValue: 0, startsOn: days[0].date
         )
@@ -37,6 +40,12 @@ enum DiscoveryUIFixture {
             application.manualLog.editQuantity(
                 caffeine.id, on: day.date, text: String(day.amount), locale: Locale(identifier: "en_US_POSIX")
             )
+        }
+        if checksOnActivation {
+            let question = try! application.savedAnalyses.save(.init(
+                output: .health(metric: .restingHeartRate), inputs: [.manualQuantity(caffeine.id)], timeZone: timeZone
+            ))
+            try! application.savedAnalyses.setPinned(true, for: question.id)
         }
         return application
     }
@@ -58,15 +67,27 @@ enum DiscoveryUIFixture {
         ProcessInfo.processInfo.environment["HEALTH_ANALYSIS_DISCOVERY_REASSESSMENT_UI_FIXTURE"] == "1"
     }
 
-    private struct Source: HealthMeasurementSource {
+    private actor Source: HealthMeasurementSource {
         let records: [HealthMeasurement]
+        let exercisesRefresh: Bool
+        var attempts = 0
+
+        init(records: [HealthMeasurement], exercisesRefresh: Bool) {
+            self.records = records
+            self.exercisesRefresh = exercisesRefresh
+        }
 
         func requestReadAccess() async throws {}
 
         func readChanges(
             after anchors: [String: Data], includingPreviouslySaved: Bool
         ) async throws -> [HealthMeasurementChanges] {
-            [.init(queryID: "restingHeartRate", anchor: Data([1]), added: records)]
+            attempts += 1
+            if !exercisesRefresh || attempts == 1 {
+                return [.init(queryID: "restingHeartRate", anchor: Data([1]), added: records)]
+            }
+            if attempts == 2 { throw HealthMeasurementReadFailure.protectedData }
+            return [.init(queryID: "restingHeartRate", anchor: Data([2]), added: [], deleted: records.map(\.id))]
         }
     }
 }

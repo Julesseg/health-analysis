@@ -242,13 +242,13 @@ extension HealthAnalysisApplication {
     @MainActor public func analyze(
         _ configuration: AnalysisConfiguration, asOf: Date = .now
     ) throws(AnalysisRunFailure) -> AnalysisResult {
-        try analyze(configuration, asOf: asOf, after: nil)
+        try prepareAnalysis(configuration, asOf: asOf)()
     }
 
-    @MainActor func analyze(
-        _ configuration: AnalysisConfiguration, asOf: Date, after cutoff: Date?,
+    @MainActor func prepareAnalysis(
+        _ configuration: AnalysisConfiguration, asOf: Date, after cutoff: Date? = nil,
         interactionReference: AnalysisInteractionEstimate? = nil
-    ) throws(AnalysisRunFailure) -> AnalysisResult {
+    ) throws(AnalysisRunFailure) -> PreparedAnalysis {
         let series = try validatedAnalysisSeries(for: configuration)
         let inputs = series.inputs
         let category = series.category
@@ -288,12 +288,17 @@ extension HealthAnalysisApplication {
             window: configuration.behaviorWindow, history: configuration.history, asOf: asOf, calendar: calendar,
             categoryInputs: category.inputContrasts, after: cutoff
         )
-        return AnalysisResult.assess(
-            configuration: configuration, dataset: dataset, inputs: inputs.map(\.variable), output: output,
-            calendar: calendar, practicalDifference: practicalDifference,
-            lastReadAt: outputHistory.healthReadAt, lastReadFailure: outputHistory.healthReadFailure,
-            category: category, interactionReference: interactionReference
-        )
+        let variables = inputs.map(\.variable)
+        let readAt = outputHistory.healthReadAt
+        let readFailure = outputHistory.healthReadFailure
+        return { [calendar] in
+            AnalysisResult.assess(
+                configuration: configuration, dataset: dataset, inputs: variables, output: output,
+                calendar: calendar, practicalDifference: practicalDifference,
+                lastReadAt: readAt, lastReadFailure: readFailure,
+                category: category, interactionReference: interactionReference
+            )
+        }
     }
 
     @MainActor func validatedAnalysisSeries(
@@ -399,6 +404,8 @@ extension HealthAnalysisApplication {
         }
     }
 }
+
+typealias PreparedAnalysis = @Sendable () -> AnalysisResult
 
 extension AnalysisResult {
     static func assess(

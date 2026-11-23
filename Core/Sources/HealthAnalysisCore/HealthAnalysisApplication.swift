@@ -13,6 +13,7 @@ public struct HealthAnalysisApplication: Sendable {
     public let savedAnalyses: SavedAnalyses
     public let firstUse: FirstUseSetup
     public let discovery = DiscoveryActivity()
+    let analysisFitter = AnalysisFitter()
 
     public init(
         healthSource: (any HealthMeasurementSource)? = nil,

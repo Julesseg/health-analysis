@@ -34,6 +34,7 @@ public final class HealthMeasurementHistory {
         var lastSuccessfulReadAt: Date?
         var sleepFallbackTimeZoneIdentifier: String?
         var workouts: [HealthWorkout]?
+        var analysisChanges: [AnalysisSeriesID: Date]?
 
         static func load(from url: URL) throws -> Self {
             do {
@@ -45,6 +46,7 @@ public final class HealthMeasurementHistory {
     }
 
     public private(set) var readState: ReadState = .idle
+    public private(set) var reconciliationVersion = 0
     public var history: [HealthMeasurement] { snapshot?.records ?? [] }
     public var workouts: [HealthWorkout] { snapshot?.workouts ?? [] }
     public var hasReadableRecords: Bool { !history.isEmpty || !workouts.isEmpty }
@@ -80,6 +82,12 @@ public final class HealthMeasurementHistory {
         snapshot?.preferredSources[metric.rawValue]
     }
 
+    func analysisChangeDate(for series: AnalysisSeriesID) -> Date? {
+        guard let snapshot else { return nil }
+        guard let analysisChanges = snapshot.analysisChanges else { return snapshot.lastSuccessfulReadAt }
+        return analysisChanges[series]
+    }
+
     public func sources(for metric: HealthMeasurement.Metric) -> [HealthMeasurement.Source] {
         let records = history.reversed().filter { $0.metric == metric }.map(\.source)
         return availableSources(records, preferred: preferredSource(for: metric))
@@ -108,6 +116,7 @@ public final class HealthMeasurementHistory {
         _ bundleIdentifier: String?, for metric: HealthMeasurement.Metric, among sources: [HealthMeasurement.Source]
     ) throws(PreferenceFailure) {
         guard var updated = snapshot else { throw .persistence }
+        guard updated.preferredSources[metric.rawValue]?.bundleIdentifier != bundleIdentifier else { return }
         if let bundleIdentifier {
             guard let source = sources.first(where: { $0.bundleIdentifier == bundleIdentifier }) else {
                 throw .unknownSource
@@ -116,8 +125,12 @@ public final class HealthMeasurementHistory {
         } else {
             updated.preferredSources.removeValue(forKey: metric.rawValue)
         }
+        var changes = analysisChangeDates(in: updated)
+        changes[.health(metric: metric)] = .now
+        updated.analysisChanges = changes
         do {
             try persist(updated)
+            reconciliationVersion += 1
         } catch {
             throw .persistence
         }
@@ -155,28 +168,37 @@ public final class HealthMeasurementHistory {
     }
 
     public func requestAccessAndRefresh() async {
+        while readState == .loading, !Task.isCancelled { _ = await waitForRead() }
         _ = await load(requestingAccess: true)
     }
 
     public func refresh() async {
-        _ = await load(requestingAccess: false)
+        _ = await refreshForAnalysis()
+    }
+
+    public func refreshAfterHealthChange() async {
+        if readState == .loading { _ = await waitForRead() }
+        _ = await refreshForAnalysis()
     }
 
     func refreshForAnalysis() async -> ReadState? {
-        if readState == .loading {
-            return await withCheckedContinuation { analysisReadWaiters.append($0) }
-        }
+        guard !Task.isCancelled else { return nil }
+        if readState == .loading { return await waitForRead() }
         return await load(requestingAccess: false)
+    }
+
+    private func waitForRead() async -> ReadState? {
+        await withCheckedContinuation { analysisReadWaiters.append($0) }
     }
 
     private func load(requestingAccess: Bool) async -> ReadState? {
         guard readState != .loading, !Task.isCancelled else { return nil }
         guard let source else {
             readState = .failed(.unavailable)
+            reconciliationVersion += 1
             return readState
         }
 
-        let previousState = readState
         readState = .loading
         var failure: HealthMeasurementReadFailure = .persistence
         let completedRead: ReadState?
@@ -195,7 +217,9 @@ public final class HealthMeasurementHistory {
             )
             try Task.checkCancellation()
             var updated = snapshot ?? Snapshot()
-            var imported = Dictionary(uniqueKeysWithValues: history.map { ($0.id, $0) })
+            let previous = Dictionary(uniqueKeysWithValues: history.map { ($0.id, $0) })
+            var imported = previous
+            var touchedIDs: Set<UUID> = []
             for change in changes {
                 updated.anchors[change.queryID] = change.anchor
                 updated.deletedRecordIDs.formUnion(change.deleted)
@@ -203,9 +227,11 @@ public final class HealthMeasurementHistory {
             for change in changes {
                 for id in change.deleted {
                     imported.removeValue(forKey: id)
+                    touchedIDs.insert(id)
                 }
                 for record in change.added where !updated.deletedRecordIDs.contains(record.id) {
                     imported[record.id] = record
+                    touchedIDs.insert(record.id)
                 }
             }
             updated.records = imported.values.sorted {
@@ -218,24 +244,46 @@ public final class HealthMeasurementHistory {
                 updated.sleepFallbackTimeZoneIdentifier = TimeZone.current.identifier
             }
             updated.workouts = reconciledWorkouts(changes, deletedIDs: updated.deletedRecordIDs)
-            updated.lastSuccessfulReadAt = .now
+            let checkedAt = Date.now
+            var analysisChanges = analysisChangeDates(in: updated)
+            for id in touchedIDs where previous[id] != imported[id] {
+                for record in [previous[id], imported[id]].compactMap({ $0 }) {
+                    let source = record.source.bundleIdentifier
+                    analysisChanges[.health(metric: record.metric, sourceBundleIdentifier: source)] = checkedAt
+                    if preferredSource(for: record.metric).map({ $0.bundleIdentifier == source }) ?? true {
+                        analysisChanges[.health(metric: record.metric)] = checkedAt
+                    }
+                }
+            }
+            updated.analysisChanges = analysisChanges
+            updated.lastSuccessfulReadAt = checkedAt
             failure = .persistence
             try persist(updated)
             readState = .loaded
             completedRead = readState
         } catch is CancellationError {
-            readState = previousState
-            completedRead = nil
+            readState = .failed(.interrupted)
+            completedRead = readState
         } catch {
             readState = .failed(error as? HealthMeasurementReadFailure ?? failure)
             completedRead = readState
         }
+        reconciliationVersion += 1
         let waiters = analysisReadWaiters
         analysisReadWaiters.removeAll()
         for waiter in waiters {
             waiter.resume(returning: completedRead)
         }
         return completedRead
+    }
+
+    private func analysisChangeDates(in snapshot: Snapshot) -> [AnalysisSeriesID: Date] {
+        if let changes = snapshot.analysisChanges { return changes }
+        guard let checkedAt = snapshot.lastSuccessfulReadAt else { return [:] }
+        return snapshot.records.reduce(into: [:]) { changes, record in
+            changes[.health(metric: record.metric)] = checkedAt
+            changes[.health(metric: record.metric, sourceBundleIdentifier: record.source.bundleIdentifier)] = checkedAt
+        }
     }
 
     private func reconciledWorkouts(_ changes: [HealthMeasurementChanges], deletedIDs: Set<UUID>) -> [HealthWorkout] {

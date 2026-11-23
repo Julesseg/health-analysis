@@ -3,6 +3,7 @@ import HealthAnalysisCore
 import HealthKit
 
 struct HealthKitMeasurementQuery: Sendable {
+    let sampleType: HKSampleType
     let readTypes: Set<HKObjectType>
     private let queryID: String
     private let read: @Sendable (HKHealthStore, String, HKQueryAnchor?, Bool) async throws -> HealthMeasurementChanges
@@ -13,6 +14,7 @@ struct HealthKitMeasurementQuery: Sendable {
         additionalReadTypes: Set<HKObjectType> = [],
         makeChanges: @escaping @Sendable (String, Data, [Sample], [UUID]) -> HealthMeasurementChanges
     ) {
+        sampleType = type
         queryID = "\(type.identifier).all.v1"
         readTypes = additionalReadTypes.union([type])
         read = { store, queryID, previousAnchor, includingPreviouslySaved in
@@ -59,7 +61,22 @@ struct HealthKitMeasurementQuery: Sendable {
 
     private static func query<Sample: HKSample>(
         _ predicate: HKSamplePredicate<Sample>, after anchor: HKQueryAnchor?, in store: HKHealthStore
-    ) async throws -> HKAnchoredObjectQueryDescriptor<Sample>.Result {
-        try await HKAnchoredObjectQueryDescriptor(predicates: [predicate], anchor: anchor).result(for: store)
+    ) async throws -> (newAnchor: HKQueryAnchor, addedSamples: [Sample], deletedObjects: [HKDeletedObject]) {
+        let pageSize = 500
+        var cursor = anchor
+        var added: [Sample] = []
+        var deleted: [HKDeletedObject] = []
+        while true {
+            try Task.checkCancellation()
+            let page = try await HKAnchoredObjectQueryDescriptor(
+                predicates: [predicate], anchor: cursor, limit: pageSize
+            ).result(for: store)
+            added.append(contentsOf: page.addedSamples)
+            deleted.append(contentsOf: page.deletedObjects)
+            if page.addedSamples.count + page.deletedObjects.count < pageSize {
+                return (page.newAnchor, added, deleted)
+            }
+            cursor = page.newAnchor
+        }
     }
 }

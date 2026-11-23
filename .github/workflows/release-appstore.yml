@@ -42,7 +42,7 @@ on:
 # Keep the project, bundle identifier, and App Store Connect record aligned.
 env:
   APP_NAME: HealthAnalysis
-  BUNDLE_ID: com.julesseg.healthanalysis
+  BUNDLE_ID: com.julesseguin.healthanalysis
 
 # One release build per ref; a newer push supersedes an older in-flight one.
 concurrency:

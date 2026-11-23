@@ -11,7 +11,7 @@ data collection and analysis are implemented.
 ## Build and test
 
 - The Xcode project and shared scheme are named `HealthAnalysis`. The app
-  displays as Health Analysis and uses bundle ID `com.julesseg.healthanalysis`.
+  displays as Health Analysis and uses bundle ID `com.julesseguin.healthanalysis`.
   The UI test target is `HealthAnalysisUITests`.
 - The app targets iPhone on iOS 26 or later for native Liquid Glass. Build
   with Xcode 26 or later in Swift 6 language mode. The Core package uses
@@ -45,7 +45,7 @@ through the app's `Localizable.xcstrings` catalog.
 
 The optional PR release workflow needs an Apple Developer membership,
 an Apple Distribution certificate, an Ad Hoc provisioning profile for
-`com.julesseg.healthanalysis` with test iPhones registered, and GitHub Pages
+`com.julesseguin.healthanalysis` with test iPhones registered, and GitHub Pages
 set to GitHub Actions. Configure the `github-pages` environment to allow the
 pull request deployment refs.
 
@@ -62,7 +62,7 @@ are configured. See the [build and publish pipeline](ci/README.md).
 
 ## Enabling App Store / TestFlight releases
 
-Create an App Store Connect record for `com.julesseg.healthanalysis` and an
+Create an App Store Connect record for `com.julesseguin.healthanalysis` and an
 App Store Connect API key with the App Manager role. Configure
 `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, and
 `APP_STORE_CONNECT_KEY_P8` alongside the Apple Distribution certificate,

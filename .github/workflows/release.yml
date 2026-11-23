@@ -15,7 +15,7 @@ on:
 # (Pages URL, repo URL) is derived from the repository at runtime.
 env:
   APP_NAME: HealthAnalysis
-  BUNDLE_ID: com.julesseg.healthanalysis
+  BUNDLE_ID: com.julesseguin.healthanalysis
 
 # Supersede only an OLDER build of the SAME PR — a new push to PR #X cancels
 # PR #X's in-flight run (we keep just the latest build per PR anyway). Different

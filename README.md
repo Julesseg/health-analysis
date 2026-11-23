@@ -17,8 +17,8 @@ data collection and analysis are implemented.
   with Xcode 27 or later in Swift 6 language mode. The Core package uses
   Swift tools 6.0 and CI runs it with Swift 6.0.3 on Linux.
 - CI runs on pull requests and pushes to `master`. It checks Core, the issue
-  dispatcher, and native UI journeys on an iPhone simulator running iOS 27 or
-  later.
+  dispatcher, and native UI journeys on an iPhone 18 Pro Max simulator running
+  iOS 27 or later.
 
 ```sh
 swift test --package-path Core

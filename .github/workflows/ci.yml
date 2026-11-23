@@ -48,7 +48,7 @@ jobs:
       - name: Toolchain versions
         run: xcodebuild -version
 
-      - name: Resolve an available iPhone simulator
+      - name: Resolve an available iPhone 18 Pro Max simulator
         id: sim
         run: |
           python3 - <<'PY'
@@ -57,6 +57,7 @@ jobs:
           inventory = json.loads(subprocess.check_output(
               ["xcrun", "simctl", "list", "--json"]
           ))
+          device_name = "iPhone 18 Pro Max"
           candidates = []
           for runtime in inventory["runtimes"]:
               identifier = runtime["identifier"]
@@ -66,9 +67,9 @@ jobs:
               if version >= (27, 0):
                   simulators = inventory["devices"].get(identifier, [])
                   candidates.extend((version, sim["name"], sim["udid"]) for sim in simulators
-                                    if sim["isAvailable"] and sim["name"].startswith("iPhone"))
+                                    if sim["isAvailable"] and sim["name"] == device_name)
           if not candidates:
-              raise SystemExit("No available iPhone simulator with iOS 27 or later.")
+              raise SystemExit("No available iPhone 18 Pro Max simulator with iOS 27 or later.")
           version, name, udid = max(candidates)
           print(f"Using {name} with iOS {'.'.join(map(str, version))} ({udid})")
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:

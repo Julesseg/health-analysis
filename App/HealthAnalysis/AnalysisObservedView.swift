@@ -233,9 +233,9 @@ struct AnalysisInputEvidenceView: View {
             LabeledContent(input.name) { input.displayedValue(entry.value, trackingValue: entry.trackingValue) }
             switch entry.origin {
             case .observation:
-                LabeledContent("Provenance") { Text("Explicit observation") }
+                provenanceRow("Explicit observation")
             case .assumedDefault(let effectiveOn):
-                LabeledContent("Provenance") { Text("Assumed default") }
+                provenanceRow("Assumed default")
                 if let date = result.analysisCalendar.date(from: DateComponents(
                     year: effectiveOn.year, month: effectiveOn.month, day: effectiveOn.day
                 )) {
@@ -253,6 +253,14 @@ struct AnalysisInputEvidenceView: View {
         } header: {
             Text(entry.date, format: result.analysisDateFormat)
         }
+    }
+
+    private func provenanceRow(_ origin: LocalizedStringKey) -> some View {
+        LabeledContent("Provenance") { Text(origin) }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text("Provenance"))
+            .accessibilityValue(Text(origin))
+            .accessibilityIdentifier("explore.inputProvenance")
     }
 }
 

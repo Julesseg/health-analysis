@@ -9,6 +9,9 @@ final class HealthAnalysisUITests: XCTestCase {
     func testLaunchShowsEmptyStatesAndOpensLogAndSettings() {
         let app = XCUIApplication()
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launchEnvironment["HEALTH_MEASUREMENT_UI_FIXTURE"] = "empty"
+        app.launchEnvironment["HEALTH_MEASUREMENT_UI_FIXTURE_STORE"] = UUID().uuidString
+        app.launchEnvironment["HEALTH_ANALYSIS_MANUAL_LOG_TEST_STORE"] = UUID().uuidString
         app.launch()
 
         XCTAssertTrue(app.staticTexts["No followed analyses yet"].waitForExistence(timeout: 10))

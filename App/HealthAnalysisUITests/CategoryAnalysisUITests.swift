@@ -48,7 +48,10 @@ final class CategoryAnalysisUITests: XCTestCase {
         XCTAssertTrue(recordedPair.isHittable)
         recordedPair.tap()
         XCTAssertTrue(app.navigationBars["Paired values"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Explicit observation"].firstMatch.exists)
+        let provenance = app.descendants(matching: .any)["explore.inputProvenance"].firstMatch
+        for _ in 0..<3 where !provenance.isHittable { app.swipeUp() }
+        XCTAssertTrue(provenance.isHittable)
+        XCTAssertEqual(provenance.value as? String, "Explicit observation")
     }
 
     @MainActor

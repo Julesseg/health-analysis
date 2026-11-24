@@ -1,0 +1,26 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "Analyses use measurements and daily log entries.": {},
+    "App": {},
+    "Apple Health": {},
+    "Daily log": {},
+    "Data": {},
+    "Day": {},
+    "Discovered for you": {},
+    "Done": {},
+    "Explore": {},
+    "Following": {},
+    "Health Analysis": {},
+    "Insights": {},
+    "Latest measurements": {},
+    "Log": {},
+    "No measurements available.": {},
+    "No patterns to show yet.": {},
+    "No saved analyses yet.": {},
+    "No tracking variables configured.": {},
+    "No variables to explore": {},
+    "Settings": {}
+  },
+  "version": "1.0"
+}

@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  APP_NAME: HealthAnalysis
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  dispatcher-tests:
+    name: Dispatcher eligibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: node --test ci/dispatch-eligibility.test.cjs
+
+  core-tests:
+    name: Core · swift test (Linux)
+    runs-on: ubuntu-24.04
+    container: swift:6.0.3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Core tests
+        working-directory: Core
+        run: swift test
+
+  app-ui-tests:
+    name: App · XCUITest (macOS)
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 27
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '27.x'
+
+      - name: Toolchain versions
+        run: xcodebuild -version
+
+      - name: Resolve an available iPhone simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          udid=$(xcrun simctl list --json | jq -er '
+            [.runtimes[] | select(.isAvailable and (.identifier | contains(".iOS-")))
+              | {id: .identifier, version: (.version | split(".") | map(tonumber))}
+              | select(.version[0] >= 26)] as $runtimes
+            | [.devices as $devices | $runtimes[] as $r
+              | $devices[$r.id][]? | select(.isAvailable and (.name | startswith("iPhone")))
+              | {udid, name, version: $r.version}]
+            | max_by(.version, .name).udid')
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+
+      - name: Build & run UI tests
+        working-directory: App
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project "$APP_NAME.xcodeproj" \
+            -scheme "$APP_NAME" \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -parallel-testing-enabled NO \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-test-results
+          path: App/TestResults.xcresult
+          if-no-files-found: ignore

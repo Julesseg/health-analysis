@@ -8,7 +8,7 @@ The app opens on Insights. Explore and Data have their own navigation, and Log a
 
 The scaffold comes from [iOS Swift App Template at 0229180](https://github.com/Julesseg/iOS-Swift-app-template/tree/02291809a7afc6c83a223e1773a5a41319c6b5d7). Open `App/HealthAnalysis.xcodeproj` and run the shared `HealthAnalysis` scheme. The iPhone app displays as **Health Analysis** and uses `com.julesseguin.healthanalysis`. It targets iOS 26.0 and later with Swift 6. CI builds with Xcode 27 and runs the portable Swift package using Swift 6.0.3 on Linux.
 
-`HealthAnalysisCore` exposes `HealthAnalysisSession` to both SwiftUI and application acceptance tests. Run `swift test --package-path Core` and `node --test ci/dispatch-eligibility.test.cjs` locally. The native UI test walks through all three tabs and both sheets on an iPhone simulator.
+`HealthAnalysisCore` exposes `HealthAnalysisSession` to both SwiftUI and application acceptance tests. Run `swift test --package-path Core` and `node --test ci/dispatch-eligibility.test.cjs` locally. The native UI test walks through all three tabs and both sheets on a single iPhone 15 Pro simulator. Use this model for local verification and visual reviews.
 
 For a visual review, run the CI workflow manually with **Capture the five navigation screens for visual review** enabled, or set `TEST_RUNNER_CAPTURE_SCREENSHOTS=true` when invoking `xcodebuild test` on a leased simulator. CI uploads the test result bundle for failures and requested captures. Documentation-only changes skip the simulator job.
 

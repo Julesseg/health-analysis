@@ -8,12 +8,13 @@ final class HealthAnalysisUITests: XCTestCase {
         app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
 
-        XCTAssertTrue(app.buttons["Insights"].isSelected)
+        let tabs = app.tabBars
+        XCTAssertTrue(tabs.buttons["Insights"].isSelected)
         XCTAssertTrue(app.staticTexts["No saved analyses yet."].exists)
 
         try app.performAccessibilityAudit(for: [.dynamicType, .textClipped, .sufficientElementDescription])
         capture("Insights", app)
-        app.buttons["Explore"].tap()
+        tabs.buttons["Explore"].tap()
         XCTAssertTrue(app.staticTexts["No variables to explore"].exists)
         capture("Explore", app)
         app.buttons["Log"].tap()
@@ -21,16 +22,16 @@ final class HealthAnalysisUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["No tracking variables configured."].exists)
         capture("Log", app)
         app.buttons["Done"].tap()
-        XCTAssertTrue(app.buttons["Explore"].isSelected)
+        XCTAssertTrue(tabs.buttons["Explore"].isSelected)
 
-        app.buttons["Data"].tap()
+        tabs.buttons["Data"].tap()
         XCTAssertTrue(app.staticTexts["No measurements available."].exists)
         capture("Data", app)
         app.buttons["Settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
         capture("Settings", app)
         app.buttons["Done"].tap()
-        XCTAssertTrue(app.buttons["Data"].isSelected)
+        XCTAssertTrue(tabs.buttons["Data"].isSelected)
     }
 
     @MainActor

@@ -67,18 +67,16 @@ jobs:
       - name: Toolchain versions
         run: xcodebuild -version
 
-      - name: Resolve an available iPhone simulator
+      - name: Create the iPhone 15 Pro simulator
         id: sim
         run: |
           set -euo pipefail
-          udid=$(xcrun simctl list --json | jq -er '
-            [.runtimes[] | select(.isAvailable and (.identifier | contains(".iOS-")))
-              | {id: .identifier, version: (.version | split(".") | map(tonumber))}
-              | select(.version[0] >= 26)] as $runtimes
-            | [.devices as $devices | $runtimes[] as $r
-              | $devices[$r.id][]? | select(.isAvailable and (.name | startswith("iPhone")))
-              | {udid, name, version: $r.version}]
-            | max_by(.version, .name).udid')
+          model=com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro
+          runtime=$(xcrun simctl list runtimes --json | jq -er --arg model "$model" '
+            [.runtimes[] | select(.isAvailable and any(.supportedDeviceTypes[]?; .identifier == $model))]
+            | max_by(.version | split(".") | map(tonumber)).identifier')
+          udid=$(xcrun simctl create "iPhone 15 Pro" "$model" "$runtime")
+          echo "Testing iPhone 15 Pro on $runtime ($udid)"
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
 
       - name: Build & run UI tests

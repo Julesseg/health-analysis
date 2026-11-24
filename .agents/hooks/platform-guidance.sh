@@ -23,7 +23,7 @@ else
   cat <<'EOF'
 ENV=LOCAL MAC. Xcode is available, so UI tests can run locally when useful.
 `cd Core && swift test` remains the fast loop and CI is the full UI gate. For
-UI tests, use the simulator-lease skill before opening or booting the device:
+UI tests, use the simulator-lease skill before opening or booting the iPhone 15 Pro simulator:
   cd App && xcodebuild test -project HealthAnalysis.xcodeproj -scheme HealthAnalysis \
     -destination 'platform=iOS Simulator,id=<leased-udid>' -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO
 Finish the lease immediately after verification.

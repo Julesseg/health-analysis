@@ -10,6 +10,8 @@ The scaffold comes from [iOS Swift App Template at 0229180](https://github.com/J
 
 `HealthAnalysisCore` exposes `HealthAnalysisSession` to both SwiftUI and application acceptance tests. Run `swift test --package-path Core` and `node --test ci/dispatch-eligibility.test.cjs` locally. The native UI test walks through all three tabs and both sheets on an iPhone simulator.
 
+For a visual review, run the CI workflow manually with **Capture the five navigation screens for visual review** enabled, or set `TEST_RUNNER_CAPTURE_SCREENSHOTS=true` when invoking `xcodebuild test` on a leased simulator. CI uploads the test result bundle for failures and requested captures. Documentation-only changes skip the simulator job.
+
 ## Distribution
 
 Installable PR builds require GitHub Pages, a registered device in the Ad Hoc provisioning profile, and four Actions secrets: `APPLE_TEAM_ID`, `APPLE_CERTIFICATE_P12`, `APPLE_CERTIFICATE_PASSWORD`, and `APPLE_PROVISIONING_PROFILE`. The certificate and profile are base64 encoded. The Pages environment must allow deployments from the PR. Set `NTFY_TOPIC` for optional notifications. See the [build pipeline](ci/README.md).

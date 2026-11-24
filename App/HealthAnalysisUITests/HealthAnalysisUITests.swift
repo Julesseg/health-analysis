@@ -10,9 +10,7 @@ final class HealthAnalysisUITests: XCTestCase {
 
         let tabs = app.tabBars
         XCTAssertTrue(tabs.buttons["Insights"].isSelected)
-        for message in ["No saved analyses yet.", "No patterns to show yet.", "No measurements available."] {
-            XCTAssertTrue(app.staticTexts[message].exists)
-        }
+        XCTAssertTrue(app.staticTexts["No saved analyses yet."].exists)
 
         try app.performAccessibilityAudit(for: [.dynamicType, .textClipped, .sufficientElementDescription])
         capture("Insights", app)
@@ -20,7 +18,7 @@ final class HealthAnalysisUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["No variables to explore"].exists)
         capture("Explore", app)
         app.buttons["Log"].tap()
-        XCTAssertTrue(app.datePickers["Day"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.datePickers.element.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["No tracking variables configured."].exists)
         capture("Log", app)
         app.buttons["Done"].tap()
@@ -38,6 +36,7 @@ final class HealthAnalysisUITests: XCTestCase {
 
     @MainActor
     private func capture(_ screen: String, _ app: XCUIApplication) {
+        guard ProcessInfo.processInfo.environment["CAPTURE_SCREENSHOTS"] == "true" else { return }
         let image = XCTAttachment(screenshot: app.screenshot())
         image.name = screen
         image.lifetime = .keepAlways

@@ -4,12 +4,18 @@ on:
   push:
     branches: [main, master]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      capture_screenshots:
+        description: Capture the five navigation screens for visual review
+        type: boolean
+        default: false
 
 env:
   APP_NAME: HealthAnalysis
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -19,8 +25,20 @@ jobs:
   dispatcher-tests:
     name: Dispatcher eligibility
     runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.changes.outputs.docs_only }}
     steps:
       - uses: actions/checkout@v4
+      - name: Check for a documentation-only change
+        id: changes
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if git fetch --depth=1 origin "$BASE" &&
+             git diff --quiet --no-renames "$BASE" HEAD -- . ':(exclude)docs/**' ':(exclude,glob)**/*.md'; then
+            echo "docs_only=true" >> "$GITHUB_OUTPUT"
+          fi
       - run: node --test ci/dispatch-eligibility.test.cjs
 
   core-tests:
@@ -35,6 +53,8 @@ jobs:
 
   app-ui-tests:
     name: App · XCUITest (macOS)
+    needs: dispatcher-tests
+    if: ${{ !cancelled() && needs.dispatcher-tests.outputs.docs_only != 'true' }}
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@v4
@@ -63,6 +83,8 @@ jobs:
 
       - name: Build & run UI tests
         working-directory: App
+        env:
+          TEST_RUNNER_CAPTURE_SCREENSHOTS: ${{ inputs.capture_screenshots && 'true' || 'false' }}
         run: |
           set -o pipefail
           xcodebuild test \
@@ -74,7 +96,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO
 
       - name: Upload test results
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && (failure() || inputs.capture_screenshots) }}
         uses: actions/upload-artifact@v4
         with:
           name: ui-test-results

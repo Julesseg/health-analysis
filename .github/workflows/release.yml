@@ -188,7 +188,10 @@ jobs:
     needs: build
     if: needs.build.outputs.configured == 'true'
     runs-on: ubuntu-latest
+    env:
+      PAGES_ARTIFACT_NAME: github-pages-${{ github.run_attempt }}
     permissions:
+      actions: read
       contents: write   # force-push the build-history branch
       pages: write
       id-token: write
@@ -252,8 +255,10 @@ jobs:
           node ci/assemble-build-history.mjs
 
       - name: Upload Pages artifact
+        id: pages_artifact
         uses: actions/upload-pages-artifact@v3
         with:
+          name: ${{ env.PAGES_ARTIFACT_NAME }}
           path: /tmp/site
 
       # Persist the assembled site back to the build-history branch as a single
@@ -274,9 +279,28 @@ jobs:
               commit -q -m "Publish PR #$PR_NUMBER: $PR_TITLE"
           git push -f "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" build-history
 
+      - name: Wait for Pages artifact metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PAGES_ARTIFACT_ID: ${{ steps.pages_artifact.outputs.artifact_id }}
+        run: |
+          set -euo pipefail
+          for attempt in {1..6}; do
+            if artifact_id=$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
+              -f name="$PAGES_ARTIFACT_NAME" --jq '.artifacts[] | select(.expired == false) | .id') \
+              && [[ "$artifact_id" == "$PAGES_ARTIFACT_ID" ]]; then
+              exit 0
+            fi
+            if (( attempt < 6 )); then sleep 5; fi
+          done
+          echo "::error::Pages artifact $PAGES_ARTIFACT_NAME is missing from the workflow run's artifact list."
+          exit 1
+
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: ${{ env.PAGES_ARTIFACT_NAME }}
 
   notify:
     name: Notify

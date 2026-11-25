@@ -26,6 +26,6 @@ Its App Store history mentions automatic Garmin history sync and background sync
 - Compare representative stored values with Garmin's corresponding readings.
 - Inspect the saving source, start/end timestamps, measurement units, and number of records per night.
 - Establish available history, missing nights, resync duplicates, corrections, and sync freshness.
-- Check sleep duration, timing, resting heart rate, and activity coverage in Apple Health before enabling the initial presets.
+- Check the meaning and coverage of sleep duration, timing, resting heart rate and activity when validating those categories for on-demand analysis.
 
 Public documentation can establish intended behavior. Stored-record checks are needed to establish what the user's installation actually supplies.

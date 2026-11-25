@@ -10,7 +10,7 @@ Read `GLOSSARY.md` and the ADRs relevant to the work. If either is absent, proce
 
 Use glossary terms in specifications, issues, proposals, tests, and code. If a needed concept is missing, first check whether an existing term covers it. Use the domain-modeling skill for a real terminology gap.
 
-Keep input and output roles distinct from causal claims, behavior windows distinct from the analysis period, and assumed defaults distinct from explicit observations. A day review is separate from autosaving individual daily-log entries. Use the glossary definitions as the authority.
+Keep input and output roles distinct from causal claims, and assumed defaults distinct from recorded observations. A day review is separate from autosaving individual daily-log entries. Use the glossary definitions as the authority.
 
 ## Architectural decisions
 

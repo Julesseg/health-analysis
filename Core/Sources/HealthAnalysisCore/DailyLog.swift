@@ -41,9 +41,12 @@ public struct LogQuantity: Codable, Identifiable {
         day >= startDay && (endDay.map { day <= $0 } ?? true)
     }
 
+    public var latestDefaultDay: LogDay {
+        defaultChanges?.keys.max().map { max($0, effectiveDay) } ?? effectiveDay
+    }
+
     var latestDefaultValue: Decimal {
-        let latest = defaultChanges?.keys.max().map { max($0, effectiveDay) } ?? effectiveDay
-        return applicableDefault(on: latest) ?? defaultValue
+        applicableDefault(on: latestDefaultDay) ?? defaultValue
     }
 
     func applicableDefault(on day: LogDay) -> Decimal? {
@@ -57,6 +60,7 @@ public struct LogQuantity: Codable, Identifiable {
 
 public enum QuantitySettingsError: Error, Equatable {
     case missingName, missingUnit, invalidDefault, invalidTrackingPeriod, rangeExcludesEntries, saveFailed
+    case earlierDefaultRequiresConfirmation
     case endDateWouldRemoveEntries(Int)
 }
 
@@ -64,9 +68,34 @@ public enum LogEditFeedback: Equatable {
     case invalidNumber, saveFailed
 }
 
+public enum LogDayStatus: Equatable {
+    case unmarked, editsSaved, confirmed
+}
+
+public struct LogDayConfirmation {
+    public let canSave: Bool
+    public let saveFailed: Bool
+}
+
+public struct LogQuantityObservation: Equatable {
+    public enum Origin: Equatable {
+        case recorded, confirmedDefault
+    }
+
+    public let value: Decimal
+    public let origin: Origin
+
+    public init(value: Decimal, origin: Origin) {
+        self.value = value
+        self.origin = origin
+    }
+}
+
 public struct LogQuantityField: Identifiable {
     public let quantity: LogQuantity
     public let assumedDefault: String?
+    public let savedValue: String?
+    public let observationOrigin: LogQuantityObservation.Origin?
     public let feedback: LogEditFeedback?
     public var id: UUID { quantity.id }
 }
@@ -74,6 +103,7 @@ public struct LogQuantityField: Identifiable {
 struct DailyLog: Codable {
     var quantities: [LogQuantity] = []
     var entries: [LogDay: [UUID: Decimal]] = [:]
+    var confirmedDays: [LogDay: [UUID: Decimal]]?
 
     static func open(at url: URL) throws -> Self {
         do {
@@ -90,13 +120,16 @@ struct DailyLog: Codable {
     }
 
     func recordedDays(for id: UUID) -> [LogDay] {
-        entries.compactMap { day, quantities in quantities[id] == nil ? nil : day }
+        let edited = entries.compactMap { day, quantities in quantities[id] == nil ? nil : day }
+        let defaulted = confirmedDays?.compactMap { day, quantities in quantities[id] == nil ? nil : day } ?? []
+        return Array(Set(edited).union(defaulted))
     }
 
     mutating func removeEntries(for id: UUID, on days: [LogDay]) {
         for day in days {
             entries[day]?[id] = nil
             if entries[day]?.isEmpty == true { entries[day] = nil }
+            confirmedDays?[day]?[id] = nil
         }
     }
 

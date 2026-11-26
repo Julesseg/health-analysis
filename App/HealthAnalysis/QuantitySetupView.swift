@@ -9,7 +9,10 @@ struct QuantitySetupView: View {
 
     @Binding var session: HealthAnalysisSession
     private let quantity: LogQuantity?
+    private let selectedDay: LogDay
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.locale) private var locale
+    @Environment(\.calendar) private var calendar
     @State private var timeZone: TimeZone
     @State private var name: String
     @State private var unit: String
@@ -18,7 +21,8 @@ struct QuantitySetupView: View {
     @State private var hasEnd: Bool
     @State private var endDate: Date
     @State private var changesDefault = false
-    @State private var defaultDate = Date.now
+    @State private var defaultDate: Date
+    @State private var appliesToEarlierDates = false
     @State private var error: QuantitySettingsError?
     @State private var removalFailed = false
     @State private var confirmation: Confirmation?
@@ -26,6 +30,7 @@ struct QuantitySetupView: View {
     init(session: Binding<HealthAnalysisSession>, quantity: LogQuantity? = nil, selectedDay: LogDay, timeZone: TimeZone) {
         _session = session
         self.quantity = quantity
+        self.selectedDay = selectedDay
         let timeZone = TimeZone(identifier: timeZone.identifier) ?? timeZone
         _timeZone = State(initialValue: timeZone)
         _name = State(initialValue: quantity?.name ?? "")
@@ -35,6 +40,7 @@ struct QuantitySetupView: View {
         _startDate = State(initialValue: start.date(in: timeZone))
         _hasEnd = State(initialValue: quantity?.endDay != nil)
         _endDate = State(initialValue: (quantity?.endDay ?? max(start, selectedDay)).date(in: timeZone))
+        _defaultDate = State(initialValue: LogDay(.now, timeZone: timeZone).date(in: timeZone))
     }
 
     var body: some View {
@@ -57,17 +63,12 @@ struct QuantitySetupView: View {
                     Text(message(for: error)).foregroundStyle(.red)
                 } else if let quantity, unit != quantity.unit {
                     Text("Changing the unit relabels existing entries. Their numeric values stay the same.")
+                } else if quantity == nil {
+                    Text("The default starts on the first day of tracking.")
                 }
             }
             if let quantity {
-                Section {
-                    LabeledContent("Latest default", value: session.latestDefaultText(for: quantity))
-                    Toggle("Change Default", isOn: $changesDefault)
-                    if changesDefault {
-                        defaultField
-                        DatePicker("Default starts", selection: $defaultDate, displayedComponents: .date)
-                    }
-                }
+                defaultSettings(for: quantity)
                 Section {
                     Button("Remove Quantity", role: .destructive) { confirmation = .removeQuantity }
                 } footer: {
@@ -124,6 +125,44 @@ struct QuantitySetupView: View {
             .keyboardType(.numbersAndPunctuation)
     }
 
+    private func defaultSettings(for quantity: LogQuantity) -> some View {
+        let format = Date.FormatStyle(date: .abbreviated, locale: locale, calendar: calendar, timeZone: .gmt)
+        return Section {
+            LabeledContent("Latest default", value: session.latestDefaultText(for: quantity))
+            LabeledContent("Effective date") {
+                Text(quantity.latestDefaultDay.date(in: .gmt), format: format)
+            }
+            Toggle("Change Default", isOn: $changesDefault)
+            if changesDefault {
+                defaultField
+                Toggle("Apply to Earlier Dates", isOn: $appliesToEarlierDates)
+                    .onChange(of: appliesToEarlierDates) {
+                        let today = LogDay(.now, timeZone: timeZone)
+                        if appliesToEarlierDates, selectedDay < today {
+                            defaultDate = selectedDay.date(in: timeZone)
+                        } else if LogDay(defaultDate, timeZone: timeZone) < today {
+                            defaultDate = today.date(in: timeZone)
+                        }
+                    }
+                DatePicker(
+                    "Default starts", selection: $defaultDate,
+                    in: (appliesToEarlierDates ? Date.distantPast : firstDefaultDate)...,
+                    displayedComponents: .date
+                )
+            }
+        } footer: {
+            if changesDefault {
+                Text("This default applies from the chosen date until the next scheduled default. Saved values are kept.")
+            }
+        }
+    }
+
+    private var firstDefaultDate: Date {
+        var calendar = calendar
+        calendar.timeZone = timeZone
+        return calendar.startOfDay(for: .now)
+    }
+
     private func save(confirmedEndDay: LogDay? = nil) {
         let start = LogDay(startDate, timeZone: timeZone)
         let end = confirmedEndDay ?? (hasEnd ? LogDay(endDate, timeZone: timeZone) : nil)
@@ -133,7 +172,9 @@ struct QuantitySetupView: View {
                     quantity.id, name: name, unit: unit, startDay: start,
                     endDay: end,
                     defaultChange: changesDefault ? (defaultText, LogDay(defaultDate, timeZone: timeZone)) : nil,
-                    removeEntriesAfterEnd: confirmedEndDay != nil
+                    applyDefaultToEarlierDays: appliesToEarlierDates,
+                    removeEntriesAfterEnd: confirmedEndDay != nil,
+                    today: LogDay(.now, timeZone: timeZone)
                 )
             } else {
                 try session.createQuantity(name: name, unit: unit, defaultText: defaultText, effectiveDay: start)
@@ -167,6 +208,7 @@ struct QuantitySetupView: View {
         case .invalidTrackingPeriod: "Choose an end date on or after the start date."
         case .rangeExcludesEntries: "Choose a start date on or before the first recorded entry."
         case .endDateWouldRemoveEntries: "The new end date excludes recorded entries."
+        case .earlierDefaultRequiresConfirmation: "Choose today or later, or turn on Apply to Earlier Dates."
         case .saveFailed: "Couldn’t save this quantity. Tap Save to retry."
         }
     }

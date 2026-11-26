@@ -29,6 +29,162 @@ import Testing
         }
     }
 
+    @Test func confirmingADayKeepsDefaultZeroDistinctFromRecordedZero() throws {
+        let today = Date(timeIntervalSince1970: 1_700_000_000)
+        let skipped = LogDay(today.addingTimeInterval(-86_400), timeZone: zone)
+        try withStore { url in
+            var session = HealthAnalysisSession(storeURL: url, today: today, timeZone: zone, locale: locale)
+            let day = session.logDay
+            let caffeine = try session.createQuantity(name: "Caffeine", unit: "mg", defaultText: "0", effectiveDay: skipped)
+            let exercise = try session.createQuantity(name: "Exercise", unit: "min", defaultText: "20", effectiveDay: skipped)
+            session.editQuantity(exercise.id, on: day, text: "0")
+            #expect(session.observation(for: caffeine.id, on: day) == nil)
+            #expect(session.observation(for: exercise.id, on: day) == LogQuantityObservation(value: 0, origin: .recorded))
+            #expect(session.logStatus(on: day) == .editsSaved)
+
+            session.confirmDay(day)
+            #expect(session.logStatus(on: day) == .confirmed)
+            #expect(session.observation(for: caffeine.id, on: day) == LogQuantityObservation(value: 0, origin: .confirmedDefault))
+            #expect(session.recordedQuantity(caffeine.id, on: day) == nil)
+            #expect(session.logFields(on: day).first?.assumedDefault == nil)
+            #expect(session.logFields(on: day).first?.observationOrigin == .confirmedDefault)
+            #expect(session.quantityText(caffeine.id, on: day) == "0")
+            #expect(session.observation(for: exercise.id, on: day)?.origin == .recorded)
+            #expect(session.observation(for: caffeine.id, on: skipped) == nil)
+            #expect(session.logStatus(on: skipped) == .unmarked)
+
+            session.editQuantity(caffeine.id, on: day, text: "0")
+            session.editQuantity(exercise.id, on: day, text: "12")
+            let reopened = HealthAnalysisSession(storeURL: url, today: today, timeZone: zone, locale: locale)
+            #expect(reopened.logStatus(on: day) == .confirmed)
+            #expect(reopened.observation(for: caffeine.id, on: day) == LogQuantityObservation(value: 0, origin: .recorded))
+            #expect(reopened.observation(for: exercise.id, on: day) == LogQuantityObservation(value: 12, origin: .recorded))
+        }
+    }
+
+    @Test func failedConfirmationKeepsSavedEditsAndCanBeRetriedOnTheOriginalDay() throws {
+        let today = Date(timeIntervalSince1970: 1_700_000_000)
+        let earlier = LogDay(today.addingTimeInterval(-86_400), timeZone: zone)
+        try withStore { url in
+            var session = HealthAnalysisSession(storeURL: url, today: today, timeZone: zone, locale: locale)
+            let day = session.logDay
+            let caffeine = try session.createQuantity(name: "Caffeine", unit: "mg", defaultText: "50", effectiveDay: earlier)
+            let exercise = try session.createQuantity(name: "Exercise", unit: "min", defaultText: "0", effectiveDay: earlier)
+            session.editQuantity(exercise.id, on: day, text: "0")
+            session.editQuantity(caffeine.id, on: day, text: "1.")
+            #expect(session.dayConfirmation(on: day)?.canSave == false)
+            session.confirmDay(day)
+            #expect(session.logStatus(on: day) == .editsSaved)
+            session.editQuantity(caffeine.id, on: day, text: "10")
+
+            let backup = url.appendingPathExtension("backup")
+            try FileManager.default.moveItem(at: url, to: backup)
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
+            session.confirmDay(earlier)
+            session.selectLogDay(earlier)
+            #expect(session.dayConfirmation(on: earlier)?.saveFailed == true)
+            #expect(session.logStatus(on: earlier) == .unmarked)
+            #expect(session.observation(for: caffeine.id, on: earlier) == nil)
+            #expect(session.observation(for: exercise.id, on: earlier) == nil)
+            session.selectLogDay(day)
+            #expect(session.dayConfirmation(on: day)?.saveFailed == false)
+            #expect(session.logStatus(on: day) == .editsSaved)
+
+            try FileManager.default.removeItem(at: url)
+            try FileManager.default.moveItem(at: backup, to: url)
+            let beforeRetry = HealthAnalysisSession(storeURL: url, today: today, timeZone: zone, locale: locale)
+            #expect(beforeRetry.logStatus(on: earlier) == .unmarked)
+            #expect(beforeRetry.logFields(on: earlier).first?.assumedDefault == "50")
+
+            session.confirmDay(earlier)
+            #expect(session.dayConfirmation(on: earlier) == nil)
+            session.confirmDay(day)
+            let reopened = HealthAnalysisSession(storeURL: url, today: today, timeZone: zone, locale: locale)
+            #expect(reopened.logStatus(on: earlier) == .confirmed)
+            #expect(reopened.logStatus(on: day) == .confirmed)
+            #expect(reopened.observation(for: caffeine.id, on: earlier) == LogQuantityObservation(value: 50, origin: .confirmedDefault))
+            #expect(reopened.observation(for: exercise.id, on: earlier) == LogQuantityObservation(value: 0, origin: .confirmedDefault))
+        }
+    }
+
+    @Test func recordingTheOnlyNewValueClearsAFailedConfirmationOnAReviewedDay() throws {
+        try withStore { url in
+            var session = HealthAnalysisSession(storeURL: url, timeZone: zone, locale: locale)
+            let day = session.logDay
+            let caffeine = try session.createQuantity(name: "Caffeine", unit: "mg", defaultText: "0", effectiveDay: day)
+            session.confirmDay(day)
+            let exercise = try session.createQuantity(name: "Exercise", unit: "min", defaultText: "20", effectiveDay: day)
+            #expect(session.dayConfirmation(on: day)?.canSave == true)
+            #expect(session.observation(for: exercise.id, on: day) == nil)
+
+            let backup = url.appendingPathExtension("backup")
+            try FileManager.default.moveItem(at: url, to: backup)
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
+            session.confirmDay(day)
+            #expect(session.dayConfirmation(on: day)?.saveFailed == true)
+            session.editQuantity(caffeine.id, on: day, text: "1")
+            let failedCorrection = try #require(session.logFields(on: day).first)
+            #expect(failedCorrection.feedback == .saveFailed)
+            #expect(failedCorrection.savedValue == "0")
+            #expect(failedCorrection.observationOrigin == .confirmedDefault)
+            #expect(session.observation(for: caffeine.id, on: day)?.origin == .confirmedDefault)
+
+            try FileManager.default.removeItem(at: url)
+            try FileManager.default.moveItem(at: backup, to: url)
+            session.editQuantity(exercise.id, on: day, text: "15")
+            #expect(session.logStatus(on: day) == .confirmed)
+            #expect(session.dayConfirmation(on: day) == nil)
+            #expect(session.logFields(on: day).first?.feedback == .saveFailed)
+            try session.createQuantity(name: "Water", unit: "mL", defaultText: "0", effectiveDay: day)
+            #expect(session.dayConfirmation(on: day)?.saveFailed == false)
+        }
+    }
+
+    @Test func backdatedDefaultRequiresOptInAndPreservesExistingObservations() throws {
+        let today = Date(timeIntervalSince1970: 1_700_000_000)
+        func daysAgo(_ count: Int) -> LogDay {
+            LogDay(today.addingTimeInterval(-86_400 * Double(count)), timeZone: zone)
+        }
+        let start = daysAgo(5)
+        let effectiveDay = daysAgo(4)
+        let entered = daysAgo(3)
+        let confirmed = daysAgo(2)
+        let skipped = daysAgo(1)
+        try withStore { url in
+            var session = HealthAnalysisSession(storeURL: url, today: today, timeZone: zone, locale: locale)
+            let day = session.logDay
+            let caffeine = try session.createQuantity(name: "Caffeine", unit: "mg", defaultText: "0", effectiveDay: start)
+            session.editQuantity(caffeine.id, on: entered, text: "0")
+            session.confirmDay(confirmed)
+            try session.updateQuantity(
+                caffeine.id, name: caffeine.name, unit: caffeine.unit, startDay: start, endDay: nil,
+                defaultChange: ("20", day), today: day
+            )
+            #expect(session.logFields(on: skipped).first?.assumedDefault == "0")
+            #expect(throws: QuantitySettingsError.earlierDefaultRequiresConfirmation) {
+                try session.updateQuantity(
+                    caffeine.id, name: caffeine.name, unit: caffeine.unit, startDay: start, endDay: nil,
+                    defaultChange: ("10", effectiveDay), today: day
+                )
+            }
+            #expect(session.logFields(on: skipped).first?.assumedDefault == "0")
+            try session.updateQuantity(
+                caffeine.id, name: caffeine.name, unit: caffeine.unit, startDay: start, endDay: nil,
+                defaultChange: ("10", effectiveDay), applyDefaultToEarlierDays: true, today: day
+            )
+
+            let reopened = HealthAnalysisSession(storeURL: url, today: today, timeZone: zone, locale: locale)
+            #expect(reopened.logFields(on: start).first?.assumedDefault == "0")
+            #expect(reopened.logFields(on: effectiveDay).first?.assumedDefault == "10")
+            #expect(reopened.observation(for: caffeine.id, on: entered) == LogQuantityObservation(value: 0, origin: .recorded))
+            #expect(reopened.observation(for: caffeine.id, on: confirmed) == LogQuantityObservation(value: 0, origin: .confirmedDefault))
+            #expect(reopened.logFields(on: skipped).first?.assumedDefault == "10")
+            #expect(reopened.logStatus(on: skipped) == .unmarked)
+            #expect(reopened.observation(for: caffeine.id, on: skipped) == nil)
+            #expect(reopened.logFields(on: day).first?.assumedDefault == "20")
+        }
+    }
+
     @Test func explicitZeroAndBackdatedCorrectionsSurviveReopeningInAnotherTimeZone() throws {
         let dates = ISO8601DateFormatter()
         let today = try #require(dates.date(from: "2024-03-10T19:00:00Z"))
@@ -153,7 +309,7 @@ import Testing
             session.editQuantity(quantity.id, on: start, text: "7")
             try session.updateQuantity(
                 quantity.id, name: "Coffee", unit: "mg", startDay: start, endDay: end,
-                defaultChange: (text: "12", effectiveDay: end)
+                defaultChange: (text: "12", effectiveDay: end), today: end
             )
             session.editQuantity(quantity.id, on: session.logDay, text: "8")
             session.editQuantity(quantity.id, on: beforeStart, text: "9")
@@ -178,13 +334,15 @@ import Testing
             let today = Date(timeIntervalSince1970: 1_700_000_000)
             var session = HealthAnalysisSession(storeURL: url, today: today, timeZone: zone, locale: locale)
             let day = session.logDay
-            let earlier = LogDay(today.addingTimeInterval(-86_400), timeZone: zone)
+            let earlier = LogDay(today.addingTimeInterval(-172_800), timeZone: zone)
+            let reviewed = LogDay(today.addingTimeInterval(-86_400), timeZone: zone)
             let first = try session.createQuantity(name: "Coffee", unit: "mg", defaultText: "0", effectiveDay: earlier)
             let second = try session.createQuantity(name: "Exercise", unit: "min", defaultText: "0", effectiveDay: earlier)
             session.editQuantity(first.id, on: earlier, text: "10")
             session.editQuantity(first.id, on: day, text: "15")
             session.editQuantity(second.id, on: day, text: "20")
-            #expect(throws: QuantitySettingsError.endDateWouldRemoveEntries(1)) {
+            session.confirmDay(reviewed)
+            #expect(throws: QuantitySettingsError.endDateWouldRemoveEntries(2)) {
                 try session.updateQuantity(first.id, name: "Coffee", unit: "mg", startDay: earlier, endDay: earlier)
             }
             #expect(session.recordedQuantity(first.id, on: day) == 15)
@@ -196,6 +354,9 @@ import Testing
             #expect(archived.quantities.first?.endDay == earlier)
             #expect(archived.recordedQuantity(first.id, on: earlier) == 10)
             #expect(archived.recordedQuantity(first.id, on: day) == nil)
+            #expect(archived.observation(for: first.id, on: reviewed) == nil)
+            #expect(archived.observation(for: second.id, on: reviewed) == LogQuantityObservation(value: 0, origin: .confirmedDefault))
+            #expect(archived.logStatus(on: reviewed) == .confirmed)
             #expect(archived.recordedQuantity(second.id, on: day) == 20)
             try session.removeQuantity(first.id)
 
@@ -224,6 +385,8 @@ import Testing
             #expect(reopened.quantities.first?.startDay == day)
             #expect(reopened.logFields(on: day).first?.id == id)
             #expect(reopened.recordedQuantity(id, on: day) == 7)
+            #expect(reopened.observation(for: id, on: day)?.origin == .recorded)
+            #expect(reopened.logStatus(on: day) == .editsSaved)
         }
     }
 

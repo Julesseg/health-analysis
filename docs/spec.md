@@ -20,6 +20,7 @@ Use Apple Health and a personal daily log to explore associations on an iPhone 1
 ## Daily logging
 
 - Define custom quantities with units, counts, yes/no fields, ordered ratings, unordered categories and optional times of day. Preserve exact or approximate recalled times and the intended local day across travel and daylight-saving changes.
+- Manage custom variables from the Log Categories sheet. Log shows a variable from its tracking start through its optional last logging day, inclusive. The sheet still lists archived variables. Confirm before removing a variable or setting an end date that deletes later entries.
 - Show each field’s saved value or applicable configured default. New defaults have effective dates. Applying a default to earlier dates requires an explicit choice and preserves existing entries. A prefilled value alone is missing for analysis.
 - Autosave each valid edit against its selected day. An explicitly recorded zero or no counts immediately. Confirm day records every displayed value, including unchanged defaults. Preserve the distinction between a typed entry and a confirmed default. A skipped day adds no observations.
 - Keep entries when switching days or leaving the form. Incomplete or invalid input preserves the stored valid value. A failed save retains the edit for retry and accurately shows persistence and review state.

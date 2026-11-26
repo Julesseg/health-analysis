@@ -5,17 +5,191 @@ public struct HealthAnalysisSession {
         case analysis, log
     }
 
-    public private(set) var tab: Tab = .analysis
-    public var logDate: Date
-
-    public init(today: Date = .now) {
-        logDate = today
+    private struct FieldKey: Hashable {
+        let day: LogDay
+        let quantityID: UUID
     }
 
-    public mutating func selectTab(_ tab: Tab, today: Date = .now) {
+    private struct Draft {
+        let text: String
+        let feedback: LogEditFeedback?
+    }
+
+    public private(set) var tab: Tab = .analysis
+    public private(set) var logDay: LogDay
+    private let storeURL: URL
+    private let quantityFormat: QuantityNumberFormat
+    private var log: DailyLog?
+    private var drafts: [FieldKey: Draft] = [:]
+    public var isLogAvailable: Bool { log != nil }
+    public var quantities: [LogQuantity] { log?.quantities ?? [] }
+
+    public init(
+        storeURL: URL,
+        today: Date = .now,
+        timeZone: TimeZone = .autoupdatingCurrent,
+        locale: Locale = .autoupdatingCurrent
+    ) {
+        self.storeURL = storeURL
+        logDay = LogDay(today, timeZone: timeZone)
+        quantityFormat = QuantityNumberFormat(locale: locale)
+        log = try? DailyLog.open(at: storeURL)
+    }
+
+    public mutating func retryOpeningLog() {
+        guard log == nil else { return }
+        log = try? DailyLog.open(at: storeURL)
+    }
+
+    public mutating func selectTab(_ tab: Tab, today: Date = .now, timeZone: TimeZone = .autoupdatingCurrent) {
         if self.tab != tab && tab == .log {
-            logDate = today
+            selectLogDay(LogDay(today, timeZone: timeZone))
         }
         self.tab = tab
+    }
+
+    public mutating func selectLogDay(_ day: LogDay) {
+        if logDay != day {
+            drafts = drafts.filter { $0.value.feedback != nil }
+        }
+        logDay = day
+    }
+
+    @discardableResult
+    public mutating func createQuantity(
+        name: String,
+        unit: String,
+        defaultText: String,
+        effectiveDay: LogDay
+    ) throws(QuantitySettingsError) -> LogQuantity {
+        guard var updated = log else { throw .saveFailed }
+        let (name, unit) = try quantityLabels(name: name, unit: unit)
+        guard let defaultValue = quantityFormat.parse(defaultText) else { throw .invalidDefault }
+
+        let quantity = LogQuantity(
+            id: UUID(), name: name, unit: unit, defaultValue: defaultValue, effectiveDay: effectiveDay, trackingStart: effectiveDay
+        )
+        updated.quantities.append(quantity)
+        try saveQuantitySettings(updated)
+        return quantity
+    }
+
+    public mutating func updateQuantity(
+        _ id: UUID,
+        name: String,
+        unit: String,
+        startDay: LogDay,
+        endDay: LogDay?,
+        defaultChange: (text: String, effectiveDay: LogDay)? = nil,
+        removeEntriesAfterEnd: Bool = false
+    ) throws(QuantitySettingsError) {
+        guard var updated = log, let index = updated.quantities.firstIndex(where: { $0.id == id }) else { throw .saveFailed }
+        let (name, unit) = try quantityLabels(name: name, unit: unit)
+        if let endDay, endDay < startDay { throw .invalidTrackingPeriod }
+        var quantity = updated.quantities[index]
+        quantity.name = name
+        quantity.unit = unit
+        quantity.trackingStart = startDay
+        quantity.endDay = endDay
+        let recordedDays = updated.recordedDays(for: id)
+        guard !recordedDays.contains(where: { $0 < startDay }) else { throw .rangeExcludesEntries }
+        if let defaultChange {
+            guard let value = quantityFormat.parse(defaultChange.text) else { throw .invalidDefault }
+            var changes = quantity.defaultChanges ?? [:]
+            changes[defaultChange.effectiveDay] = value
+            quantity.defaultChanges = changes
+        }
+        let excludedDays = endDay.map { end in recordedDays.filter { $0 > end } } ?? []
+        if !excludedDays.isEmpty && !removeEntriesAfterEnd { throw .endDateWouldRemoveEntries(excludedDays.count) }
+        updated.removeEntries(for: id, on: excludedDays)
+        updated.quantities[index] = quantity
+        try saveQuantitySettings(updated)
+        if removeEntriesAfterEnd, let endDay {
+            drafts = drafts.filter { $0.key.quantityID != id || $0.key.day <= endDay }
+        }
+    }
+
+    public mutating func removeQuantity(_ id: UUID) throws(QuantitySettingsError) {
+        guard var updated = log, let index = updated.quantities.firstIndex(where: { $0.id == id }) else { throw .saveFailed }
+        updated.quantities.remove(at: index)
+        let recordedDays = updated.recordedDays(for: id)
+        updated.removeEntries(for: id, on: recordedDays)
+        try saveQuantitySettings(updated)
+        drafts = drafts.filter { $0.key.quantityID != id }
+    }
+
+    public func latestDefaultText(for quantity: LogQuantity) -> String {
+        quantityFormat.format(quantity.latestDefaultValue)
+    }
+
+    private func quantityLabels(name: String, unit: String) throws(QuantitySettingsError) -> (String, String) {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let unit = unit.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { throw .missingName }
+        guard !unit.isEmpty else { throw .missingUnit }
+        return (name, unit)
+    }
+
+    private mutating func saveQuantitySettings(_ updated: DailyLog) throws(QuantitySettingsError) {
+        do {
+            try persist(updated)
+        } catch {
+            throw .saveFailed
+        }
+    }
+
+    public func logFields(on day: LogDay) -> [LogQuantityField] {
+        quantities.compactMap { quantity in
+            guard quantity.tracks(day) else { return nil }
+            let assumed = recordedQuantity(quantity.id, on: day) == nil ? quantity.applicableDefault(on: day) : nil
+            let draft = drafts[FieldKey(day: day, quantityID: quantity.id)]
+            return LogQuantityField(
+                quantity: quantity,
+                assumedDefault: assumed.map(quantityFormat.format),
+                feedback: draft?.feedback
+            )
+        }
+    }
+
+    public func quantityText(_ id: UUID, on day: LogDay) -> String {
+        drafts[FieldKey(day: day, quantityID: id)]?.text ?? recordedQuantity(id, on: day).map(quantityFormat.format) ?? ""
+    }
+
+    public mutating func editQuantity(_ id: UUID, on day: LogDay, text: String) {
+        guard var updated = log,
+              updated.quantities.contains(where: { $0.id == id && $0.tracks(day) }) else { return }
+        let key = FieldKey(day: day, quantityID: id)
+        guard let value = quantityFormat.parse(text) else {
+            drafts[key] = Draft(text: text, feedback: .invalidNumber)
+            return
+        }
+
+        do {
+            if recordedQuantity(id, on: day) != value {
+                updated.entries[day, default: [:]][id] = value
+                try persist(updated)
+            }
+            drafts[key] = Draft(text: text, feedback: nil)
+        } catch {
+            drafts[key] = Draft(text: text, feedback: .saveFailed)
+        }
+    }
+
+    public mutating func retryQuantity(_ id: UUID, on day: LogDay) {
+        guard let draft = drafts[FieldKey(day: day, quantityID: id)], draft.feedback == .saveFailed else { return }
+        editQuantity(id, on: day, text: draft.text)
+    }
+
+    public func recordedQuantity(_ id: UUID, on day: LogDay) -> Decimal? {
+        log?.entries[day]?[id]
+    }
+
+    public func hasSavedEdits(on day: LogDay) -> Bool {
+        log?.entries[day]?.isEmpty == false
+    }
+
+    private mutating func persist(_ updated: DailyLog) throws {
+        try updated.save(to: storeURL)
+        log = updated
     }
 }

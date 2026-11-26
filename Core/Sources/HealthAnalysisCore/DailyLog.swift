@@ -27,14 +27,37 @@ public struct LogDay: Codable, Comparable, Hashable {
 
 public struct LogQuantity: Codable, Identifiable {
     public let id: UUID
-    public let name: String
-    public let unit: String
-    public let defaultValue: Decimal
-    public let effectiveDay: LogDay
+    public internal(set) var name: String
+    public internal(set) var unit: String
+    let defaultValue: Decimal
+    let effectiveDay: LogDay
+    var trackingStart: LogDay?
+    public internal(set) var endDay: LogDay?
+    var defaultChanges: [LogDay: Decimal]?
+
+    public var startDay: LogDay { trackingStart ?? effectiveDay }
+
+    func tracks(_ day: LogDay) -> Bool {
+        day >= startDay && (endDay.map { day <= $0 } ?? true)
+    }
+
+    var latestDefaultValue: Decimal {
+        let latest = defaultChanges?.keys.max().map { max($0, effectiveDay) } ?? effectiveDay
+        return applicableDefault(on: latest) ?? defaultValue
+    }
+
+    func applicableDefault(on day: LogDay) -> Decimal? {
+        let latest = defaultChanges?.keys.filter { $0 <= day }.max()
+        if let latest, latest >= effectiveDay || day < effectiveDay {
+            return defaultChanges?[latest]
+        }
+        return day >= effectiveDay ? defaultValue : nil
+    }
 }
 
-public enum QuantityCreationError: Error {
-    case missingName, missingUnit, invalidDefault, saveFailed
+public enum QuantitySettingsError: Error, Equatable {
+    case missingName, missingUnit, invalidDefault, invalidTrackingPeriod, rangeExcludesEntries, saveFailed
+    case endDateWouldRemoveEntries(Int)
 }
 
 public enum LogEditFeedback: Equatable {
@@ -54,9 +77,26 @@ struct DailyLog: Codable {
 
     static func open(at url: URL) throws -> Self {
         do {
-            return try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
+            var log = try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
+            for index in log.quantities.indices where log.quantities[index].trackingStart == nil {
+                let quantity = log.quantities[index]
+                let firstEntry = log.recordedDays(for: quantity.id).min() ?? quantity.effectiveDay
+                log.quantities[index].trackingStart = min(firstEntry, quantity.effectiveDay)
+            }
+            return log
         } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
             return Self()
+        }
+    }
+
+    func recordedDays(for id: UUID) -> [LogDay] {
+        entries.compactMap { day, quantities in quantities[id] == nil ? nil : day }
+    }
+
+    mutating func removeEntries(for id: UUID, on days: [LogDay]) {
+        for day in days {
+            entries[day]?[id] = nil
+            if entries[day]?.isEmpty == true { entries[day] = nil }
         }
     }
 

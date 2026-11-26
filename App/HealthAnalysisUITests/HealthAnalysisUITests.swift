@@ -38,33 +38,6 @@ final class HealthAnalysisUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["No tracking variables configured."].exists)
         capture("Log", app)
 
-        app.buttons["Add Quantity"].tap()
-        XCTAssertTrue(app.navigationBars["New Quantity"].waitForExistence(timeout: 5))
-        capture("New Quantity", app)
-        let name = app.textFields["Name"]
-        name.tap()
-        name.typeText("Caffeine")
-        let unit = app.textFields["Unit"]
-        unit.tap()
-        unit.typeText("mg")
-        let defaultValue = app.textFields["Default value"]
-        defaultValue.tap()
-        defaultValue.typeText("0")
-        app.buttons["Save"].tap()
-
-        let field = app.textFields["Caffeine (mg)"]
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
-        XCTAssertEqual(field.placeholderValue, "0")
-        XCTAssertTrue(app.staticTexts["Default value"].exists)
-        XCTAssertEqual(today.value as? String, "No saved edits")
-        capture("Assumed Default", app)
-        field.tap()
-        field.typeText("0")
-        XCTAssertEqual(today.value as? String, "Edits saved")
-        XCTAssertFalse(app.staticTexts["Default value"].exists)
-        field.typeText("\n")
-        capture("Explicit Zero", app)
-
         let dateHeader = app.staticTexts["selectedLogDate"]
         let todayLabel = dateHeader.label
         showPreviousWeek(in: app)
@@ -72,7 +45,37 @@ final class HealthAnalysisUITests: XCTestCase {
         earlier.tap()
         XCTAssertTrue(earlier.isSelected)
         XCTAssertNotEqual(dateHeader.label, todayLabel)
-        XCTAssertEqual(field.placeholderValue, "Enter value")
+
+        let categories = app.buttons["Log Categories"]
+        categories.tap()
+        XCTAssertTrue(app.navigationBars["Log Categories"].waitForExistence(timeout: 5))
+        capture("Empty Log Categories", app)
+        app.buttons["Add Quantity"].tap()
+        XCTAssertTrue(app.navigationBars["New Quantity"].waitForExistence(timeout: 5))
+        capture("New Quantity", app)
+        let name = app.textFields["quantityName"]
+        name.tap()
+        name.typeText("Caffeine")
+        let unit = app.textFields["quantityUnit"]
+        unit.tap()
+        unit.typeText("mg")
+        let defaultValue = app.textFields["Default value"]
+        defaultValue.tap()
+        defaultValue.typeText("0")
+        app.buttons["Save"].tap()
+        let caffeine = categoryButton(labeled: "Caffeine (mg)", in: app)
+        XCTAssertTrue(caffeine.waitForExistence(timeout: 5))
+        capture("Log Categories", app)
+        app.buttons["Done"].tap()
+
+        let field = app.textFields["Caffeine (mg)"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        app.buttons["logDay-8"].tap()
+        XCTAssertTrue(app.staticTexts["No tracking variables for this day."].exists)
+        XCTAssertFalse(field.exists)
+        earlier.tap()
+        XCTAssertTrue(earlier.isSelected)
+        XCTAssertEqual(field.placeholderValue, "0")
         XCTAssertEqual(earlier.value as? String, "No saved edits")
         field.tap()
         field.typeText("12.5.")
@@ -92,7 +95,16 @@ final class HealthAnalysisUITests: XCTestCase {
         tabs.buttons["Analysis"].tap()
         tabs.buttons["Log"].tap()
         XCTAssertTrue(today.isSelected)
-        XCTAssertEqual(field.value as? String, "0")
+        XCTAssertEqual(field.placeholderValue, "0")
+        XCTAssertTrue(app.staticTexts["Default value"].exists)
+        XCTAssertEqual(today.value as? String, "No saved edits")
+        capture("Assumed Default", app)
+        field.tap()
+        field.typeText("0")
+        XCTAssertEqual(today.value as? String, "Edits saved")
+        XCTAssertFalse(app.staticTexts["Default value"].exists)
+        field.typeText("\n")
+        capture("Explicit Zero", app)
 
         app.terminate()
         app.launch()
@@ -104,6 +116,55 @@ final class HealthAnalysisUITests: XCTestCase {
         earlier.tap()
         XCTAssertEqual(field.value as? String, "7.25")
         XCTAssertEqual(earlier.value as? String, "Edits saved")
+
+        categories.tap()
+        caffeine.tap()
+        XCTAssertTrue(app.navigationBars["Edit Quantity"].waitForExistence(timeout: 5))
+        name.tap()
+        name.typeText(" intake")
+        name.typeText("\n")
+        let endDate = app.switches["Set End Date"]
+        endDate.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        XCTAssertEqual(endDate.value as? String, "1")
+        capture("Edit Tracking Period", app)
+        app.buttons["Save"].tap()
+        let warning = app.alerts["Remove entries after the end date?"]
+        XCTAssertTrue(warning.waitForExistence(timeout: 5))
+        capture("Confirm End Date", app)
+        warning.buttons["Cancel"].tap()
+        XCTAssertTrue(app.navigationBars["Edit Quantity"].exists)
+        app.buttons["Save"].tap()
+        XCTAssertTrue(warning.waitForExistence(timeout: 5))
+        warning.buttons["Remove Entries and Save"].tap()
+        let archived = categoryButton(labeled: "Caffeine intake (mg)", in: app)
+        XCTAssertTrue(archived.waitForExistence(timeout: 5))
+        capture("Archived Category", app)
+        app.buttons["Done"].tap()
+        XCTAssertEqual(app.textFields["Caffeine intake (mg)"].value as? String, "7.25")
+        tabs.buttons["Analysis"].tap()
+        tabs.buttons["Log"].tap()
+        XCTAssertTrue(today.isSelected)
+        XCTAssertEqual(today.value as? String, "No saved edits")
+        XCTAssertTrue(app.staticTexts["No tracking variables for this day."].exists)
+        capture("Day After Tracking End", app)
+
+        categories.tap()
+        archived.tap()
+        app.buttons["Remove Quantity"].tap()
+        let removal = app.alerts["Remove Caffeine intake?"]
+        XCTAssertTrue(removal.waitForExistence(timeout: 5))
+        capture("Confirm Quantity Removal", app)
+        removal.buttons["Remove"].tap()
+        XCTAssertTrue(app.staticTexts["No tracking variables"].waitForExistence(timeout: 5))
+        app.buttons["Done"].tap()
+        showPreviousWeek(in: app)
+        earlier.tap()
+        XCTAssertEqual(earlier.value as? String, "No saved edits")
+    }
+
+    @MainActor
+    private func categoryButton(labeled label: String, in app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", label)).firstMatch
     }
 
     @MainActor

@@ -18,7 +18,7 @@ import Testing
             #expect(field.quantity.name == "Caffeine")
             #expect(field.quantity.unit == "mg")
             #expect(field.assumedDefault == "40")
-            #expect(session.logFields(on: previous).first?.assumedDefault == nil)
+            #expect(session.logFields(on: previous).isEmpty)
             #expect(session.recordedQuantity(quantity.id, on: day) == nil)
             #expect(!session.hasSavedEdits(on: day))
 
@@ -39,7 +39,7 @@ import Testing
         try withStore { url in
             var session = HealthAnalysisSession(storeURL: url, today: today, timeZone: zone, locale: locale)
             let day = session.logDay
-            let first = try session.createQuantity(name: "Caffeine", unit: "mg", defaultText: "0", effectiveDay: day)
+            let first = try session.createQuantity(name: "Caffeine", unit: "mg", defaultText: "0", effectiveDay: justBeforeDst)
             let second = try session.createQuantity(name: "Caffeine", unit: "mg", defaultText: "25", effectiveDay: day)
 
             session.editQuantity(first.id, on: day, text: "0")
@@ -126,7 +126,7 @@ import Testing
             #expect(session.tab == .analysis)
             #expect(!session.isLogAvailable)
             session.selectTab(.log)
-            #expect(throws: QuantityCreationError.saveFailed) {
+            #expect(throws: QuantitySettingsError.saveFailed) {
                 try session.createQuantity(name: "Caffeine", unit: "mg", defaultText: "0", effectiveDay: session.logDay)
             }
             #expect(try Data(contentsOf: url) == original)
@@ -138,6 +138,92 @@ import Testing
             session.retryOpeningLog()
             #expect(session.isLogAvailable)
             #expect(session.logFields(on: session.logDay).isEmpty)
+        }
+    }
+
+    @Test func editingAndArchivingChangesWhichDaysShowTheQuantityAndKeepsItsHistory() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let today = Date(timeIntervalSince1970: 1_700_000_000)
+        let start = LogDay(try #require(calendar.date(byAdding: .day, value: -3, to: today)), timeZone: zone)
+        let end = LogDay(try #require(calendar.date(byAdding: .day, value: -1, to: today)), timeZone: zone)
+        let beforeStart = LogDay(try #require(calendar.date(byAdding: .day, value: -4, to: today)), timeZone: zone)
+        try withStore { url in
+            var session = HealthAnalysisSession(storeURL: url, today: today, timeZone: zone, locale: locale)
+            let quantity = try session.createQuantity(name: "Caffeine", unit: "mg", defaultText: "10", effectiveDay: start)
+            session.editQuantity(quantity.id, on: start, text: "7")
+            try session.updateQuantity(
+                quantity.id, name: "Coffee", unit: "mg", startDay: start, endDay: end,
+                defaultChange: (text: "12", effectiveDay: end)
+            )
+            session.editQuantity(quantity.id, on: session.logDay, text: "8")
+            session.editQuantity(quantity.id, on: beforeStart, text: "9")
+
+            let reopened = HealthAnalysisSession(storeURL: url, today: today, timeZone: zone, locale: locale)
+            #expect(reopened.quantities.first?.id == quantity.id)
+            #expect(reopened.quantities.first?.endDay == end)
+            #expect(reopened.logFields(on: start).first?.quantity.name == "Coffee")
+            #expect(reopened.recordedQuantity(quantity.id, on: start) == 7)
+            let middle = LogDay(try #require(calendar.date(byAdding: .day, value: -2, to: today)), timeZone: zone)
+            #expect(reopened.logFields(on: middle).first?.assumedDefault == "10")
+            #expect(reopened.logFields(on: end).first?.assumedDefault == "12")
+            #expect(reopened.logFields(on: reopened.logDay).isEmpty)
+            #expect(reopened.logFields(on: beforeStart).isEmpty)
+            #expect(!reopened.hasSavedEdits(on: reopened.logDay))
+            #expect(!reopened.hasSavedEdits(on: beforeStart))
+        }
+    }
+
+    @Test func removingAQuantityKeepsOtherObservationsAndClearsItsDayMarker() throws {
+        try withStore { url in
+            let today = Date(timeIntervalSince1970: 1_700_000_000)
+            var session = HealthAnalysisSession(storeURL: url, today: today, timeZone: zone, locale: locale)
+            let day = session.logDay
+            let earlier = LogDay(today.addingTimeInterval(-86_400), timeZone: zone)
+            let first = try session.createQuantity(name: "Coffee", unit: "mg", defaultText: "0", effectiveDay: earlier)
+            let second = try session.createQuantity(name: "Exercise", unit: "min", defaultText: "0", effectiveDay: earlier)
+            session.editQuantity(first.id, on: earlier, text: "10")
+            session.editQuantity(first.id, on: day, text: "15")
+            session.editQuantity(second.id, on: day, text: "20")
+            #expect(throws: QuantitySettingsError.endDateWouldRemoveEntries(1)) {
+                try session.updateQuantity(first.id, name: "Coffee", unit: "mg", startDay: earlier, endDay: earlier)
+            }
+            #expect(session.recordedQuantity(first.id, on: day) == 15)
+            #expect(session.quantities.first?.endDay == nil)
+            try session.updateQuantity(
+                first.id, name: "Coffee", unit: "mg", startDay: earlier, endDay: earlier, removeEntriesAfterEnd: true
+            )
+            let archived = HealthAnalysisSession(storeURL: url, today: today, timeZone: zone, locale: locale)
+            #expect(archived.quantities.first?.endDay == earlier)
+            #expect(archived.recordedQuantity(first.id, on: earlier) == 10)
+            #expect(archived.recordedQuantity(first.id, on: day) == nil)
+            #expect(archived.recordedQuantity(second.id, on: day) == 20)
+            try session.removeQuantity(first.id)
+
+            let reopened = HealthAnalysisSession(storeURL: url, today: today, timeZone: zone, locale: locale)
+            #expect(reopened.quantities.map(\.id) == [second.id])
+            #expect(reopened.recordedQuantity(first.id, on: earlier) == nil)
+            #expect(!reopened.hasSavedEdits(on: earlier))
+            #expect(reopened.recordedQuantity(second.id, on: day) == 20)
+            #expect(reopened.hasSavedEdits(on: day))
+        }
+    }
+
+    @Test func reopeningThePreviousStoreKeepsEntriesThatPredateTheFirstDefault() throws {
+        let id = try #require(UUID(uuidString: "E24718B5-535D-4AAF-9A1E-F5BD391104F7"))
+        let backdated = try #require(ISO8601DateFormatter().date(from: "2024-03-09T20:00:00Z"))
+        let day = LogDay(backdated, timeZone: zone)
+        try withStore { url in
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let legacy = """
+                {"quantities":[{"id":"\(id.uuidString)","name":"Coffee","unit":"mg","defaultValue":5,
+                "effectiveDay":{"year":2024,"month":3,"day":10}}],
+                "entries":[{"year":2024,"month":3,"day":9},["\(id.uuidString)",7]]}
+                """
+            try Data(legacy.utf8).write(to: url)
+            let reopened = HealthAnalysisSession(storeURL: url, today: backdated, timeZone: zone, locale: locale)
+            #expect(reopened.quantities.first?.startDay == day)
+            #expect(reopened.logFields(on: day).first?.id == id)
+            #expect(reopened.recordedQuantity(id, on: day) == 7)
         }
     }
 

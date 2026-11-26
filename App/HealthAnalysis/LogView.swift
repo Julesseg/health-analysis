@@ -5,8 +5,7 @@ struct LogView: View {
     @Binding var session: HealthAnalysisSession
     @Environment(\.calendar) private var calendar
     @Environment(\.locale) private var locale
-    @Environment(\.timeZone) private var timeZone
-    @State private var showingQuantitySetup = false
+    @State private var showingCategories = false
     @FocusState private var focusedQuantity: UUID?
 
     var body: some View {
@@ -37,7 +36,11 @@ struct LogView: View {
             Form {
                 Section {
                     if fields.isEmpty {
-                        Text("No tracking variables configured.")
+                        if session.quantities.isEmpty {
+                            Text("No tracking variables configured.")
+                        } else {
+                            Text("No tracking variables for this day.")
+                        }
                     }
                     ForEach(fields) { field in
                         QuantityRow(
@@ -59,14 +62,14 @@ struct LogView: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("Add Quantity", systemImage: "plus") {
+                Button("Log Categories", systemImage: "list.bullet") {
                     focusedQuantity = nil
-                    showingQuantitySetup = true
+                    showingCategories = true
                 }
             }
         }
-        .sheet(isPresented: $showingQuantitySetup) {
-            QuantitySetupView(session: $session, effectiveDate: day.date(in: timeZone))
+        .sheet(isPresented: $showingCategories) {
+            LogCategoriesView(session: $session, selectedDay: day)
         }
         .onChange(of: day) { focusedQuantity = nil }
     }
@@ -147,10 +150,19 @@ private struct WeekStrip: View {
         .tabViewStyle(.page(indexDisplayMode: .never))
         .frame(height: stripHeight)
         .padding(.horizontal)
-        .onAppear { week = 0 }
+        .onAppear { showSelectedWeek(relativeTo: today) }
+        .onChange(of: selection) { showSelectedWeek(relativeTo: today) }
         .onChange(of: week) {
             if week == oldestWeek { oldestWeek -= 4 }
         }
+    }
+
+    private func showSelectedWeek(relativeTo today: Date) {
+        let selectedDate = calendar.startOfDay(for: selection.date(in: calendar.timeZone))
+        let daysAgo = calendar.dateComponents([.day], from: selectedDate, to: today).day ?? 0
+        let selectedWeek = -max(0, daysAgo) / 7
+        oldestWeek = min(oldestWeek, selectedWeek - 4)
+        week = selectedWeek
     }
 
     private func dayButton(_ date: Date, offset: Int) -> some View {

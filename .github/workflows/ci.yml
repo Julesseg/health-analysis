@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      capture_screenshots:
+        description: Capture the five navigation screens for visual review
+        type: boolean
+        default: false
+
+env:
+  APP_NAME: HealthAnalysis
+
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  dispatcher-tests:
+    name: Dispatcher eligibility
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.changes.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for a documentation-only change
+        id: changes
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if git fetch --depth=1 origin "$BASE" &&
+             git diff --quiet --no-renames "$BASE" HEAD -- . ':(exclude)docs/**' ':(exclude,glob)**/*.md'; then
+            echo "docs_only=true" >> "$GITHUB_OUTPUT"
+          fi
+      - run: node --test ci/dispatch-eligibility.test.cjs
+
+  core-tests:
+    name: Core · swift test (Linux)
+    runs-on: ubuntu-24.04
+    container: swift:6.0.3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Core tests
+        working-directory: Core
+        run: swift test
+
+  app-ui-tests:
+    name: App · XCUITest (macOS)
+    needs: dispatcher-tests
+    if: ${{ !cancelled() && needs.dispatcher-tests.outputs.docs_only != 'true' }}
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 27
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '27.x'
+
+      - name: Toolchain versions
+        run: xcodebuild -version
+
+      - name: Create the iPhone 15 Pro simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          model=com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro
+          runtime=$(xcrun simctl list runtimes --json | jq -er --arg model "$model" '
+            [.runtimes[] | select(.isAvailable and any(.supportedDeviceTypes[]?; .identifier == $model))]
+            | max_by(.version | split(".") | map(tonumber)).identifier')
+          udid=$(xcrun simctl create "iPhone 15 Pro" "$model" "$runtime")
+          echo "Testing iPhone 15 Pro on $runtime ($udid)"
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+
+      - name: Build & run UI tests
+        working-directory: App
+        env:
+          TEST_RUNNER_CAPTURE_SCREENSHOTS: ${{ inputs.capture_screenshots && 'true' || 'false' }}
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project "$APP_NAME.xcodeproj" \
+            -scheme "$APP_NAME" \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -parallel-testing-enabled NO \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload test results
+        if: ${{ !cancelled() && (failure() || inputs.capture_screenshots) }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-test-results
+          path: App/TestResults.xcresult
+          if-no-files-found: ignore

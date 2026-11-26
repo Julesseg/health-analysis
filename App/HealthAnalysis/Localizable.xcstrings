@@ -1,0 +1,20 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "Analysis": {},
+    "App": {},
+    "Discover": {},
+    "Discovery is coming in a later build.": {},
+    "Done": {},
+    "Health Analysis": {},
+    "Inputs": {},
+    "Log": {},
+    "New Analysis": {},
+    "No saved analyses yet.": {},
+    "No tracking variables configured.": {},
+    "None selected": {},
+    "Output": {},
+    "Settings": {}
+  },
+  "version": "1.0"
+}

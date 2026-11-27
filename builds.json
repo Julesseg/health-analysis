@@ -1,0 +1,32 @@
+[
+  {
+    "pr": 33,
+    "title": "feat: log counts, yes/no values, ratings and categories",
+    "sha": "0d36bbb",
+    "time": "2026-11-27T14:07:32.447Z"
+  },
+  {
+    "pr": 32,
+    "title": "feat: confirm days and preserve Log value origin",
+    "sha": "7fa50da",
+    "time": "2026-11-26T23:16:24.395Z"
+  },
+  {
+    "pr": 31,
+    "title": "feat: autosave daily quantities in Log",
+    "sha": "4d8ec53",
+    "time": "2026-11-26T16:29:35.340Z"
+  },
+  {
+    "pr": 29,
+    "title": "feat: bootstrap the personal iPhone Analysis and Log app",
+    "sha": "9ecff45",
+    "time": "2026-11-26T14:56:26.310Z"
+  },
+  {
+    "pr": 28,
+    "title": "feat: build the personal health analysis app",
+    "sha": "b94a633",
+    "time": "2026-11-24T09:35:38.583Z"
+  }
+]

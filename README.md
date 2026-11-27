@@ -2,13 +2,13 @@
 
 A personal native iPhone app for exploring associations between health measurements and behavior, using read-only Apple Health data and app-owned manual logs.
 
-The app opens on Analysis with an empty saved list, a blank builder (+), Discover, and Settings. Log opens on today with a scrollable week strip to enter or backdate custom quantities. Add a quantity with a unit, a default value, and the day the default starts. Valid edits save on the phone as you type.
+The app opens on Analysis with an empty saved list, a blank builder (+), Discover, and Settings. Log opens on today with a scrollable week strip to enter or backdate custom quantities, counts, yes/no values, ordered ratings, and categories. Valid edits autosave on the phone. Confirm Day records any displayed defaults.
 
 ## Development
 
 The scaffold comes from [iOS Swift App Template at 0229180](https://github.com/Julesseg/iOS-Swift-app-template/tree/02291809a7afc6c83a223e1773a5a41319c6b5d7). Open `App/HealthAnalysis.xcodeproj` and run the shared `HealthAnalysis` scheme. The iPhone app displays as **Health Analysis** and uses `com.julesseguin.healthanalysis`. It targets iOS 26.0 and later with Swift 6. CI builds with Xcode 27 and runs the portable Swift package using Swift 6.0.3 on Linux.
 
-`HealthAnalysisCore` exposes `HealthAnalysisSession` to both SwiftUI and application acceptance tests. Run `swift test --package-path Core` and `node --test ci/dispatch-eligibility.test.cjs` locally. The native UI test exercises Analysis navigation, quantity setup, and daily Log edits through relaunch on an iPhone 15 Pro simulator. Use this model for local verification and visual reviews.
+`HealthAnalysisCore` exposes `HealthAnalysisSession` to both SwiftUI and application acceptance tests. Run `swift test --package-path Core` and `node --test ci/dispatch-eligibility.test.cjs` locally. The native UI tests exercise Analysis navigation, custom variable setup, and daily Log edits through relaunch on an iPhone 15 Pro simulator. Use this model for local verification and visual reviews.
 
 For a visual review, run the CI workflow manually with **Capture the five navigation screens for visual review** enabled, or set `TEST_RUNNER_CAPTURE_SCREENSHOTS=true` when invoking `xcodebuild test` on a leased simulator. CI uploads the test result bundle for failures and requested captures. Documentation-only changes skip the simulator job.
 

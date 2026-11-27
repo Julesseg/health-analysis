@@ -6,7 +6,7 @@ struct LogView: View {
     @Environment(\.calendar) private var calendar
     @Environment(\.locale) private var locale
     @State private var showingCategories = false
-    @FocusState private var focusedQuantity: UUID?
+    @FocusState private var focusedVariable: UUID?
 
     var body: some View {
         Group {
@@ -25,7 +25,9 @@ struct LogView: View {
 
     private var dailyLog: some View {
         let day = session.logDay
-        let fields = session.logFields(on: day)
+        let quantities = session.logFields(on: day)
+        let variables = session.typedLogFields(on: day)
+        let hasFields = !quantities.isEmpty || !variables.isEmpty
 
         return VStack(alignment: .leading) {
             WeekStrip(
@@ -35,16 +37,21 @@ struct LogView: View {
             )
             Form {
                 Section {
-                    if fields.isEmpty {
-                        if session.quantities.isEmpty {
+                    if !hasFields {
+                        if session.quantities.isEmpty && session.logVariables.isEmpty {
                             Text("No tracking variables configured.")
                         } else {
                             Text("No tracking variables for this day.")
                         }
                     }
-                    ForEach(fields) { field in
-                        QuantityRow(
-                            field: field,
+                    ForEach(quantities) { field in
+                        LogNumberRow(
+                            id: field.id,
+                            label: Text("\(field.quantity.name) (\(field.quantity.unit))"),
+                            assumedDefault: field.assumedDefault,
+                            savedValue: field.savedValue,
+                            origin: field.observationOrigin,
+                            feedback: field.feedback,
                             text: Binding(
                                 get: { session.quantityText(field.id, on: day) },
                                 set: { text in
@@ -52,16 +59,20 @@ struct LogView: View {
                                     session.editQuantity(field.id, on: day, text: text)
                                 }
                             ),
-                            focus: $focusedQuantity,
+                            focus: $focusedVariable,
+                            validationMessage: "Enter a valid number.",
                             retry: { session.retryQuantity(field.id, on: day) }
                         )
+                    }
+                    ForEach(variables) { field in
+                        typedRow(field, on: day)
                     }
                 } header: {
                     let format = Date.FormatStyle(date: .complete, locale: locale, calendar: calendar, timeZone: .gmt)
                     Text(day.date(in: .gmt), format: format)
                         .accessibilityIdentifier("selectedLogDate")
                 }
-                if !fields.isEmpty {
+                if hasFields {
                     dayReview(day)
                 }
             }
@@ -71,7 +82,7 @@ struct LogView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Log Categories", systemImage: "list.bullet") {
-                    focusedQuantity = nil
+                    focusedVariable = nil
                     showingCategories = true
                 }
             }
@@ -79,7 +90,43 @@ struct LogView: View {
         .sheet(isPresented: $showingCategories) {
             LogCategoriesView(session: $session, selectedDay: day)
         }
-        .onChange(of: day) { focusedQuantity = nil }
+        .onChange(of: day) { focusedVariable = nil }
+    }
+
+    @ViewBuilder
+    private func typedRow(_ field: TypedLogField, on day: LogDay) -> some View {
+        let retry = { session.retryTypedEdit(field.id, on: day) }
+        if case .count = field.variable.kind {
+            LogNumberRow(
+                id: field.id,
+                label: field.variable.label,
+                assumedDefault: countLabel(field.assumedDefault),
+                savedValue: countLabel(field.observation?.value),
+                origin: field.observation?.origin,
+                feedback: field.feedback,
+                text: Binding(
+                    get: { session.countText(field.id, on: day) },
+                    set: { text in
+                        guard text != session.countText(field.id, on: day) else { return }
+                        session.editCount(field.id, on: day, text: text)
+                    }
+                ),
+                focus: $focusedVariable,
+                keyboard: .numberPad,
+                validationMessage: "Enter a nonnegative whole number.",
+                retry: retry
+            )
+        } else {
+            LogChoiceRow(field: field, retry: retry) { choice in
+                focusedVariable = nil
+                session.editTypedValue(field.id, on: day, value: choice)
+            }
+        }
+    }
+
+    private func countLabel(_ value: LogValue?) -> String? {
+        guard case .count(let count) = value else { return nil }
+        return session.formatCount(count)
     }
 
     @ViewBuilder
@@ -95,7 +142,7 @@ struct LogView: View {
                     "Confirm Day"
                 }
                 Button(title) {
-                    focusedQuantity = nil
+                    focusedVariable = nil
                     session.confirmDay(day)
                 }
                 .disabled(!confirmation.canSave)
@@ -113,54 +160,121 @@ struct LogView: View {
     }
 }
 
-private struct QuantityRow: View {
-    let field: LogQuantityField
+private struct LogNumberRow: View {
+    let id: UUID
+    let label: Text
+    let assumedDefault: String?
+    let savedValue: String?
+    let origin: LogObservationOrigin?
+    let feedback: LogEditFeedback?
     @Binding var text: String
     var focus: FocusState<UUID?>.Binding
+    var keyboard: UIKeyboardType = .numbersAndPunctuation
+    let validationMessage: LocalizedStringKey
     let retry: () -> Void
 
     var body: some View {
-        let label = Text("\(field.quantity.name) (\(field.quantity.unit))")
-
         VStack(alignment: .leading, spacing: 6) {
             label.accessibilityHidden(true)
-            TextField("Value", text: $text, prompt: field.assumedDefault.map(Text.init(verbatim:)) ?? Text("Enter value"))
-                .keyboardType(.numbersAndPunctuation)
+            TextField("Value", text: $text, prompt: assumedDefault.map(Text.init(verbatim:)) ?? Text("Enter value"))
+                .keyboardType(keyboard)
                 .textFieldStyle(.roundedBorder)
                 .submitLabel(.done)
-                .focused(focus, equals: field.id)
+                .focused(focus, equals: id)
                 .onSubmit { focus.wrappedValue = nil }
                 .accessibilityLabel(label)
-            if let valueOrigin {
-                valueOrigin.font(.footnote).foregroundStyle(.secondary)
+            LogRowFeedback(
+                assumedDefault: assumedDefault.map(Text.init(verbatim:)),
+                savedValue: savedValue.map(Text.init(verbatim:)),
+                origin: origin, feedback: feedback, validationMessage: validationMessage, retry: retry
+            )
+        }
+    }
+}
+
+private struct LogChoiceRow: View {
+    let field: TypedLogField
+    let retry: () -> Void
+    let select: (LogValue) -> Void
+
+    var body: some View {
+        let choices = field.variable.kind.choices
+        let value = field.pendingValue ?? field.observation?.value ?? field.assumedDefault
+        let selection = choices.first(where: { $0.value == value })?.label ?? Text("Choose")
+
+        VStack(alignment: .leading, spacing: 6) {
+            Menu {
+                ForEach(choices) { choice in
+                    Button {
+                        select(choice.value)
+                    } label: {
+                        if value == choice.value {
+                            Label { choice.label } icon: { Image(systemName: "checkmark") }
+                        } else {
+                            choice.label
+                        }
+                    }
+                }
+            } label: {
+                HStack {
+                    field.variable.label.foregroundStyle(.primary)
+                    Spacer()
+                    selection
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption)
+                }
+                .contentShape(Rectangle())
             }
-            switch field.feedback {
-            case .invalidNumber:
-                Text("Enter a valid number.")
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-            case .saveFailed:
-                Text("Couldn’t save this value.")
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-                Button("Retry Save", action: retry)
-                    .buttonStyle(.bordered)
-            case nil:
-                EmptyView()
-            }
+            .menuOrder(.fixed)
+            .accessibilityLabel(field.variable.label)
+            .accessibilityValue(selection)
+            LogRowFeedback(
+                assumedDefault: choices.first(where: { $0.value == field.assumedDefault })?.label,
+                savedValue: choices.first(where: { $0.value == field.observation?.value })?.label,
+                origin: field.observation?.origin, feedback: field.feedback, validationMessage: "Choose a value.", retry: retry
+            )
+        }
+    }
+}
+
+private struct LogRowFeedback: View {
+    let assumedDefault: Text?
+    let savedValue: Text?
+    let origin: LogObservationOrigin?
+    let feedback: LogEditFeedback?
+    let validationMessage: LocalizedStringKey
+    let retry: () -> Void
+
+    var body: some View {
+        if let valueOrigin {
+            valueOrigin.font(.footnote).foregroundStyle(.secondary)
+        }
+        switch feedback {
+        case .invalidNumber:
+            Text(validationMessage)
+                .font(.footnote)
+                .foregroundStyle(.red)
+        case .saveFailed:
+            Text("Couldn’t save this value.")
+                .font(.footnote)
+                .foregroundStyle(.red)
+            Button("Retry Save", action: retry)
+                .buttonStyle(.bordered)
+        case nil:
+            EmptyView()
         }
     }
 
     private var valueOrigin: Text? {
-        if let assumedDefault = field.assumedDefault {
-            return field.feedback == nil ? Text("Default value") : Text("Default value (\(assumedDefault))")
+        if let assumedDefault {
+            return feedback == nil ? Text("Default value") : Text("Default value (\(assumedDefault))")
         }
-        if let savedValue = field.savedValue, field.feedback != nil {
-            return field.observationOrigin == .confirmedDefault
+        if let savedValue, feedback != nil {
+            return origin == .confirmedDefault
                 ? Text("Saved confirmed default (\(savedValue))")
                 : Text("Last saved value (\(savedValue))")
         }
-        return field.observationOrigin == .confirmedDefault ? Text("Confirmed default") : nil
+        return origin == .confirmedDefault ? Text("Confirmed default") : nil
     }
 }
 

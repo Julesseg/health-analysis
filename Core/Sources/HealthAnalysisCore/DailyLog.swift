@@ -77,19 +77,23 @@ public struct LogDayConfirmation {
     public let saveFailed: Bool
 }
 
-public struct LogQuantityObservation: Equatable {
-    public enum Origin: Equatable {
-        case recorded, confirmedDefault
-    }
+public enum LogObservationOrigin: Equatable {
+    case recorded, confirmedDefault
+}
 
-    public let value: Decimal
+public struct LogObservation<Value: Equatable>: Equatable {
+    public typealias Origin = LogObservationOrigin
+
+    public let value: Value
     public let origin: Origin
 
-    public init(value: Decimal, origin: Origin) {
+    public init(value: Value, origin: Origin) {
         self.value = value
         self.origin = origin
     }
 }
+
+public typealias LogQuantityObservation = LogObservation<Decimal>
 
 public struct LogQuantityField: Identifiable {
     public let quantity: LogQuantity
@@ -104,6 +108,7 @@ struct DailyLog: Codable {
     var quantities: [LogQuantity] = []
     var entries: [LogDay: [UUID: Decimal]] = [:]
     var confirmedDays: [LogDay: [UUID: Decimal]]?
+    var typed: TypedLog?
 
     static func open(at url: URL) throws -> Self {
         do {
@@ -175,6 +180,12 @@ struct QuantityNumberFormat {
         return Decimal(string: normalized, locale: Locale(identifier: "en_US_POSIX"))
     }
 
+    func parseCount(_ text: String) -> Int? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let digits = normalizeWholePart(trimmed) else { return nil }
+        return Int(digits)
+    }
+
     private func normalizeWholePart(_ text: String) -> String? {
         let groups = groupingSeparator.map { text.components(separatedBy: $0) } ?? [text]
         if groups.count > 1 {
@@ -200,5 +211,9 @@ struct QuantityNumberFormat {
     func format(_ value: Decimal) -> String {
         var value = value
         return NSDecimalString(&value, locale)
+    }
+
+    func formatCount(_ value: Int) -> String {
+        value.formatted(.number.locale(locale).grouping(.never))
     }
 }

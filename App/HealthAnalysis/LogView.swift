@@ -30,7 +30,7 @@ struct LogView: View {
         return VStack(alignment: .leading) {
             WeekStrip(
                 selection: day,
-                hasSavedEdits: { session.hasSavedEdits(on: $0) },
+                status: { session.logStatus(on: $0) },
                 select: { session.selectLogDay($0) }
             )
             Form {
@@ -45,9 +45,14 @@ struct LogView: View {
                     ForEach(fields) { field in
                         QuantityRow(
                             field: field,
-                            text: session.quantityText(field.id, on: day),
+                            text: Binding(
+                                get: { session.quantityText(field.id, on: day) },
+                                set: { text in
+                                    guard text != session.quantityText(field.id, on: day) else { return }
+                                    session.editQuantity(field.id, on: day, text: text)
+                                }
+                            ),
                             focus: $focusedQuantity,
-                            edit: { session.editQuantity(field.id, on: day, text: $0) },
                             retry: { session.retryQuantity(field.id, on: day) }
                         )
                     }
@@ -55,6 +60,9 @@ struct LogView: View {
                     let format = Date.FormatStyle(date: .complete, locale: locale, calendar: calendar, timeZone: .gmt)
                     Text(day.date(in: .gmt), format: format)
                         .accessibilityIdentifier("selectedLogDate")
+                }
+                if !fields.isEmpty {
+                    dayReview(day)
                 }
             }
             .id(day)
@@ -73,34 +81,59 @@ struct LogView: View {
         }
         .onChange(of: day) { focusedQuantity = nil }
     }
+
+    @ViewBuilder
+    private func dayReview(_ day: LogDay) -> some View {
+        let isConfirmed = session.logStatus(on: day) == .confirmed
+        if let confirmation = session.dayConfirmation(on: day) {
+            Section {
+                let title: LocalizedStringKey = if confirmation.saveFailed {
+                    "Retry Confirmation"
+                } else if isConfirmed {
+                    "Confirm New Values"
+                } else {
+                    "Confirm Day"
+                }
+                Button(title) {
+                    focusedQuantity = nil
+                    session.confirmDay(day)
+                }
+                .disabled(!confirmation.canSave)
+            } footer: {
+                if confirmation.saveFailed {
+                    Text("Couldn’t save the day confirmation.")
+                        .foregroundStyle(.red)
+                }
+            }
+        } else if isConfirmed {
+            Section {
+                Label("Day confirmed", systemImage: "checkmark")
+            }
+        }
+    }
 }
 
 private struct QuantityRow: View {
     let field: LogQuantityField
-    @State var text: String
+    @Binding var text: String
     var focus: FocusState<UUID?>.Binding
-    let edit: (String) -> Void
     let retry: () -> Void
 
     var body: some View {
         let label = Text("\(field.quantity.name) (\(field.quantity.unit))")
-        let input = Binding(
-            get: { text },
-            set: { value in
-                text = value
-                edit(value)
-            }
-        )
 
         VStack(alignment: .leading, spacing: 6) {
             label.accessibilityHidden(true)
-            TextField("Value", text: input, prompt: field.assumedDefault.map(Text.init(verbatim:)) ?? Text("Enter value"))
+            TextField("Value", text: $text, prompt: field.assumedDefault.map(Text.init(verbatim:)) ?? Text("Enter value"))
                 .keyboardType(.numbersAndPunctuation)
                 .textFieldStyle(.roundedBorder)
                 .submitLabel(.done)
                 .focused(focus, equals: field.id)
                 .onSubmit { focus.wrappedValue = nil }
                 .accessibilityLabel(label)
+            if let valueOrigin {
+                valueOrigin.font(.footnote).foregroundStyle(.secondary)
+            }
             switch field.feedback {
             case .invalidNumber:
                 Text("Enter a valid number.")
@@ -113,24 +146,33 @@ private struct QuantityRow: View {
                 Button("Retry Save", action: retry)
                     .buttonStyle(.bordered)
             case nil:
-                if field.assumedDefault != nil {
-                    Text("Default value")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
+                EmptyView()
             }
         }
+    }
+
+    private var valueOrigin: Text? {
+        if let assumedDefault = field.assumedDefault {
+            return field.feedback == nil ? Text("Default value") : Text("Default value (\(assumedDefault))")
+        }
+        if let savedValue = field.savedValue, field.feedback != nil {
+            return field.observationOrigin == .confirmedDefault
+                ? Text("Saved confirmed default (\(savedValue))")
+                : Text("Last saved value (\(savedValue))")
+        }
+        return field.observationOrigin == .confirmedDefault ? Text("Confirmed default") : nil
     }
 }
 
 private struct WeekStrip: View {
     let selection: LogDay
-    let hasSavedEdits: (LogDay) -> Bool
+    let status: (LogDay) -> LogDayStatus
     let select: (LogDay) -> Void
     @Environment(\.calendar) private var calendar
     @State private var week = 0
     @State private var oldestWeek = -4
     @ScaledMetric private var stripHeight: CGFloat = 60
+    @ScaledMetric private var indicatorHeight: CGFloat = 14
 
     var body: some View {
         let today = calendar.startOfDay(for: .now)
@@ -168,7 +210,12 @@ private struct WeekStrip: View {
     private func dayButton(_ date: Date, offset: Int) -> some View {
         let day = LogDay(date, timeZone: calendar.timeZone)
         let selected = day == selection
-        let edited = hasSavedEdits(day)
+        let status = status(day)
+        let accessibilityStatus: LocalizedStringKey = switch status {
+        case .unmarked: "No saved edits"
+        case .editsSaved: "Edits saved"
+        case .confirmed: "Day confirmed"
+        }
 
         return Button {
             select(day)
@@ -178,10 +225,16 @@ private struct WeekStrip: View {
                     .font(.caption)
                 Text(date, format: .dateTime.day())
                     .font(.body.weight(selected ? .bold : .regular))
-                Circle()
-                    .fill(.tint)
-                    .frame(width: 5, height: 5)
-                    .opacity(edited ? 1 : 0)
+                ZStack {
+                    if status == .confirmed {
+                        Image(systemName: "checkmark")
+                            .font(.caption2.weight(.semibold))
+                    } else if status == .editsSaved {
+                        Circle().frame(width: 5, height: 5)
+                    }
+                }
+                .frame(height: indicatorHeight)
+                .foregroundStyle(.tint)
             }
             .frame(maxWidth: .infinity, minHeight: 44)
             .background(selected ? Color.accentColor.opacity(0.18) : .clear, in: .capsule)
@@ -189,7 +242,7 @@ private struct WeekStrip: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(date, format: .dateTime.weekday(.wide).month(.wide).day().year()))
-        .accessibilityValue(edited ? Text("Edits saved") : Text("No saved edits"))
+        .accessibilityValue(Text(accessibilityStatus))
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier("logDay-\(-offset)")
     }

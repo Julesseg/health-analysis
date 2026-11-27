@@ -15,12 +15,18 @@ public struct HealthAnalysisSession {
         let feedback: LogEditFeedback?
     }
 
+    private struct PendingDayReview {
+        var assumedValues: [UUID: Decimal] = [:]
+        var hasUnresolvedDraft = false
+    }
+
     public private(set) var tab: Tab = .analysis
     public private(set) var logDay: LogDay
     private let storeURL: URL
     private let quantityFormat: QuantityNumberFormat
     private var log: DailyLog?
     private var drafts: [FieldKey: Draft] = [:]
+    private var failedDayConfirmations: Set<LogDay> = []
     public var isLogAvailable: Bool { log != nil }
     public var quantities: [LogQuantity] { log?.quantities ?? [] }
 
@@ -81,7 +87,9 @@ public struct HealthAnalysisSession {
         startDay: LogDay,
         endDay: LogDay?,
         defaultChange: (text: String, effectiveDay: LogDay)? = nil,
-        removeEntriesAfterEnd: Bool = false
+        applyDefaultToEarlierDays: Bool = false,
+        removeEntriesAfterEnd: Bool = false,
+        today: LogDay = LogDay(.now, timeZone: .autoupdatingCurrent)
     ) throws(QuantitySettingsError) {
         guard var updated = log, let index = updated.quantities.firstIndex(where: { $0.id == id }) else { throw .saveFailed }
         let (name, unit) = try quantityLabels(name: name, unit: unit)
@@ -95,6 +103,9 @@ public struct HealthAnalysisSession {
         guard !recordedDays.contains(where: { $0 < startDay }) else { throw .rangeExcludesEntries }
         if let defaultChange {
             guard let value = quantityFormat.parse(defaultChange.text) else { throw .invalidDefault }
+            guard defaultChange.effectiveDay >= today || applyDefaultToEarlierDays else {
+                throw .earlierDefaultRequiresConfirmation
+            }
             var changes = quantity.defaultChanges ?? [:]
             changes[defaultChange.effectiveDay] = value
             quantity.defaultChanges = changes
@@ -141,18 +152,22 @@ public struct HealthAnalysisSession {
     public func logFields(on day: LogDay) -> [LogQuantityField] {
         quantities.compactMap { quantity in
             guard quantity.tracks(day) else { return nil }
-            let assumed = recordedQuantity(quantity.id, on: day) == nil ? quantity.applicableDefault(on: day) : nil
+            let observation = observation(for: quantity.id, on: day)
+            let assumed = observation == nil ? quantity.applicableDefault(on: day) : nil
             let draft = drafts[FieldKey(day: day, quantityID: quantity.id)]
             return LogQuantityField(
                 quantity: quantity,
                 assumedDefault: assumed.map(quantityFormat.format),
+                savedValue: observation.map { quantityFormat.format($0.value) },
+                observationOrigin: observation?.origin,
                 feedback: draft?.feedback
             )
         }
     }
 
     public func quantityText(_ id: UUID, on day: LogDay) -> String {
-        drafts[FieldKey(day: day, quantityID: id)]?.text ?? recordedQuantity(id, on: day).map(quantityFormat.format) ?? ""
+        drafts[FieldKey(day: day, quantityID: id)]?.text
+            ?? observation(for: id, on: day).map { quantityFormat.format($0.value) } ?? ""
     }
 
     public mutating func editQuantity(_ id: UUID, on day: LogDay, text: String) {
@@ -165,8 +180,9 @@ public struct HealthAnalysisSession {
         }
 
         do {
-            if recordedQuantity(id, on: day) != value {
+            if updated.entries[day]?[id] != value {
                 updated.entries[day, default: [:]][id] = value
+                updated.confirmedDays?[day]?[id] = nil
                 try persist(updated)
             }
             drafts[key] = Draft(text: text, feedback: nil)
@@ -184,12 +200,62 @@ public struct HealthAnalysisSession {
         log?.entries[day]?[id]
     }
 
+    public func observation(for id: UUID, on day: LogDay) -> LogQuantityObservation? {
+        if let value = recordedQuantity(id, on: day) {
+            return LogQuantityObservation(value: value, origin: .recorded)
+        }
+        if let value = log?.confirmedDays?[day]?[id] {
+            return LogQuantityObservation(value: value, origin: .confirmedDefault)
+        }
+        return nil
+    }
+
     public func hasSavedEdits(on day: LogDay) -> Bool {
         log?.entries[day]?.isEmpty == false
+    }
+
+    public func logStatus(on day: LogDay) -> LogDayStatus {
+        if log?.confirmedDays?[day] != nil { return .confirmed }
+        return hasSavedEdits(on: day) ? .editsSaved : .unmarked
+    }
+
+    public func dayConfirmation(on day: LogDay) -> LogDayConfirmation? {
+        guard let review = pendingDayReview(on: day) else { return nil }
+        return LogDayConfirmation(
+            canSave: !review.hasUnresolvedDraft,
+            saveFailed: failedDayConfirmations.contains(day)
+        )
+    }
+
+    public mutating func confirmDay(_ day: LogDay) {
+        guard var updated = log, let review = pendingDayReview(on: day), !review.hasUnresolvedDraft else { return }
+        var reviews = updated.confirmedDays ?? [:]
+        reviews[day, default: [:]].merge(review.assumedValues) { existing, _ in existing }
+        updated.confirmedDays = reviews
+        do {
+            try persist(updated)
+            failedDayConfirmations.remove(day)
+        } catch {
+            failedDayConfirmations.insert(day)
+        }
+    }
+
+    private func pendingDayReview(on day: LogDay) -> PendingDayReview? {
+        var review = PendingDayReview()
+        for quantity in quantities where quantity.tracks(day) {
+            if drafts[FieldKey(day: day, quantityID: quantity.id)]?.feedback != nil {
+                review.hasUnresolvedDraft = true
+            }
+            if observation(for: quantity.id, on: day) == nil {
+                review.assumedValues[quantity.id] = quantity.applicableDefault(on: day)
+            }
+        }
+        return review.assumedValues.isEmpty && logStatus(on: day) != .editsSaved ? nil : review
     }
 
     private mutating func persist(_ updated: DailyLog) throws {
         try updated.save(to: storeURL)
         log = updated
+        failedDayConfirmations = failedDayConfirmations.filter { pendingDayReview(on: $0) != nil }
     }
 }

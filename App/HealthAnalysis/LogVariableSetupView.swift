@@ -87,7 +87,15 @@ struct LogVariableSetupView: View {
         Section {
             ForEach($options) { $option in
                 let position = (options.firstIndex { $0.id == option.id } ?? 0) + 1
-                TextField("Option \(position)", text: $option.label)
+                if type == .rating {
+                    HStack(spacing: 10) {
+                        ratingRank(position)
+                        TextField("Label", text: $option.label)
+                            .accessibilityLabel(Text("Option \(position)"))
+                    }
+                } else {
+                    TextField("Option \(position)", text: $option.label)
+                }
             }
             .onDelete { offsets in
                 if offsets.contains(where: { .option(options[$0].id) == defaultDraft.choice }) {
@@ -103,6 +111,22 @@ struct LogVariableSetupView: View {
                 Text("Enter ratings from lowest to highest.")
             }
         }
+    }
+
+    private func ratingRank(_ position: Int) -> some View {
+        let symbol = "\(position).circle.fill"
+        return Group {
+            if UIImage(systemName: symbol) != nil {
+                Image(systemName: symbol)
+            } else {
+                Text(position, format: .number.grouping(.never))
+                    .font(.footnote.weight(.semibold))
+                    .padding(3)
+                    .background(.quaternary, in: Circle())
+            }
+        }
+        .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
     }
 
     private var kind: LogVariable.Kind {

@@ -25,6 +25,16 @@ Use Apple Health and a personal daily log to explore associations on an iPhone 1
 - Autosave each valid edit against its selected day. An explicitly recorded zero or no counts immediately. Confirm day records every displayed value, including unchanged defaults. Preserve the distinction between a typed entry and a confirmed default. A skipped day adds no observations.
 - Keep entries when switching days or leaving the form. Incomplete or invalid input preserves the stored valid value. A failed save retains the edit for retry and accurately shows persistence and review state.
 
+## Daily log CSV
+
+- Log offers Import and Export. Export includes recorded daily log values across the full history. Preserve explicit observations and confirmed defaults, including zero and no. Omit untouched defaults and days with no observations.
+- The CSV is a table with one row per custom variable and one column per represented local day. A day cell holds that variable's observation for that date.
+- Match custom variable names ignoring capitalization and surrounding spaces. Keep the existing display spelling on a match. Create a custom variable for an unfamiliar name and show new names before import. A former name after a rename is treated as unfamiliar if no current name matches it.
+- A new variable starts tracking on its earliest imported observation and has no end date by default. Earlier observations in a later import extend its start date. Gaps between observations remain unrecorded unless a value already exists in Log.
+- A supplied observation replaces any saved observation for the same variable and day. Identical observations leave the log unchanged. Import preserves values outside the supplied observations and each day's existing review status. Imported observations become available to analysis immediately.
+- The import page has a Copy prompt button. The prompt describes the CSV format, the person's custom variable definitions and a fictional example. It instructs the LLM to flag ambiguous dates, units and values. Recorded history stays out of the prompt.
+- Validate the entire file before writing. Show new variable names and counts of new and replaced observations before the person chooses Import. Apply the accepted import in one transaction. The [CSV format](daily-log-csv.md) defines the columns, value types, validation and formatting prompt.
+
 ## Building and reading an analysis
 
 - Choose one or more Inputs and exactly one Output. Run the question against all usable aligned history. There is no history or time-window picker, weekly/monthly aggregation control, separate adjustment list, or preset question. Returning from a result preserves the configuration.
@@ -50,4 +60,4 @@ Use Apple Health and a personal daily log to explore associations on an iPhone 1
 
 Drive portable behavior through the HealthAnalysisSession used by SwiftUI, with deterministic data at the Health boundary and a reopenable local store for durability. Use hand-checkable histories for date alignment, missing data, corrections, zeros and default provenance. Validate estimates and confidence on known and null associations, including correlated inputs, dependent observations and discovery selection. Use one lean native iPhone journey for meaningful wiring and accessibility checks. Measure responsiveness on a large history and verify HealthKit data semantics on a real device before making claims about personal records.
 
-The first version stays on-device. Apple Health writes, direct Garmin ingestion, a backend, export/restore, device sync, medical recommendations and push notifications are outside scope.
+The first version stores and processes data on-device. Daily log CSV is the supported exchange format. Full-app backup and restore, Apple Health writes, direct Garmin ingestion, a backend, device sync, medical recommendations and push notifications are outside scope.

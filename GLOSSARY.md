@@ -41,7 +41,10 @@ A retained choice of inputs and output. It can be created manually or saved from
 A named quantity, count, yes/no value, rating, or category recorded over time. A tracking variable can be selected as an input or an output.
 
 **Custom variable**:
-A tracking variable the person defines and records in their daily log. It has its own history even when Apple Health contains a measurement with the same name and unit.
+A named tracking variable the person adds to their daily log, directly or by importing recorded values. It has its own history even when Apple Health contains a measurement with the same name and unit.
+
+**Tracking start date**:
+The first local day from which a custom variable applies to the daily log. Days without a recorded value can fall within its tracking period.
 
 **Selected source**:
 The single contributor whose readings are used for an imported Apple Health category. Readings from other contributors do not fill gaps in its history.

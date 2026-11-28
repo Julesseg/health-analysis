@@ -135,32 +135,13 @@ struct QuantitySetupView: View {
             Toggle("Change Default", isOn: $changesDefault)
             if changesDefault {
                 defaultField
-                Toggle("Apply to Earlier Dates", isOn: $appliesToEarlierDates)
-                    .onChange(of: appliesToEarlierDates) {
-                        let today = LogDay(.now, timeZone: timeZone)
-                        if appliesToEarlierDates, selectedDay < today {
-                            defaultDate = selectedDay.date(in: timeZone)
-                        } else if LogDay(defaultDate, timeZone: timeZone) < today {
-                            defaultDate = today.date(in: timeZone)
-                        }
-                    }
-                DatePicker(
-                    "Default starts", selection: $defaultDate,
-                    in: (appliesToEarlierDates ? Date.distantPast : firstDefaultDate)...,
-                    displayedComponents: .date
-                )
+                LogDefaultDateFields(date: $defaultDate, appliesToEarlierDates: $appliesToEarlierDates, selectedDay: selectedDay)
             }
         } footer: {
             if changesDefault {
                 Text("This default applies from the chosen date until the next scheduled default. Saved values are kept.")
             }
         }
-    }
-
-    private var firstDefaultDate: Date {
-        var calendar = calendar
-        calendar.timeZone = timeZone
-        return calendar.startOfDay(for: .now)
     }
 
     private func save(confirmedEndDay: LogDay? = nil) {

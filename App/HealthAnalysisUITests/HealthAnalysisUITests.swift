@@ -50,6 +50,7 @@ final class HealthAnalysisUITests: XCTestCase {
         categories.tap()
         XCTAssertTrue(app.navigationBars["Log Categories"].waitForExistence(timeout: 5))
         capture("Empty Log Categories", app)
+        app.buttons["Add Variable"].tap()
         app.buttons["Add Quantity"].tap()
         XCTAssertTrue(app.navigationBars["New Quantity"].waitForExistence(timeout: 5))
         capture("New Quantity", app)
@@ -227,6 +228,128 @@ final class HealthAnalysisUITests: XCTestCase {
         showPreviousWeek(in: app)
         earlier.tap()
         XCTAssertEqual(earlier.value as? String, "No saved edits")
+    }
+
+    @MainActor
+    func testTypedDailyLogControlsAndBackdatedValues() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launchEnvironment["HEALTH_ANALYSIS_UI_TEST_STORE"] = UUID().uuidString
+        app.launch()
+        app.tabBars.buttons["Log"].tap()
+        capture("Log Before Tracking", app)
+
+        let earlier = app.buttons["logDay-1"]
+        let today = app.buttons["logDay-0"]
+        earlier.tap()
+        app.buttons["Log Categories"].tap()
+
+        app.buttons["Add Variable"].tap()
+        capture("Add Tracking Variable", app)
+        app.buttons["Add Count"].tap()
+        capture("New Count", app)
+        enter("Coffee", in: app.textFields["logVariableName"])
+        enter("cups", in: app.textFields["Unit (optional)"])
+        enter("0", in: app.textFields["Default value (optional)"])
+        app.navigationBars.buttons["Save"].tap()
+
+        startVariable("Add Yes/No", named: "Exercised", in: app, captureAs: "New Yes No")
+        choose("No", from: app.buttons["logVariableDefault"], in: app)
+        app.navigationBars.buttons["Save"].tap()
+
+        startVariable("Add Rating", named: "Energy", in: app, captureAs: "New Rating")
+        enter("Steady", in: app.textFields["Option 1"])
+        enter("Strong", in: app.textFields["Option 2"])
+        app.navigationBars.buttons["Save"].tap()
+
+        startVariable("Add Category", named: "Location", in: app, captureAs: "New Category")
+        enter("Office", in: app.textFields["Option 1"])
+        enter("Home", in: app.textFields["Option 2"])
+        app.navigationBars.buttons["Save"].tap()
+
+        XCTAssertTrue(app.navigationBars["Log Categories"].waitForExistence(timeout: 5))
+        capture("Typed Log Categories", app)
+        app.buttons["Done"].tap()
+
+        let count = app.textFields["Coffee (cups)"]
+        let exercised = app.buttons["Exercised"]
+        let energy = app.buttons["Energy"]
+        let location = app.buttons["Location"]
+        XCTAssertEqual(earlier.value as? String, "No saved edits")
+        XCTAssertEqual(count.placeholderValue, "0")
+        XCTAssertEqual(exercised.value as? String, "No")
+        XCTAssertEqual(energy.value as? String, "Choose")
+        capture("Typed Defaults", app)
+        try app.performAccessibilityAudit(for: [.textClipped, .sufficientElementDescription])
+
+        enter("0", in: count)
+        XCTAssertEqual(earlier.value as? String, "Edits saved")
+        choose("No", from: exercised, in: app)
+        energy.tap()
+        XCTAssertLessThan(app.buttons["Steady"].frame.minY, app.buttons["Strong"].frame.minY)
+        capture("Ordered Rating Options", app)
+        app.buttons["Strong"].tap()
+        choose("Home", from: location, in: app)
+        XCTAssertEqual(earlier.value as? String, "Edits saved")
+        XCTAssertFalse(app.staticTexts["Default value"].exists)
+        capture("Backdated Typed Values", app)
+
+        today.tap()
+        XCTAssertEqual(today.value as? String, "No saved edits")
+        XCTAssertEqual(count.placeholderValue, "0")
+        XCTAssertEqual(energy.value as? String, "Choose")
+        app.buttons["Confirm Day"].tap()
+        XCTAssertEqual(today.value as? String, "Day confirmed")
+        XCTAssertEqual(count.value as? String, "0")
+        XCTAssertEqual(location.value as? String, "Choose")
+        capture("Confirmed Typed Defaults", app)
+
+        app.buttons["Log Categories"].tap()
+        categoryButton(labeled: "Energy", in: app).tap()
+        XCTAssertTrue(app.navigationBars["Energy"].waitForExistence(timeout: 5))
+        choose("Steady", from: app.buttons["logVariableDefault"], in: app)
+        capture("Change Rating Default", app)
+        app.navigationBars.buttons["Save"].tap()
+        app.buttons["Done"].tap()
+        XCTAssertEqual(today.value as? String, "Day confirmed")
+        XCTAssertEqual(energy.value as? String, "Steady")
+        app.buttons["Confirm New Values"].tap()
+
+        app.terminate()
+        app.launch()
+        app.tabBars.buttons["Log"].tap()
+        XCTAssertEqual(today.value as? String, "Day confirmed")
+        XCTAssertEqual(exercised.value as? String, "No")
+        XCTAssertEqual(energy.value as? String, "Steady")
+        earlier.tap()
+        XCTAssertEqual(earlier.value as? String, "Edits saved")
+        XCTAssertEqual(count.value as? String, "0")
+        XCTAssertEqual(exercised.value as? String, "No")
+        XCTAssertEqual(energy.value as? String, "Strong")
+        XCTAssertEqual(location.value as? String, "Home")
+    }
+
+    @MainActor
+    private func startVariable(_ type: String, named name: String, in app: XCUIApplication, captureAs title: String) {
+        app.buttons["Add Variable"].tap()
+        app.buttons[type].tap()
+        let field = app.textFields["logVariableName"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        capture(title, app)
+        enter(name, in: field)
+    }
+
+    @MainActor
+    private func enter(_ text: String, in field: XCUIElement) {
+        field.tap()
+        field.typeText(text)
+    }
+
+    @MainActor
+    private func choose(_ title: String, from menu: XCUIElement, in app: XCUIApplication) {
+        menu.tap()
+        app.buttons[title].tap()
     }
 
     @MainActor
